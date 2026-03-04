@@ -1,0 +1,22 @@
+# SDV (Synthetic Data Vault) metadata format – single or multi-table
+# Source: https://docs.sdv.dev/sdv/concepts/metadata/metadata-json
+# Use schema_source so the loader picks the SDV parser.
+schema_source: sdv
+
+METADATA_SPEC_VERSION: "V1"
+tables:
+  phase1_table:
+    primary_key: id
+    columns:
+      id:
+        sdtype: id
+        regex_format: "[0-9]+"
+      col_1:
+        sdtype: numerical
+        computer_representation: Int32
+      company_name:
+        sdtype: categorical
+      value:
+        sdtype: numerical
+        computer_representation: Float
+relationships: []
