@@ -35,6 +35,7 @@ credentials and are expected).  Live-DB tests add:
 - **20** when Oracle XE is running (`test_live_oracle.py`)
 - **19** when Mautic is running (`test_live_mautic.py`)
 - **16** when Gitea is running (`test_live_gitea.py`)
+- **34** when AdventureWorks is restored (`test_live_adventureworks.py` — AWLT 12 tables + full 71 tables)
 - **16** when Chinook (SQL Server) is loaded (`test_live_chinook.py`)
 - **20** when Oracle HR/CO schemas are installed (`test_live_oracle_hr.py`)
 - **17** when all live databases and Spark are available (`test_live_synth.py`)
@@ -146,6 +147,7 @@ python3.11 -m venv .venv_test
 | `make test-live-oracle` | `pytest tests/test_live_oracle.py -v` | Live Oracle XE tests (Lima VM) |
 | `make test-live-mautic` | `pytest tests/test_live_mautic.py -v` | Live Mautic application tests (Podman) |
 | `make test-live-gitea` | `pytest tests/test_live_gitea.py -v` | Live Gitea application tests (PostgreSQL) |
+| `make test-live-adventureworks` | `pytest tests/test_live_adventureworks.py -v` | AdventureWorksLT + AW2022 full (SQL Server) |
 | `make test-live-chinook` | `pytest tests/test_live_chinook.py -v` | Live Chinook sample DB tests (SQL Server) |
 | `make test-live-oracle-hr` | `pytest tests/test_live_oracle_hr.py -v` | Live Oracle HR/CO sample schema tests |
 | `make test-live-roundtrip` | `pytest tests/test_live_roundtrip.py -v` | Double round-trip on all live DBs |
@@ -519,6 +521,51 @@ make test-live-gitea
 
 ---
 
+## AdventureWorks application tests (`test_live_adventureworks.py`)
+
+Two Microsoft canonical SQL Server sample databases, both restored into the SQL Server 22 Lima VM.
+
+**AdventureWorksLT2022** (12 tables, `SalesLT` schema) — compact retail sample: customers,
+addresses, products, sales orders.  Good baseline for SQL Server cross-schema FK relationships.
+
+**AdventureWorks2022** (71 tables, 6 schemas) — the full Microsoft sample covering
+HumanResources, Person, Production, Purchasing, and Sales departments.  The most type-rich
+SQL Server test target, exercising user-defined types, `MONEY`, `UNIQUEIDENTIFIER`, `xml`,
+`hierarchyid`, and `geography`.
+
+### What is tested (34 tests)
+
+| Class | Tests | What it checks |
+|-------|-------|----------------|
+| `TestAWLTConnection` | 2 | AWLT DB reachable; all 5 SalesLT tables present |
+| `TestAWLTParse` | 4 | All 12 AWLT tables parse; Customer/Product/SalesOrderDetail columns |
+| `TestAWLTEmit` | 5 | All 12 AWLT tables emit; double round-trip; cross-dialect to PostgreSQL, MySQL, Oracle |
+| `TestAWLTMultiInstance` | 3 | Quarterly shard expansion; aliases; full YAML round-trip |
+| `TestAWFullConnection` | 3 | AW2022 DB reachable; all 6 schemas present; per-schema table counts |
+| `TestAWFullParse` | 6 | All 71 tables parse; Employee/Product/SalesOrderHeader columns; UDT resolution; TransactionHistory |
+| `TestAWFullEmit` | 7 | All 71 tables emit; double round-trip for Employee and SalesOrderHeader; cross-dialect to PostgreSQL, Oracle, MySQL, Databricks |
+| `TestAWFullMultiInstance` | 4 | 12-month archive shard expansion; region aliases; full 71-table YAML dump and reload; YAML type spot-check |
+
+### Notable type findings
+
+| SQL Server type | Canonical resolution |
+|----------------|----------------------|
+| `Name` UDT → `NVARCHAR(50)` | `string(50)` |
+| `Flag` / `NameStyle` UDT → `BIT` | `boolean` or `integer` |
+| `MONEY` | `decimal` |
+| `UNIQUEIDENTIFIER` | `uuid` |
+| `timestamp` / ROWVERSION | `string` (remapped via NVARCHAR MAX) |
+| `xml`, `hierarchyid`, `geography` | `string` (remapped, no direct canonical) |
+
+### Setup
+
+```bash
+make test-live-adventureworks
+# See docs/local-databases.md – AdventureWorks section for one-time restore
+```
+
+---
+
 ## Chinook application tests (`test_live_chinook.py`)
 
 [Chinook](https://github.com/lerocha/chinook-database) is the de-facto SQL Server sample database —
@@ -680,6 +727,7 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`tests/test_live_oracle.py`](../tests/test_live_oracle.py) – live Oracle XE test suite (20 tests)
 - [`tests/test_live_mautic.py`](../tests/test_live_mautic.py) – live Mautic application test suite (19 tests)
 - [`tests/test_live_gitea.py`](../tests/test_live_gitea.py) – live Gitea application test suite (16 tests, PostgreSQL)
+- [`tests/test_live_adventureworks.py`](../tests/test_live_adventureworks.py) – AdventureWorksLT 2022 + AdventureWorks2022 full suite (34 tests, SQL Server)
 - [`tests/test_live_chinook.py`](../tests/test_live_chinook.py) – live Chinook sample database suite (16 tests, SQL Server)
 - [`tests/test_live_oracle_hr.py`](../tests/test_live_oracle_hr.py) – live Oracle HR/CO sample schema suite (20 tests, Oracle XE)
 - [`tests/test_live_roundtrip.py`](../tests/test_live_roundtrip.py) – comprehensive double round-trip suite
