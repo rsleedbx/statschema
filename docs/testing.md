@@ -33,6 +33,7 @@ Current baseline: **2053 passed, 3 skipped** (the 3 skips require live Databrick
 credentials and are expected).  Live-DB tests add:
 - **14** when SQL Server is running (`test_live_sqlserver.py`)
 - **20** when Oracle XE is running (`test_live_oracle.py`)
+- **19** when Mautic is running (`test_live_mautic.py`)
 - **17** when all live databases and Spark are available (`test_live_synth.py`)
 
 ---
@@ -140,6 +141,7 @@ python3.11 -m venv .venv_test
 | `make test-live-mysql` | `pytest tests/test_live_mysql.py -v` | Live MySQL 5.7 + 8.x tests (Podman) |
 | `make test-live-pg` | `pytest tests/test_live_pg.py -v` | Live PostgreSQL 14 + 16 tests (Podman) |
 | `make test-live-oracle` | `pytest tests/test_live_oracle.py -v` | Live Oracle XE tests (Lima VM) |
+| `make test-live-mautic` | `pytest tests/test_live_mautic.py -v` | Live Mautic application tests (Podman) |
 | `make test-live-roundtrip` | `pytest tests/test_live_roundtrip.py -v` | Double round-trip on all live DBs |
 | `make test-live-synth` | `pytest tests/test_live_synth.py -v` | Full synth pipeline on all live DBs |
 | `make test-live-all` | all `test-live-*` targets | Everything against every live DB |
@@ -162,6 +164,7 @@ python3.11 -m venv .venv_test
 | `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
 | `tests/test_live_pg.py` | ~18 | No | **Yes** – PostgreSQL 14 + 16 via Podman |
 | `tests/test_live_oracle.py` | 20 | No | **Yes** – Oracle XE via Lima VM |
+| `tests/test_live_mautic.py` | 19 | No | **Yes** – Mautic 5 + MySQL 8 via Podman |
 | `tests/test_live_roundtrip.py` | ~300 | No | **Yes** – MySQL + PG + SQL Server |
 | `tests/test_live_synth.py` | 17 | **Yes** | **Yes** – MySQL 8 + PG 16 + SQL Server |
 
@@ -184,6 +187,7 @@ required credentials are not set, so `make test` always completes cleanly:
 | `test_live_mysql.py` | port 3357 or 3384 closed |
 | `test_live_pg.py` | port 5414 or 5416 closed |
 | `test_live_oracle.py` | port 1521 closed (or `oracledb` not installed) |
+| `test_live_mautic.py` | `mautic` DB unreachable on port 3384 |
 | `test_live_roundtrip.py` | any required port closed |
 | `test_live_synth.py` | any required DB port or Spark unavailable |
 
@@ -483,6 +487,42 @@ The live SQL Server tests confirmed the following are intentional:
 
 ---
 
+## Mautic application tests (`test_live_mautic.py`)
+
+Mautic is an open-source marketing automation platform with ~108 MySQL tables.
+It validates `schema_parser` against a real-world application schema with diverse
+types, virtual generated columns, and natural multi-instance shard patterns.
+
+### What is tested (19 tests)
+
+| Class | Tests | What it checks |
+|-------|-------|----------------|
+| `TestMauticConnection` | 2 | DB reachable; 10 contacts exist in `leads` |
+| `TestMauticParse` | 5 | All 108 tables parse; key columns on `leads`, `email_stats`, `campaign_lead_event_log`, `page_hits` |
+| `TestMauticEmit` | 4 | All 108 tables emit; double round-trip idempotency; cross-dialect MySQL→PostgreSQL and MySQL→SQL Server |
+| `TestMauticMultiInstance` | 5 | `instance_count` expansion; combined count+aliases; YAML round-trip; aliases pattern; 30-shard bulk test |
+| `TestMauticCanonicalYaml` | 3 | Full 108-table YAML dump and reload; field-level YAML content; `leads` round-trip |
+
+### Notable findings
+
+| Mautic pattern | Handled by |
+|----------------|------------|
+| `GENERATED ALWAYS AS … VIRTUAL` column | Column silently dropped by `sqlglot` (not in the canonical model — this is correct behaviour) |
+| `BIGINT UNSIGNED` FK refs | Widened to canonical `long` → emits as `BIGINT` |
+| `TINYINT(1)` boolean flags | Canonical `integer` (Mautic uses 0/1 not `BOOLEAN`) |
+| `LONGTEXT` with `DC2Type:array` comments | Canonical `string` |
+
+### Setup
+
+See [docs/local-databases.md – Mautic section](local-databases.md#mautic-application-level-testing) for the
+full one-time setup commands.
+
+```bash
+make test-live-mautic
+```
+
+---
+
 ## Comprehensive live synthetic data tests (`test_live_synth.py`)
 
 This test file validates the full DDL → Spark → DB → stats → Spark loop on real databases.
@@ -553,6 +593,7 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`tests/test_live_mysql.py`](../tests/test_live_mysql.py) – live MySQL 5.7 + 8.x test suite
 - [`tests/test_live_pg.py`](../tests/test_live_pg.py) – live PostgreSQL 14 + 16 test suite
 - [`tests/test_live_oracle.py`](../tests/test_live_oracle.py) – live Oracle XE test suite (20 tests)
+- [`tests/test_live_mautic.py`](../tests/test_live_mautic.py) – live Mautic application test suite (19 tests)
 - [`tests/test_live_roundtrip.py`](../tests/test_live_roundtrip.py) – comprehensive double round-trip suite
 - [`tests/test_live_synth.py`](../tests/test_live_synth.py) – live synthetic data pipeline tests
 - [`src/schema_parser/db_stats_collector.py`](../src/schema_parser/db_stats_collector.py) – collect `TableStats` from a live database

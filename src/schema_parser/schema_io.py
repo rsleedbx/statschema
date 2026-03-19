@@ -52,6 +52,34 @@ tables:
           distribution: zipf
           distribution_params: {a: 1.5}
           use_mcv_weights: true
+
+Multi-instance / dedup (optional fields)
+-----------------------------------------
+A single table definition can represent many physical tables sharing the same schema.
+
+  # 1000 numbered shards (Mautic-style):
+  - name: email_stats
+    instance_count: 1000          # default suffix: _{:04d} → _0001 … _1000
+    # instance_suffix_format: "_{:04d}"   # optional override
+    columns: [...]
+
+  # Explicit aliases (same schema, different logical names):
+  - name: audit_log
+    aliases:
+      - audit_log_archive
+      - audit_log_staging
+    columns: [...]
+
+  # Both combined — numbered instances plus extra aliases:
+  - name: events
+    instance_count: 3
+    aliases: [events_archive]
+    columns: [...]
+    # → events_0001, events_0002, events_0003, events_archive
+
+Use ``load_canonical(path, expand=True)`` or call
+``expand_table_instances(tables)`` to resolve these into individual
+``CanonicalTableSchema`` objects before DDL emission or data generation.
 """
 
 from __future__ import annotations
@@ -61,7 +89,7 @@ from typing import Optional, Union
 
 import yaml
 
-from .model import CanonicalTableSchema
+from .model import CanonicalTableSchema, expand_table_instances
 
 _SCHEMA_VERSION = "1.0"
 
@@ -113,6 +141,8 @@ def dump_schema(
 
 def load_canonical(
     source: Union[str, Path, dict],
+    *,
+    expand: bool = False,
 ) -> list[CanonicalTableSchema]:
     """
     Load canonical tables from a YAML string, file path, or already-parsed dict.
@@ -124,19 +154,36 @@ def load_canonical(
           - ``Path`` or file-path string → read from file
           - Multi-line YAML string        → parse inline
           - ``dict``                      → use directly (already parsed)
+    expand
+        When ``True``, call :func:`expand_table_instances` automatically so that
+        tables with ``instance_count > 1`` or ``aliases`` are resolved into
+        individual ``CanonicalTableSchema`` objects before returning.
+
+        When ``False`` (default) the compact representation is returned as-is,
+        preserving ``aliases`` / ``instance_count`` on each table for later
+        inspection or re-serialization.  Call ``expand_table_instances(tables)``
+        manually when you need the flat list.
 
     Returns
     -------
     List of ``CanonicalTableSchema`` objects ready for DDL emission or data
     generation.
 
-    Example
-    -------
+    Examples
+    --------
     ::
 
+        # Compact form (default) — preserves instance_count / aliases in memory
         tables = load_canonical("schema.yaml")
-        for dialect in ("mysql", "postgres", "sqlserver", "databricks"):
-            print(emit_ddl(tables[0], dialect))
+
+        # Expanded form — one CanonicalTableSchema per physical table
+        tables = load_canonical("schema.yaml", expand=True)
+        for t in tables:
+            print(emit_ddl(t, dialect="mysql"))
+
+        # Manual expansion (equivalent to expand=True)
+        from schema_parser import expand_table_instances
+        tables = expand_table_instances(load_canonical("schema.yaml"))
     """
     if isinstance(source, dict):
         data = source
@@ -149,4 +196,5 @@ def load_canonical(
         # Inline YAML string
         data = yaml.safe_load(source)
 
-    return [CanonicalTableSchema.from_dict(t) for t in data.get("tables", [])]
+    tables = [CanonicalTableSchema.from_dict(t) for t in data.get("tables", [])]
+    return expand_table_instances(tables) if expand else tables

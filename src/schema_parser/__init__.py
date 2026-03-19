@@ -74,7 +74,13 @@ Full pipeline (DDL → canonical YAML → many targets + data)
                Populated test table on Unity Catalog
 """
 
-from .model import CanonicalColumn, CanonicalForeignKey, CanonicalTableSchema, GenerationRule
+from .model import (
+    CanonicalColumn,
+    CanonicalForeignKey,
+    CanonicalTableSchema,
+    GenerationRule,
+    expand_table_instances,
+)
 from .schema_io import dump_schema, load_canonical
 from .ydata_parser import parse_ydata_yaml, parse_ydata_yaml_file, parse_ydata_multi_yaml
 from .pipeline_parser import parse_pipeline_tables, parse_pipeline_config
@@ -114,6 +120,7 @@ __all__ = [
     "CanonicalForeignKey",
     "CanonicalTableSchema",
     "GenerationRule",
+    "expand_table_instances",
     # Canonical schema YAML I/O  ← the interchange / persistence layer
     "dump_schema",
     "load_canonical",
