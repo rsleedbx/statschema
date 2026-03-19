@@ -17,7 +17,7 @@ from datetime import datetime
 import pytest
 
 from src.statschema.model import CanonicalColumn, CanonicalTableSchema
-from src.protobuf_converter import (
+from src.zbhelper.protobuf_converter import (
     _proto_message_name,
     schema_to_proto_str,
     compile_proto,

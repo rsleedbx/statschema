@@ -29,7 +29,7 @@ import pytest
 from src.statschema.model import CanonicalColumn, CanonicalTableSchema
 from pathlib import Path
 
-from src.zerobus_ingest import (
+from src.zbhelper.zerobus_ingest import (
     DatabricksSdkHeadersProvider,
     IngestConfig,
     IngestResult,
@@ -94,7 +94,7 @@ def _mock_sdk_patch(offsets=None):
 
     return (
         patch.multiple(
-            "src.zerobus_ingest",
+            "src.zbhelper.zerobus_ingest",
             ZerobusSdk=MagicMock(return_value=mock_sdk_instance),
             TableProperties=MagicMock(),
             StreamConfigurationOptions=MagicMock(),
@@ -112,7 +112,7 @@ def _mock_sdk_patch(offsets=None):
 class TestDatabricksSdkHeadersProvider:
     def test_get_headers_returns_authorization_and_table(self):
         provider = DatabricksSdkHeadersProvider(table_name="main.default.t")
-        with patch("src.zerobus_ingest._get_sdk_token", return_value="tok123"):
+        with patch("src.zbhelper.zerobus_ingest._get_sdk_token", return_value="tok123"):
             headers = provider.get_headers()
         header_dict = dict(headers)
         assert header_dict["authorization"] == "Bearer tok123"
@@ -124,7 +124,7 @@ class TestDatabricksSdkHeadersProvider:
         def fake_token(**kw):
             captured.update(kw)
             return "t"
-        with patch("src.zerobus_ingest._get_sdk_token", side_effect=fake_token):
+        with patch("src.zbhelper.zerobus_ingest._get_sdk_token", side_effect=fake_token):
             provider.get_headers()
         assert captured["host"] == "https://ws"
 
@@ -134,7 +134,7 @@ class TestDatabricksSdkHeadersProvider:
         def fake_token(**kw):
             captured.update(kw)
             return "t"
-        with patch("src.zerobus_ingest._get_sdk_token", side_effect=fake_token):
+        with patch("src.zbhelper.zerobus_ingest._get_sdk_token", side_effect=fake_token):
             provider.get_headers()
         assert captured["profile"] == "myprofile"
 
@@ -144,7 +144,7 @@ class TestDatabricksSdkHeadersProvider:
         def fake_token(**kw):
             captured.update(kw)
             return "t"
-        with patch("src.zerobus_ingest._get_sdk_token", side_effect=fake_token):
+        with patch("src.zbhelper.zerobus_ingest._get_sdk_token", side_effect=fake_token):
             provider.get_headers()
         assert captured["lifetime_seconds"] == 300
 
@@ -155,7 +155,7 @@ class TestDatabricksSdkHeadersProvider:
         def fresh_token(**kw):
             n["count"] += 1
             return f"tok{n['count']}"
-        with patch("src.zerobus_ingest._get_sdk_token", side_effect=fresh_token):
+        with patch("src.zbhelper.zerobus_ingest._get_sdk_token", side_effect=fresh_token):
             h1 = dict(provider.get_headers())
             h2 = dict(provider.get_headers())
         assert h1["authorization"] == "Bearer tok1"
@@ -168,7 +168,7 @@ class TestDatabricksSdkHeadersProvider:
         def fake_token(**kw):
             captured.update(kw)
             return "t"
-        with patch("src.zerobus_ingest._get_sdk_token", side_effect=fake_token):
+        with patch("src.zbhelper.zerobus_ingest._get_sdk_token", side_effect=fake_token):
             provider.get_headers()
         assert captured.get("lifetime_seconds") is None
 
@@ -323,8 +323,8 @@ class TestIngestConfig:
         """Patch both host resolution and build_zerobus_endpoint for unit tests."""
         monkeypatch.delenv("ZEROBUS_SERVER_ENDPOINT", raising=False)
         return (
-            patch("src.zerobus_ingest._host_from_workspace_client", return_value="https://ws.databricks.com"),
-            patch("src.zerobus_ingest.build_zerobus_endpoint", return_value="https://123.zerobus.ws.databricks.com"),
+            patch("src.zbhelper.zerobus_ingest._host_from_workspace_client", return_value="https://ws.databricks.com"),
+            patch("src.zbhelper.zerobus_ingest.build_zerobus_endpoint", return_value="https://123.zerobus.ws.databricks.com"),
         )
 
     def test_from_workspace_client_sets_headers_provider(self, monkeypatch):
@@ -348,14 +348,14 @@ class TestIngestConfig:
 
     def test_from_workspace_client_explicit_endpoint(self, monkeypatch):
         monkeypatch.delenv("ZEROBUS_SERVER_ENDPOINT", raising=False)
-        with patch("src.zerobus_ingest._host_from_workspace_client", return_value="https://ws"):
+        with patch("src.zbhelper.zerobus_ingest._host_from_workspace_client", return_value="https://ws"):
             config = IngestConfig.from_workspace_client("main.default.t", server_endpoint="https://ep")
         assert config.server_endpoint == "https://ep"
 
     def test_from_workspace_client_env_endpoint_takes_precedence(self, monkeypatch):
         monkeypatch.setenv("ZEROBUS_SERVER_ENDPOINT", "https://from-env")
-        with patch("src.zerobus_ingest._host_from_workspace_client", return_value="https://ws"), \
-             patch("src.zerobus_ingest.build_zerobus_endpoint") as mock_build:
+        with patch("src.zbhelper.zerobus_ingest._host_from_workspace_client", return_value="https://ws"), \
+             patch("src.zbhelper.zerobus_ingest.build_zerobus_endpoint") as mock_build:
             config = IngestConfig.from_workspace_client("main.default.t")
         assert config.server_endpoint == "https://from-env"
         mock_build.assert_not_called()
@@ -363,8 +363,8 @@ class TestIngestConfig:
     def test_from_workspace_client_auto_constructs_endpoint(self, monkeypatch):
         """When ZEROBUS_SERVER_ENDPOINT is unset, endpoint is auto-constructed."""
         monkeypatch.delenv("ZEROBUS_SERVER_ENDPOINT", raising=False)
-        with patch("src.zerobus_ingest._host_from_workspace_client", return_value="https://ws"), \
-             patch("src.zerobus_ingest.build_zerobus_endpoint", return_value="https://123.zerobus.ws.databricks.com"):
+        with patch("src.zbhelper.zerobus_ingest._host_from_workspace_client", return_value="https://ws"), \
+             patch("src.zbhelper.zerobus_ingest.build_zerobus_endpoint", return_value="https://123.zerobus.ws.databricks.com"):
             config = IngestConfig.from_workspace_client("main.default.t")
         assert config.server_endpoint == "https://123.zerobus.ws.databricks.com"
 
@@ -585,7 +585,7 @@ class TestIngestDataframe:
             PROTO = "PROTO"
 
         config = self._sdk_config()
-        with patch.multiple("src.zerobus_ingest", ZerobusSdk=ZerobusSdk_mock,
+        with patch.multiple("src.zbhelper.zerobus_ingest", ZerobusSdk=ZerobusSdk_mock,
                             TableProperties=MagicMock(), StreamConfigurationOptions=MagicMock(),
                             RecordType=MockRecordType):
             ingest_dataframe(_fake_df([{"col_1": 1}]), _simple_table(), config)
