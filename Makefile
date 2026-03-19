@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -65,6 +65,7 @@ test-live-all:
 	  tests/test_live_pg.py \
 	  tests/test_live_sqlserver.py \
 	  tests/test_live_oracle.py \
+	  tests/test_live_mautic.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -100,6 +101,17 @@ test-live-oracle:
 	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
 	ORACLE_SERVICE=$(or $(ORACLE_SERVICE),XE) \
 	$(PYTEST_TEST) tests/test_live_oracle.py -v
+
+## Run live Mautic application tests (Mautic 5 + mysql8 containers; see docs/local-databases.md)
+## Usage: make test-live-mautic
+## Override: make test-live-mautic MAUTIC_MYSQL_PORT=3384
+test-live-mautic:
+	MAUTIC_MYSQL_HOST=$(or $(MAUTIC_MYSQL_HOST),127.0.0.1) \
+	MAUTIC_MYSQL_PORT=$(or $(MAUTIC_MYSQL_PORT),3384) \
+	MAUTIC_MYSQL_USER=$(or $(MAUTIC_MYSQL_USER),mautic) \
+	MAUTIC_MYSQL_PASS=$(or $(MAUTIC_MYSQL_PASS),mauticpass) \
+	MAUTIC_MYSQL_DB=$(or $(MAUTIC_MYSQL_DB),mautic) \
+	$(PYTEST_TEST) tests/test_live_mautic.py -v
 
 ## Run live synthetic data pipeline tests (MySQL 8, PG 16, SQL Server 22; Spark + dbldatagen required)
 ## Credentials are loaded from .env automatically.

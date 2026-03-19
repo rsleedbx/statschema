@@ -13,6 +13,7 @@ Design goals
   that omit them continue to work.
 """
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
@@ -330,7 +331,76 @@ class CanonicalForeignKey:
 
 @dataclass
 class CanonicalTableSchema:
-    """Table in the canonical schema."""
+    """
+    Table in the canonical schema.
+
+    Multi-instance / dedup support
+    --------------------------------
+    A single table definition can represent many physical tables that share the
+    exact same schema — a common pattern in large applications (e.g. Mautic has
+    hundreds of ``email_stats_N`` shards, all with the same column structure).
+
+    ``aliases``
+        Explicit list of additional table names that share this definition.
+        ``expand_table_instances()`` emits one ``CanonicalTableSchema`` per alias
+        (plus the base ``name``).  Useful when the logical names differ but the
+        DDL is identical.
+
+        Example (YAML)::
+
+            - name: email_stats
+              aliases:
+                - email_stats_archive
+                - email_stats_staging
+              columns: [...]
+
+        Produces tables: ``email_stats``, ``email_stats_archive``, ``email_stats_staging``.
+
+    ``instance_count``
+        When > 1 the base name is *replaced* by ``N`` numbered copies whose
+        names are ``{name}{instance_suffix_format.format(i)}`` for
+        ``i in 1 .. instance_count``.  Default is **1** (just the base name —
+        backward compatible).
+
+        Example (YAML)::
+
+            - name: form_results
+              instance_count: 1000
+              instance_suffix_format: "_{:04d}"
+              columns: [...]
+
+        Produces: ``form_results_0001``, ``form_results_0002``, …, ``form_results_1000``.
+
+    ``instance_suffix_format``
+        Python format string applied to the instance number.  Must contain
+        exactly one positional placeholder.  Default: ``"_{:04d}"`` →
+        ``_0001``, ``_0002``, …
+
+    Combining ``aliases`` and ``instance_count``
+        Both can be specified together.  Numbered instances are generated first;
+        aliases are appended as extra un-numbered copies:
+
+        Example::
+
+            name: events, instance_count: 3, aliases: [events_archive]
+            → events_0001, events_0002, events_0003, events_archive
+
+    Temporal ordering constraints
+    --------------------------------
+    Ordering rules between date/time columns that must hold in every generated row.
+    Each entry is a simple expression: "<col_a> < <col_b>"  (or <=, >, >=).
+
+    Examples
+    --------
+    - "end_date > start_date"         — event must end after it starts
+    - "updated_at >= created_at"      — update cannot precede creation
+    - "shipped_at > ordered_at"       — shipment after order
+    - "birth_date < hire_date"        — employee born before hired
+
+    The generator must validate / re-sample until all constraints are satisfied.
+    Violations in synthetic data cause silent correctness bugs in query logic
+    (e.g., date-range predicates or session-duration calculations).
+    """
 
     name: str
     columns: list[CanonicalColumn]
@@ -345,6 +415,11 @@ class CanonicalTableSchema:
     # ── generation constraints ────────────────────────────────────────────
     temporal_ordering_constraints: list[str] = field(default_factory=list)
 
+    # ── multi-instance / dedup ────────────────────────────────────────────
+    aliases: list[str] = field(default_factory=list)
+    instance_count: int = 1
+    instance_suffix_format: str = "_{:04d}"
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "name":    self.name,
@@ -358,6 +433,12 @@ class CanonicalTableSchema:
             d["foreign_keys"] = self.foreign_keys
         if self.temporal_ordering_constraints:
             d["temporal_ordering_constraints"] = self.temporal_ordering_constraints
+        if self.aliases:
+            d["aliases"] = list(self.aliases)
+        if self.instance_count != 1:
+            d["instance_count"] = self.instance_count
+        if self.instance_suffix_format != "_{:04d}":
+            d["instance_suffix_format"] = self.instance_suffix_format
         return d
 
     @classmethod
@@ -370,19 +451,108 @@ class CanonicalTableSchema:
             fk_constraints=fks if fks else None,
             foreign_keys=d.get("foreign_keys"),
             temporal_ordering_constraints=list(d.get("temporal_ordering_constraints", [])),
+            aliases=list(d.get("aliases") or []),
+            instance_count=int(d.get("instance_count", 1)),
+            instance_suffix_format=str(d.get("instance_suffix_format", "_{:04d}")),
         )
+
+
+# ---------------------------------------------------------------------------
+# Multi-instance expansion helper
+# ---------------------------------------------------------------------------
+
+def expand_table_instances(
+    tables: Union[list["CanonicalTableSchema"], "CanonicalTableSchema"],
+) -> list["CanonicalTableSchema"]:
     """
-    Ordering rules between date/time columns that must hold in every generated row.
-    Each entry is a simple expression:  "<col_a> < <col_b>"  (or <=, >, >=).
+    Expand a list of canonical tables into a flat list, resolving
+    ``aliases`` and ``instance_count`` into individual named tables.
+
+    Rules
+    -----
+    - ``instance_count == 1`` and no ``aliases`` → table unchanged (backward compat).
+    - ``instance_count > 1`` → the base name is *replaced* by N numbered copies:
+      ``{name}{instance_suffix_format.format(i)}`` for ``i`` in ``1 .. instance_count``.
+    - ``aliases`` → one extra copy per alias name is appended after the
+      base / numbered copies.
+    - Expanded copies share the same column definitions, FK constraints, and
+      generation rules as the original.  FK *references* pointing to other
+      tables are left unchanged (expand those tables separately if needed).
+
+    Parameters
+    ----------
+    tables
+        A single ``CanonicalTableSchema`` or a list of them.
+
+    Returns
+    -------
+    Flat list of ``CanonicalTableSchema`` objects, each with a unique resolved
+    ``name`` and with ``aliases``, ``instance_count``, and
+    ``instance_suffix_format`` reset to defaults (to avoid re-expansion).
 
     Examples
     --------
-    - "end_date > start_date"         — event must end after it starts
-    - "updated_at >= created_at"      — update cannot precede creation
-    - "shipped_at > ordered_at"       — shipment after order
-    - "birth_date < hire_date"        — employee born before hired
+    ::
 
-    The generator must validate / re-sample until all constraints are satisfied.
-    Violations in synthetic data cause silent correctness bugs in query logic
-    (e.g., date-range predicates or session-duration calculations).
+        # 1000-shard pattern (Mautic-style)
+        table = CanonicalTableSchema(
+            name="email_stats", instance_count=1000, columns=[...]
+        )
+        tables = expand_table_instances(table)
+        # → [CanonicalTableSchema(name="email_stats_0001"), ...,
+        #    CanonicalTableSchema(name="email_stats_1000")]
+
+        # Alias pattern (same schema, different logical names)
+        table = CanonicalTableSchema(
+            name="audit_log",
+            aliases=["audit_log_archive", "audit_log_staging"],
+            columns=[...],
+        )
+        tables = expand_table_instances(table)
+        # → [CanonicalTableSchema(name="audit_log"),
+        #    CanonicalTableSchema(name="audit_log_archive"),
+        #    CanonicalTableSchema(name="audit_log_staging")]
     """
+    if isinstance(tables, CanonicalTableSchema):
+        tables = [tables]
+
+    result: list[CanonicalTableSchema] = []
+    for table in tables:
+        result.extend(_expand_one(table))
+    return result
+
+
+def _expand_one(table: "CanonicalTableSchema") -> list["CanonicalTableSchema"]:
+    """Return the expanded list of tables for a single definition."""
+    names: list[str] = []
+
+    if table.instance_count > 1:
+        try:
+            # Validate the format string with a dummy call before generating all names
+            table.instance_suffix_format.format(1)
+        except (IndexError, KeyError, ValueError) as exc:
+            raise ValueError(
+                f"Table '{table.name}': invalid instance_suffix_format "
+                f"'{table.instance_suffix_format}': {exc}"
+            ) from exc
+        for i in range(1, table.instance_count + 1):
+            names.append(f"{table.name}{table.instance_suffix_format.format(i)}")
+    else:
+        names.append(table.name)
+
+    # Aliases are always appended (independent of instance_count)
+    names.extend(table.aliases)
+
+    if len(names) == 1 and names[0] == table.name:
+        return [table]  # nothing to expand — return as-is
+
+    return [
+        dataclasses.replace(
+            table,
+            name=new_name,
+            aliases=[],
+            instance_count=1,
+            instance_suffix_format="_{:04d}",
+        )
+        for new_name in names
+    ]
