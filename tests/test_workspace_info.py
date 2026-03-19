@@ -9,7 +9,7 @@ to retrieve region and configuration information from Databricks workspaces.
 import json
 import sys
 from databricks.sdk import WorkspaceClient
-from workspace_region_info import get_workspace_info, save_workspace_info_to_file
+from src.zbhelper.workspace_region_info import get_workspace_info, save_workspace_info_to_file
 
 
 def main():

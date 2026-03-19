@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
 from src.statschema.model import CanonicalTableSchema
-from src.protobuf_converter import compile_proto, schema_to_proto_str, serialize_row
+from src.zbhelper.protobuf_converter import compile_proto, schema_to_proto_str, serialize_row
 
 # ZeroBus SDK — optional at import time (not available in .venv_test).
 # Module-level names allow unittest.mock.patch.multiple to replace them in tests.
