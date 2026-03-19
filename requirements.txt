@@ -3,6 +3,7 @@
 
 # Config and schema
 PyYAML>=6.0
+python-dotenv>=1.0
 
 # Databricks Labs Data Generator (synthetic data)
 dbldatagen>=0.4.0

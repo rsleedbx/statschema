@@ -1,0 +1,72 @@
+# ── Zerobus dev shortcuts ────────────────────────────────────────────────────
+#
+# Prerequisites
+#   .venv_test  – Python 3.11 venv with requirements-test.txt (local Spark)
+#   .venv       – Python 3.14 venv with requirements-dev.txt  (Databricks Connect)
+#
+# Quick start
+#   make venv-test       # create / refresh .venv_test
+#   make test            # run full suite with local PySpark
+#   make test-fast       # run everything except Spark data-generation tests
+#   make test-spark      # run only the Spark data-generation tests
+
+VENV_TEST  := .venv_test
+PYTHON_TEST := $(VENV_TEST)/bin/python
+PYTEST_TEST := $(VENV_TEST)/bin/pytest
+
+VENV_DEV   := .venv
+PYTHON_DEV := $(VENV_DEV)/bin/python
+
+# ---------------------------------------------------------------------------
+
+.PHONY: venv-test test test-fast test-spark test-live-sqlserver test-live-mysql test-live-pg lint clean
+
+## Create / refresh the test venv (local PySpark, no databricks-connect)
+venv-test:
+	python3.11 -m venv $(VENV_TEST)
+	$(VENV_TEST)/bin/pip install --upgrade pip
+	$(VENV_TEST)/bin/pip install -r requirements-test.txt
+
+## Run the full test suite (local PySpark, conftest.py sets JAVA_HOME)
+test:
+	$(PYTEST_TEST) tests/ -v
+
+## Run everything except Spark data-generation and live-DB tests
+test-fast:
+	$(PYTEST_TEST) tests/ -v -k "not generate_data and not live"
+
+## Run only the Spark data-generation tests
+test-spark:
+	$(PYTEST_TEST) tests/ -v -k "generate_data"
+
+## Run live SQL Server tests (requires: limactl start sqlserver22, SQLSERVER_PASS set)
+## Usage: make test-live-sqlserver SQLSERVER_PASS=<password> SQLSERVER_PORT=14330
+test-live-sqlserver:
+	SQLSERVER_PASS=$(SQLSERVER_PASS) SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	$(PYTEST_TEST) tests/test_live_sqlserver.py -v
+
+## Run live PostgreSQL tests (PG 14 and 16 containers must be running; see docs/local-databases.md)
+## Usage: make test-live-pg
+## Override ports: make test-live-pg PG14_PORT=5414 PG16_PORT=5416
+test-live-pg:
+	PG14_PORT=$(or $(PG14_PORT),5414) PG16_PORT=$(or $(PG16_PORT),5416) \
+	$(PYTEST_TEST) tests/test_live_pg.py -v
+
+## Run live MySQL tests (both 5.7 and 8.x containers must be running; see docs/local-databases.md)
+## Usage: make test-live-mysql
+## Override ports: make test-live-mysql MYSQL57_PORT=3357 MYSQL8_PORT=3384
+test-live-mysql:
+	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
+	$(PYTEST_TEST) tests/test_live_mysql.py -v
+
+## Run a single test file
+# Usage: make test-file FILE=tests/test_ddl_roundtrip.py
+test-file:
+	$(PYTEST_TEST) $(FILE) -v
+
+lint:
+	$(VENV_TEST)/bin/ruff check src/ tests/ || true
+
+clean:
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -name "*.pyc" -delete 2>/dev/null || true
