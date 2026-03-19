@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic test-live-gitea test-live-chinook test-live-oracle-hr lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -67,6 +67,7 @@ test-live-all:
 	  tests/test_live_oracle.py \
 	  tests/test_live_mautic.py \
 	  tests/test_live_gitea.py \
+	  tests/test_live_adventureworks.py \
 	  tests/test_live_chinook.py \
 	  tests/test_live_oracle_hr.py \
 	  -v
@@ -113,6 +114,12 @@ test-live-gitea:
 	GITEA_PG_PASS=$(or $(GITEA_PG_PASS),gitea123) \
 	GITEA_PG_DB=$(or $(GITEA_PG_DB),gitea) \
 	$(PYTEST_TEST) tests/test_live_gitea.py -v
+
+## Run live AdventureWorks tests (AWLT 2022 + AW2022 full on SQL Server 22 Lima VM)
+test-live-adventureworks:
+	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	SQLSERVER_PASS=$(SQLSERVER_PASS) \
+	$(PYTEST_TEST) tests/test_live_adventureworks.py -v
 
 ## Run live Chinook application tests (Chinook on SQL Server 22 Lima VM)
 test-live-chinook:
