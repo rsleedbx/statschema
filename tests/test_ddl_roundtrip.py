@@ -1832,7 +1832,7 @@ class TestPhase6StringLengthBoundaries:
         assert "TEXT"          in emit_ddl(table, "postgres",   if_not_exists=False)
         assert "NVARCHAR(MAX)" in emit_ddl(table, "sqlserver",  if_not_exists=False)
         assert "STRING"        in emit_ddl(table, "databricks", if_not_exists=False)
-        assert "VARCHAR2"      in emit_ddl(table, "oracle",     if_not_exists=False)
+        assert "CLOB"          in emit_ddl(table, "oracle",     if_not_exists=False)
 
     def test_no_length_string_roundtrips(self):
         """No-length string round-trips to TEXT/NVARCHAR(MAX)/STRING idempotently."""

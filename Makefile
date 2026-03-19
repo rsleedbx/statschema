@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -55,11 +55,16 @@ test-live-all:
 	PG16_PORT=$(or $(PG16_PORT),5416) \
 	SQLSERVER_PASS=$(SQLSERVER_PASS) \
 	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	ORACLE_HOST=$(or $(ORACLE_HOST),127.0.0.1) \
+	ORACLE_PORT=$(or $(ORACLE_PORT),1521) \
+	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
+	ORACLE_SERVICE=$(or $(ORACLE_SERVICE),XE) \
 	$(PYTEST_TEST) \
 	  tests/test_live_roundtrip.py \
 	  tests/test_live_mysql.py \
 	  tests/test_live_pg.py \
 	  tests/test_live_sqlserver.py \
+	  tests/test_live_oracle.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -86,6 +91,15 @@ test-live-pg:
 test-live-mysql:
 	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
 	$(PYTEST_TEST) tests/test_live_mysql.py -v
+
+## Run live Oracle XE tests (requires: limactl start --name=oracle config/lima/oracle.yaml)
+## Credentials are loaded from .env automatically.
+test-live-oracle:
+	ORACLE_HOST=$(or $(ORACLE_HOST),127.0.0.1) \
+	ORACLE_PORT=$(or $(ORACLE_PORT),1521) \
+	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
+	ORACLE_SERVICE=$(or $(ORACLE_SERVICE),XE) \
+	$(PYTEST_TEST) tests/test_live_oracle.py -v
 
 ## Run live synthetic data pipeline tests (MySQL 8, PG 16, SQL Server 22; Spark + dbldatagen required)
 ## Credentials are loaded from .env automatically.

@@ -30,8 +30,10 @@ make test-live-sqlserver
 ```
 
 Current baseline: **2053 passed, 3 skipped** (the 3 skips require live Databricks
-credentials and are expected).  Live-DB tests add 14 more when SQL Server is running.
-Live synthetic data tests (`test_live_synth.py`) add 17 more when all live databases and Spark are available.
+credentials and are expected).  Live-DB tests add:
+- **14** when SQL Server is running (`test_live_sqlserver.py`)
+- **20** when Oracle XE is running (`test_live_oracle.py`)
+- **17** when all live databases and Spark are available (`test_live_synth.py`)
 
 ---
 
@@ -135,6 +137,12 @@ python3.11 -m venv .venv_test
 | `make test-fast` | `pytest tests/ -v -k "not generate_data and not live"` | Skip Spark + live-DB tests |
 | `make test-spark` | `pytest tests/ -v -k "generate_data"` | Only the 3 Spark data-gen tests |
 | `make test-live-sqlserver` | `SQLSERVER_PASS=… SQLSERVER_PORT=14330 pytest tests/test_live_sqlserver.py -v` | Live SQL Server tests (Lima VM) |
+| `make test-live-mysql` | `pytest tests/test_live_mysql.py -v` | Live MySQL 5.7 + 8.x tests (Podman) |
+| `make test-live-pg` | `pytest tests/test_live_pg.py -v` | Live PostgreSQL 14 + 16 tests (Podman) |
+| `make test-live-oracle` | `pytest tests/test_live_oracle.py -v` | Live Oracle XE tests (Lima VM) |
+| `make test-live-roundtrip` | `pytest tests/test_live_roundtrip.py -v` | Double round-trip on all live DBs |
+| `make test-live-synth` | `pytest tests/test_live_synth.py -v` | Full synth pipeline on all live DBs |
+| `make test-live-all` | all `test-live-*` targets | Everything against every live DB |
 | `make test-file FILE=…` | `pytest <FILE> -v` | Single test file |
 | `make lint` | `ruff check src/ tests/` | Lint (non-blocking) |
 | `make clean` | `find … __pycache__` | Remove `.pyc` / cache |
@@ -151,6 +159,11 @@ python3.11 -m venv .venv_test
 | `tests/test_protobuf_converter.py` | ~40 | No | No |
 | `tests/test_zerobus_ingest.py` | ~60 | No | No (2 integration tests skipped) |
 | `tests/test_live_sqlserver.py` | 14 | No | **Yes** – SQL Server via Lima VM |
+| `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
+| `tests/test_live_pg.py` | ~18 | No | **Yes** – PostgreSQL 14 + 16 via Podman |
+| `tests/test_live_oracle.py` | 20 | No | **Yes** – Oracle XE via Lima VM |
+| `tests/test_live_roundtrip.py` | ~300 | No | **Yes** – MySQL + PG + SQL Server |
+| `tests/test_live_synth.py` | 17 | **Yes** | **Yes** – MySQL 8 + PG 16 + SQL Server |
 
 ### Tests that are always skipped (expected)
 
@@ -162,9 +175,17 @@ python3.11 -m venv .venv_test
 
 ### Live-DB tests: skipped automatically when DB not configured
 
-`tests/test_live_sqlserver.py` auto-skips if `SQLSERVER_PASS` is not set or
-the connection fails, so `make test` always completes cleanly without a running
-SQL Server.
+All live-DB test files auto-skip when their database is unreachable or the
+required credentials are not set, so `make test` always completes cleanly:
+
+| Test file | Skip condition |
+|-----------|----------------|
+| `test_live_sqlserver.py` | `SQLSERVER_PASS` not set or port closed |
+| `test_live_mysql.py` | port 3357 or 3384 closed |
+| `test_live_pg.py` | port 5414 or 5416 closed |
+| `test_live_oracle.py` | port 1521 closed (or `oracledb` not installed) |
+| `test_live_roundtrip.py` | any required port closed |
+| `test_live_synth.py` | any required DB port or Spark unavailable |
 
 ---
 
@@ -360,7 +381,8 @@ The same `required_permissions: ["all"]` bypass is needed.
 ### Lima VM startup is slow
 
 `limactl start` takes 1–3 minutes for the QEMU x86_64 VM to boot.
-`mssql-server` takes another ~30 seconds to initialise after the VM is up.
+
+**SQL Server** takes another ~30 seconds to initialise after the VM is up.
 Always check the service is running before running the live tests:
 
 ```bash
@@ -375,6 +397,22 @@ limactl shell sqlserver22 -- sudo systemctl start mssql-server
 sleep 10
 nc -zv 127.0.0.1 14330
 ```
+
+**Oracle XE** takes 3–5 minutes to initialise its data files on first boot.
+The container restarts automatically when the VM boots, but you must wait
+for the database to be fully ready before running tests.  Use polling:
+
+```bash
+until limactl shell oracle -- podman logs oracle-xe 2>/dev/null \
+      | grep -q "DATABASE IS READY TO USE"; do
+  echo "[$(date +%H:%M:%S)] waiting for Oracle XE…"
+  sleep 15
+done
+nc -z 127.0.0.1 1521 && echo "Oracle port 1521 open"
+```
+
+After subsequent restarts (`limactl stop oracle` + `limactl start oracle`),
+Oracle typically becomes ready within 30–60 seconds (no data file creation).
 
 ---
 
@@ -396,6 +434,18 @@ The live SQL Server tests confirmed the following are intentional:
 `UNIQUEIDENTIFIER` → `uuid` → `UNIQUEIDENTIFIER` is a full lossless round-trip
 (fixed in this session; previously incorrectly mapped to `string`).
 
+### Oracle-specific normalizations
+
+| Source Oracle type | Canonical type | Re-emitted as | Reason |
+|--------------------|---------------|---------------|--------|
+| `NUMBER(p)` (no scale, p ≤ 9) | `integer` | `NUMBER(10)` | Canonical integer bucket |
+| `NUMBER(p)` (no scale, 9 < p ≤ 18) | `long` | `NUMBER(19)` | Canonical long bucket |
+| `NUMBER(1)` | `integer` | `NUMBER(10)` | Single-digit NUMBER widens |
+| `CHAR(n)` | `string` | `VARCHAR2(n)` | CHAR → string normalisation |
+| `CLOB` | `string` (no length) | `CLOB` | No-length string → CLOB |
+| `DATE` | `datetime` | `DATE` | Oracle DATE includes time component |
+| `RAW(n)` / `BLOB` | `binary` | `RAW(n)` / `BLOB` | Binary types preserved |
+
 ---
 
 ## Bugs found by live-DB testing (fixed)
@@ -413,6 +463,15 @@ The live SQL Server tests confirmed the following are intentional:
 | Bug | Symptom | Root cause | Fix |
 |-----|---------|------------|-----|
 | `DEFAULT TRUE` rejected by SQL Server | PG `BOOLEAN NOT NULL DEFAULT TRUE` → SS `BIT NOT NULL DEFAULT true` caused `OperationalError: name "true" not permitted` | `_default_clause` emitted canonical default verbatim without dialect normalisation | Added `_normalize_default()` in `ddl_emitter.py`: maps `true/false` → `1/0` for SQL Server and MySQL; `1/0` → `TRUE/FALSE` for PostgreSQL |
+
+### From `test_live_oracle.py` (Oracle XE 21c)
+
+| Bug | Symptom | Root cause | Fix |
+|-----|---------|------------|-----|
+| `NOT NULL` order with `DEFAULT` | `ORA-00907` on columns with both DEFAULT and NOT NULL | Oracle requires `DEFAULT val NOT NULL`; emitter produced `NOT NULL DEFAULT val` | Reordered clauses in `_col_ddl` for Oracle dialect |
+| Redundant `NOT NULL` on IDENTITY columns | `ORA-00907` on auto-increment columns | Oracle `GENERATED ALWAYS AS IDENTITY` is implicitly NOT NULL; explicit `NOT NULL` is a syntax error | Suppressed `NOT NULL` when `col.auto_increment` is true and `dialect == "oracle"` |
+| Boolean `DEFAULT true` for `NUMBER(1)` | `ORA-00984: column not allowed here` | Oracle `NUMBER(1)` defaults must be `1` or `0`, not `TRUE`/`FALSE` | Extended `_normalize_default()` to include `"oracle"`, mapping `true/false` → `1/0` |
+| No-length string emitted as `VARCHAR2(255)` | `CLOB` columns round-tripped to `VARCHAR2(255)` | `_ORACLE_DEFAULTS["string"]` was `"VARCHAR2(255)"` — Oracle VARCHAR2 has a 4000-byte limit, insufficient for long strings | Changed `_ORACLE_DEFAULTS["string"]` to `"CLOB"`; explicit `length` still produces `VARCHAR2(n)` |
 
 ### From `test_live_synth.py` (live synthetic data pipeline)
 
@@ -491,8 +550,13 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`Makefile`](../Makefile) – all dev shortcuts
 - [`conftest.py`](../conftest.py) – auto JAVA_HOME detection
 - [`tests/test_live_sqlserver.py`](../tests/test_live_sqlserver.py) – live SQL Server test suite
+- [`tests/test_live_mysql.py`](../tests/test_live_mysql.py) – live MySQL 5.7 + 8.x test suite
+- [`tests/test_live_pg.py`](../tests/test_live_pg.py) – live PostgreSQL 14 + 16 test suite
+- [`tests/test_live_oracle.py`](../tests/test_live_oracle.py) – live Oracle XE test suite (20 tests)
+- [`tests/test_live_roundtrip.py`](../tests/test_live_roundtrip.py) – comprehensive double round-trip suite
 - [`tests/test_live_synth.py`](../tests/test_live_synth.py) – live synthetic data pipeline tests
 - [`src/schema_parser/db_stats_collector.py`](../src/schema_parser/db_stats_collector.py) – collect `TableStats` from a live database
+- [`config/lima/oracle.yaml`](../config/lima/oracle.yaml) – Lima VM config for Oracle XE
 - [`docs/local-databases.md`](local-databases.md) – how to run real databases locally
 - [`docs/test_plan_ddl_roundtrip.md`](test_plan_ddl_roundtrip.md) – DDL round-trip test plan
 - [`docs/synthetic_data_shortcomings.md`](synthetic_data_shortcomings.md) – known synthetic data limitations
