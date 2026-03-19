@@ -1,4 +1,4 @@
-# Zerobus pipeline – runtime
+# statschema runtime + Databricks Connect (notebooks / remote Spark)
 # Python 3.9+
 
 # Config and schema
@@ -10,18 +10,8 @@ dbldatagen>=0.4.0
 pyparsing   # missing in dbldatagen requirements.txt 
 jmespath    # missing in dbldatagen requirements.txt
 
-# Databricks Zerobus Ingest (push to Delta)
-databricks-zerobus-ingest-sdk>=0.3.0
-
-# Databricks SDK (WorkspaceClient for ZeroBus auth, token retrieval)
-databricks-sdk>=0.20.0
-
 # Databricks Connect (local Spark session to remote workspace)
 databricks-connect>=14.0.0
-
-# Protobuf (Zerobus ingest, schema generation)
-protobuf>=4.25.0,<7.0
-grpcio-tools>=1.60.0,<2.0
 
 # Optional: pyspark if running tests or data_generator without Databricks Connect
 # pyspark>=3.5.0

@@ -1,9 +1,9 @@
-# This is a Databricks asset bundle definition for zerobus.
+# Databricks asset bundle for statschema / notebooks (see README).
 # The Databricks extension requires databricks.yml configuration file.
 # See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
 
 bundle:
-  name: zerobus
+  name: statschema
 
 targets:
   e2demo:
