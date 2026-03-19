@@ -309,6 +309,26 @@ def _extract_params(dt: SgDataType) -> list[int]:
     return result
 
 
+def _source_type_str(dt: SgDataType, dialect: str) -> str:
+    """
+    Return a clean, human-readable SQL type string for the original column type,
+    e.g. "TIMESTAMP WITH TIME ZONE", "DATETIMEOFFSET", "NUMBER(10)", "TIMETZ".
+
+    Used to populate constraints["source_type"] so the canonical YAML (and any
+    downstream emitted DDL) can record what the original type was, even when the
+    canonical model normalises it to a wider or less-specific type.
+    """
+    sg_dialect = _SG_DIALECT.get(dialect, dialect) or None
+    try:
+        s = dt.sql(dialect=sg_dialect).strip()
+        # Strip redundant parentheses on bare types: "TIMESTAMP()" → "TIMESTAMP"
+        if s.endswith("()"):
+            s = s[:-2].strip()
+        return s.upper() if s else dt.this.value.upper()
+    except Exception:
+        return dt.this.value.upper()
+
+
 def _dtype_info(
     dt: SgDataType,
     dialect: str,
@@ -463,6 +483,9 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
 
         canonical, length, precision, scale, fsp, unsigned, is_serial = _dtype_info(dt, dialect)
 
+        # Capture original SQL type for source_type annotation (see _build_constraints below).
+        source_type_str = _source_type_str(dt, dialect)
+
         # Constraints on this column.
         # sqlglot 30+ uses NotNullColumnConstraint for BOTH "NULL" and "NOT NULL".
         # Distinguish them via the allow_null argument:
@@ -501,6 +524,55 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
                 raw = _normalize_default(raw)
                 default = raw
 
+        # Build constraints dict — preserve serial_type and source_type annotation.
+        # source_type is stored whenever the original SQL type carries information that
+        # the canonical type alone cannot reconstruct, so that:
+        #   1. The canonical YAML is self-documenting.
+        #   2. Downstream DDL emitters can add "-- originally <type>" comments when
+        #      the emitted type differs from the original (e.g. TIMETZ → STRING in Databricks).
+        col_constraints: dict = {}
+        if is_serial:
+            col_constraints["serial_type"] = dt.this.value
+        # Record source_type for any type that the canonical name doesn't uniquely describe:
+        #   - widened types    (NUMBER(10) → integer/long, MONEY → decimal(19,4))
+        #   - degraded targets (TIMETZ → TIME, ROWVERSION → binary, INET → string)
+        #   - spatial / exotic (GEOGRAPHY, HIERARCHYID, XML → binary/string)
+        # Do NOT record source_type for types that are semantically equivalent to the
+        # canonical (i.e., emit identically or with an accepted alias in every target).
+        _LOSSLESS_CANONICAL = {
+            # canonical type → set of original SQL type leading tokens that are lossless
+            "integer":     {"INT", "INTEGER", "SMALLINT", "MEDIUMINT", "TINYINT"},
+            "long":        {"BIGINT"},
+            "float":       {"FLOAT", "REAL"},
+            "double":      {"DOUBLE", "DOUBLE PRECISION"},
+            "boolean":     {"BOOLEAN", "BOOL", "BIT"},
+            "date":        {"DATE"},
+            "string":      {"VARCHAR", "NVARCHAR", "CHAR", "NCHAR", "TEXT", "NTEXT",
+                            "CLOB", "NCLOB", "STRING"},
+            "binary":      {"BINARY", "VARBINARY", "BLOB", "BYTEA", "IMAGE"},
+            "uuid":        {"UUID", "UNIQUEIDENTIFIER"},
+            # All UTC-aware timestamp representations are semantically equivalent;
+            # no annotation needed when moving between TIMESTAMPTZ / DATETIMEOFFSET /
+            # MySQL TIMESTAMP / Oracle TIMESTAMP WITH TIME ZONE / Databricks TIMESTAMP.
+            "timestamptz": {"TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE",
+                            "DATETIMEOFFSET", "TIMESTAMP"},
+            # Plain TIMESTAMP (no timezone) is unambiguous across dialects.
+            "timestamp":   {"TIMESTAMP", "DATETIME", "DATETIME2", "TIMESTAMP_NTZ",
+                            "TIMESTAMP WITHOUT TIME ZONE", "SMALLDATETIME"},
+            "time":        {"TIME"},
+            # NUMBER(p,s) is Oracle's spelling of DECIMAL(p,s) — semantically identical.
+            # NUMBER(p) without scale is handled by widening (→ integer/long), so we only
+            # reach here when scale is present; treat it as lossless.
+            "decimal":     {"DECIMAL", "NUMERIC", "NUMBER"},
+        }
+        lossless_for_type = _LOSSLESS_CANONICAL.get(canonical, set())
+        # Normalise the source_type_str to its leading token for comparison.
+        # Skip source_type when serial_type is already stored (it fully captures the origin).
+        _leading = source_type_str.split("(")[0].strip()
+        if _leading not in lossless_for_type and not is_serial:
+            col_constraints["source_type"]    = source_type_str
+            col_constraints["source_dialect"] = dialect
+
         columns.append(CanonicalColumn(
             name=col_name,
             type=canonical,
@@ -514,7 +586,7 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
             default=default,
             primary_key=is_pk,
             unique=unique,
-            constraints={"serial_type": dt.this.value} if is_serial else None,
+            constraints=col_constraints if col_constraints else None,
             generation=GenerationRule(unique=True) if is_pk else None,
         ))
 

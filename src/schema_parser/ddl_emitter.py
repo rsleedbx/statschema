@@ -311,6 +311,71 @@ def _unique_clause(col: CanonicalColumn) -> str:
     return ""
 
 
+def _source_type_comment(col: CanonicalColumn, emitted_type: str, emit_dialect: str) -> str:
+    """
+    Return a SQL inline comment recording the original source type when:
+      1. The column has a stored source_type (set during parsing), AND
+      2. The emitted dialect differs from the source dialect (cross-dialect transpile), AND
+      3. The emitted type string is not semantically equivalent to the original.
+
+    Only fires on cross-dialect transpile so same-dialect round-trips remain idempotent.
+
+    Examples
+    --------
+    TIMETZ (postgres) → STRING (databricks)          → "  -- originally TIMETZ (postgres)"
+    DATETIMEOFFSET (sqlserver) → TIMESTAMP (mysql)   → "  -- originally DATETIMEOFFSET (sqlserver)"
+    NUMBER(10) (oracle) → BIGINT (postgres)          → "  -- originally NUMBER(10) (oracle)"
+    TINYBLOB (mysql) → LONGBLOB (mysql)              → ""  (same dialect, no annotation)
+    VARCHAR(100) (postgres) → VARCHAR(100) (mysql)   → ""  (types match, no annotation)
+    """
+    if not col.constraints:
+        return ""
+    source_type    = col.constraints.get("source_type", "")
+    source_dialect = col.constraints.get("source_dialect", "")
+    # serial_type (SERIAL/SMALLSERIAL/BIGSERIAL) is stored separately; use it as source_type
+    # when no explicit source_type is present, since SERIAL emits very differently cross-dialect.
+    if not source_type:
+        st = col.constraints.get("serial_type", "")
+        if st:
+            source_type    = st.upper()
+            source_dialect = source_dialect or "postgres"
+    if not source_type:
+        return ""
+
+    # Normalise dialect names for comparison (tsql/mssql → sqlserver, postgresql → postgres)
+    _DIALECT_ALIASES = {
+        "tsql": "sqlserver", "mssql": "sqlserver",
+        "postgresql": "postgres", "pg": "postgres",
+        "db2": "db2",
+    }
+    norm_src  = _DIALECT_ALIASES.get(source_dialect, source_dialect)
+    norm_emit = _DIALECT_ALIASES.get(emit_dialect, emit_dialect)
+
+    # Suppress for same-dialect: round-trips must be idempotent
+    if norm_src and norm_src == norm_emit:
+        return ""
+
+    emitted_norm = emitted_type.strip().upper()
+    source_norm  = source_type.strip().upper()
+    if emitted_norm == source_norm:
+        return ""
+
+    # Suppress when the emitted type is an accepted alias for the same concept
+    _EQUIVALENT_PAIRS = {
+        frozenset({"TIMESTAMP WITH TIME ZONE", "DATETIMEOFFSET"}),
+        frozenset({"TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ"}),
+        frozenset({"TIME WITH TIME ZONE", "TIMETZ"}),
+        frozenset({"BIGINT", "INT8"}),
+        frozenset({"CHARACTER VARYING", "VARCHAR"}),
+    }
+    pair = frozenset({emitted_norm.split("(")[0].strip(), source_norm.split("(")[0].strip()})
+    if pair in _EQUIVALENT_PAIRS:
+        return ""
+
+    dialect_note = f" ({source_dialect})" if source_dialect else ""
+    return f"  -- originally {source_type}{dialect_note}"
+
+
 def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
     name     = _quote(col.name, dialect)
     col_type = _build_col_type(col, dialect)
@@ -323,11 +388,12 @@ def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
         null = _not_null_clause(col)
     default  = _default_clause(col, dialect)
     unique   = _unique_clause(col)
+    comment  = _source_type_comment(col, col_type, dialect)
     # Oracle requires: type [DEFAULT value] [NOT NULL] — DEFAULT must precede NOT NULL.
     # All other dialects accept either order; keep the standard type+null+default for them.
     if dialect == "oracle":
-        return f"  {name} {col_type}{auto}{default}{null}{unique}"
-    return f"  {name} {col_type}{auto}{null}{default}{unique}"
+        return f"  {name} {col_type}{auto}{default}{null}{unique}{comment}"
+    return f"  {name} {col_type}{auto}{null}{default}{unique}{comment}"
 
 
 def _primary_key_constraint(table: CanonicalTableSchema, dialect: str) -> str | None:
