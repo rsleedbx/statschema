@@ -632,7 +632,7 @@ SELECT DBMS_METADATA.GET_DDL('TABLE', 'MY_TABLE', 'SYSTEM') FROM DUAL;
 ### Feed captured DDL to the parser
 
 ```python
-from schema_parser import parse_ddl, emit_ddl
+from statschema import parse_ddl, emit_ddl
 
 tables = parse_ddl(ddl_string)           # auto-detects dialect
 print(emit_ddl(tables[0], dialect="mysql"))  # re-emit for any target

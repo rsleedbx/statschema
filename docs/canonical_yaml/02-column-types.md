@@ -127,5 +127,5 @@ columns:
 
 - [Column constraints](03-column-constraints.md)
 - [Column precision & length](04-column-precision-length.md)
-- [`src/schema_parser/ddl_emitter.py`](../../src/schema_parser/ddl_emitter.py) — dialect-specific type emission
-- [`src/schema_parser/ddl_parser.py`](../../src/schema_parser/ddl_parser.py) — type normalization on parse
+- [`src/statschema/ddl_emitter.py`](../../src/statschema/ddl_emitter.py) — dialect-specific type emission
+- [`src/statschema/ddl_parser.py`](../../src/statschema/ddl_parser.py) — type normalization on parse

@@ -58,7 +58,7 @@ from typing import Any
 import yaml
 import pytest
 
-from src.schema_parser import (
+from src.statschema import (
     collect_table_stats,
     emit_ddl,
     inject_stats_mysql,
@@ -67,7 +67,7 @@ from src.schema_parser import (
     inject_stats_sqlserver,
     parse_ddl,
 )
-from src.schema_parser.stats_model import (
+from src.statschema.stats_model import (
     ColumnStats,
     DatabaseStats,
     MostCommonValue,
@@ -958,7 +958,7 @@ def _get_spark_for_stats():
     builder = (
         SparkSession.builder
         .master("local[2]")
-        .appName("schema_parser_stats_transpiler_test")
+        .appName("statschema_stats_transpiler_test")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
@@ -994,7 +994,7 @@ class TestDatabricksStatsInjection:
         """inject_stats_databricks writes a sample and ANALYZE TABLE succeeds."""
         spark = _get_spark_for_stats()
 
-        from src.schema_parser import inject_stats_databricks, parse_ddl
+        from src.statschema import inject_stats_databricks, parse_ddl
 
         canonical = parse_ddl(_ORDERS_DDL_MYSQL, dialect="mysql")[0]
         stats      = _make_production_stats()
@@ -1022,7 +1022,7 @@ class TestDatabricksStatsInjection:
         """After inject_stats_databricks, DESCRIBE EXTENDED shows a Statistics row."""
         spark = _get_spark_for_stats()
 
-        from src.schema_parser import inject_stats_databricks, parse_ddl
+        from src.statschema import inject_stats_databricks, parse_ddl
 
         canonical = parse_ddl(_ORDERS_DDL_MYSQL, dialect="mysql")[0]
         stats      = _make_production_stats()
@@ -1048,7 +1048,7 @@ class TestDatabricksStatsInjection:
         """DESCRIBE EXTENDED col_name='status' shows column-level statistics."""
         spark = _get_spark_for_stats()
 
-        from src.schema_parser import inject_stats_databricks, parse_ddl
+        from src.statschema import inject_stats_databricks, parse_ddl
 
         canonical = parse_ddl(_ORDERS_DDL_MYSQL, dialect="mysql")[0]
         stats      = _make_production_stats()
@@ -1078,7 +1078,7 @@ class TestDatabricksStatsInjection:
         """
         spark = _get_spark_for_stats()
 
-        from src.schema_parser import inject_stats_databricks, parse_ddl
+        from src.statschema import inject_stats_databricks, parse_ddl
 
         canonical = parse_ddl(_ORDERS_DDL_MYSQL, dialect="mysql")[0]
         stats      = _make_production_stats()

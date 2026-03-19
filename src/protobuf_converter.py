@@ -26,7 +26,7 @@ from typing import Any
 
 _compile_counter = itertools.count()
 
-from src.schema_parser.model import CanonicalTableSchema
+from src.statschema.model import CanonicalTableSchema
 
 _CANONICAL_TO_PROTO = {
     "integer": "int32",

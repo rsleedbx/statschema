@@ -182,7 +182,7 @@ def load_canonical(
             print(emit_ddl(t, dialect="mysql"))
 
         # Manual expansion (equivalent to expand=True)
-        from schema_parser import expand_table_instances
+        from statschema import expand_table_instances
         tables = expand_table_instances(load_canonical("schema.yaml"))
     """
     if isinstance(source, dict):

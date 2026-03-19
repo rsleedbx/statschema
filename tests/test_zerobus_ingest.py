@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.schema_parser.model import CanonicalColumn, CanonicalTableSchema
+from src.statschema.model import CanonicalColumn, CanonicalTableSchema
 from pathlib import Path
 
 from src.zerobus_ingest import (
@@ -688,7 +688,7 @@ class TestIngestIntegration:
         """1000 rows with short-lived PAT (lifetime_seconds=300)."""
         pytest.importorskip("dbldatagen")
         pytest.importorskip("grpc_tools")
-        from src.schema_parser.dbldatagen_builder import build_dataframe_from_canonical
+        from src.statschema.dbldatagen_builder import build_dataframe_from_canonical
 
         table = CanonicalTableSchema(
             name="phase1_table",
@@ -704,7 +704,7 @@ class TestIngestIntegration:
         """100 incremental rows with session OAuth (no PAT created)."""
         pytest.importorskip("dbldatagen")
         pytest.importorskip("grpc_tools")
-        from src.schema_parser.dbldatagen_builder import build_dataframe_from_canonical
+        from src.statschema.dbldatagen_builder import build_dataframe_from_canonical
 
         table = CanonicalTableSchema(
             name="phase1_table",

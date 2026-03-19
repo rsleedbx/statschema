@@ -189,5 +189,5 @@ When `DatabaseStats` are available (from `collect_table_stats()` or
 
 - [Column types](02-column-types.md)
 - [Temporal ordering constraints](07-temporal-ordering.md)
-- [`src/schema_parser/dbldatagen_builder.py`](../../src/schema_parser/dbldatagen_builder.py) — translates generation rules to dbldatagen specs
-- [`src/schema_parser/model.py`](../../src/schema_parser/model.py) — `GenerationRule` dataclass
+- [`src/statschema/dbldatagen_builder.py`](../../src/statschema/dbldatagen_builder.py) — translates generation rules to dbldatagen specs
+- [`src/statschema/model.py`](../../src/statschema/model.py) — `GenerationRule` dataclass

@@ -98,4 +98,4 @@ in every fully-populated row.
 ## Related
 
 - [Data generation rules](06-generation-rules.md)
-- [`src/schema_parser/model.py`](../../src/schema_parser/model.py) — `CanonicalTableSchema.temporal_ordering_constraints`
+- [`src/statschema/model.py`](../../src/statschema/model.py) — `CanonicalTableSchema.temporal_ordering_constraints`

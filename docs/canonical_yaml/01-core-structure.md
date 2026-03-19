@@ -90,7 +90,7 @@ tables:
 ## Python API
 
 ```python
-from schema_parser import parse_ddl, dump_schema, load_canonical, emit_ddl
+from statschema import parse_ddl, dump_schema, load_canonical, emit_ddl
 
 # DDL → canonical YAML file
 tables = parse_ddl(mysql_ddl, dialect="mysql")
@@ -108,5 +108,5 @@ print(emit_ddl(tables[0], dialect="oracle"))
 - [Column types](02-column-types.md)
 - [Column constraints](03-column-constraints.md)
 - [Round-trip guarantee](09-round-trip-guarantee.md)
-- [`src/schema_parser/model.py`](../../src/schema_parser/model.py) — Python dataclass definitions
-- [`src/schema_parser/schema_io.py`](../../src/schema_parser/schema_io.py) — `dump_schema` / `load_canonical`
+- [`src/statschema/model.py`](../../src/statschema/model.py) — Python dataclass definitions
+- [`src/statschema/schema_io.py`](../../src/statschema/schema_io.py) — `dump_schema` / `load_canonical`

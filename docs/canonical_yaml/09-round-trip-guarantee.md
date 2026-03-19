@@ -66,7 +66,7 @@ re-parsing never widens further.
 ### Parse → dump → load → emit
 
 ```python
-from schema_parser import parse_ddl, dump_schema, load_canonical, emit_ddl
+from statschema import parse_ddl, dump_schema, load_canonical, emit_ddl
 
 # Step 1: Parse source DDL into canonical form
 mysql_ddl = """
@@ -102,7 +102,7 @@ tables3  = load_canonical(yaml_str, expand=True) # also expand multi-instance
 ### Emit all dialects at once
 
 ```python
-from schema_parser import emit_ddl_all, SUPPORTED_DIALECTS
+from statschema import emit_ddl_all, SUPPORTED_DIALECTS
 
 for dialect in SUPPORTED_DIALECTS:
     print(f"--- {dialect} ---")
@@ -130,7 +130,7 @@ The YAML itself is also lossless — `load_canonical(dump_schema(tables))` retur
 tables that are semantically identical to the originals:
 
 ```python
-from schema_parser import dump_schema, load_canonical
+from statschema import dump_schema, load_canonical
 
 yaml_str = dump_schema(original_tables)
 restored = load_canonical(yaml_str)
@@ -146,7 +146,7 @@ for orig, rest in zip(original_tables, restored):
 ## Supported dialects
 
 ```python
-from schema_parser import SUPPORTED_DIALECTS
+from statschema import SUPPORTED_DIALECTS
 # → ["mysql", "postgres", "sqlserver", "oracle", "databricks"]
 ```
 

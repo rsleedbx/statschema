@@ -1,6 +1,6 @@
 # Stats Transpiler
 
-`schema_parser` is the only library that **transpiles both DDL schema and column statistics** across database dialects.
+`statschema` is the only library that **transpiles both DDL schema and column statistics** across database dialects.
 
 Every other DDL transpiler stops at the schema.  A migrated database with correct
 DDL but default (empty) statistics is still broken — the query optimizer has no
@@ -58,7 +58,7 @@ statistics (PostgreSQL `CREATE STATISTICS`, Oracle composite column stats) are
 not included in the canonical `TableStats` model.
 
 **Timeline**: PostgreSQL 19 is planned to ship `pg_restore_extended_stats()`.
-`schema_parser` will add support once that API is stable.
+`statschema` will add support once that API is stable.
 
 ### 4. SQL Server column-level statistics
 
@@ -172,7 +172,7 @@ Verify that EXPLAIN plans match the production shape in every pull request.
 - name: Inject production statistics into CI database
   run: |
     python -c "
-    from schema_parser import load_stats, inject_stats_postgres
+    from statschema import load_stats, inject_stats_postgres
     import psycopg2
     conn = psycopg2.connect(...)
     inject_stats_postgres(conn, load_stats('stats/orders.yaml').tables['orders'])
@@ -263,7 +263,7 @@ For Databricks targets:
 ### `inject_stats_postgres(conn, table_stats, schema="public")`
 
 ```python
-from schema_parser import load_stats, inject_stats_postgres
+from statschema import load_stats, inject_stats_postgres
 import psycopg2
 
 conn   = psycopg2.connect(host="...", dbname="mydb", user="postgres", password="...")
@@ -278,7 +278,7 @@ print(result.warnings)           # []
 ### `inject_stats_oracle(conn, table_stats, schema=None)`
 
 ```python
-from schema_parser import load_stats, inject_stats_oracle
+from statschema import load_stats, inject_stats_oracle
 import oracledb
 
 conn   = oracledb.connect(user="hr", password="...", dsn="localhost:1521/XEPDB1")
@@ -289,7 +289,7 @@ result = inject_stats_oracle(conn, stats, schema="HR")
 ### `inject_stats_mysql(conn, table_stats, schema=None)`
 
 ```python
-from schema_parser import load_stats, inject_stats_mysql
+from statschema import load_stats, inject_stats_mysql
 import pymysql
 
 conn   = pymysql.connect(host="127.0.0.1", port=3384, user="root", password="...", db="shop")
@@ -300,7 +300,7 @@ result = inject_stats_mysql(conn, stats, schema="shop")
 ### `inject_stats_sqlserver(conn, table_stats, schema="dbo")`
 
 ```python
-from schema_parser import load_stats, inject_stats_sqlserver
+from statschema import load_stats, inject_stats_sqlserver
 import pymssql
 
 conn   = pymssql.connect(host="127.0.0.1", port=14330, user="sa", password="...", database="shop")
@@ -312,7 +312,7 @@ result = inject_stats_sqlserver(conn, stats, schema="dbo")
 ### `inject_stats_databricks(spark, table_stats, canonical_schema, …)`
 
 ```python
-from schema_parser import load_stats, load_canonical, inject_stats_databricks
+from statschema import load_stats, load_canonical, inject_stats_databricks
 from pyspark.sql import SparkSession
 
 spark  = SparkSession.builder.appName("migration").getOrCreate()
@@ -386,5 +386,5 @@ data and no longer depends on the injected values.
 - [`docs/local-databases.md`](local-databases.md) — how to run MySQL, PostgreSQL, Oracle, SQL Server locally
 - [`docs/testing.md`](testing.md) — running the stats transpiler test suite
 - `tests/test_live_stats_transpiler.py` — live tests proving injection works for all four engines
-- `src/schema_parser/stats_injector.py` — implementation
-- `src/schema_parser/db_stats_collector.py` — collecting stats from a live source database
+- `src/statschema/stats_injector.py` — implementation
+- `src/statschema/db_stats_collector.py` — collecting stats from a live source database

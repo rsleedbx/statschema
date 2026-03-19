@@ -42,8 +42,8 @@ def main():
     print("Project root:", root)
     spark = _get_spark()
 
-    from src.schema_parser import load_schema, SchemaSource
-    from src.schema_parser.dbldatagen_builder import build_dataframe_from_canonical, to_dbldatagen_specs
+    from src.statschema import load_schema, SchemaSource
+    from src.statschema.dbldatagen_builder import build_dataframe_from_canonical, to_dbldatagen_specs
 
     schema_path = root / "tests" / "fixtures" / "ronaldbradford_schema" / "sakila_excerpt.sql"
     format_hint = SchemaSource.MYSQL

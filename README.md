@@ -1,4 +1,4 @@
-# schema_parser — stats transpiler · DDL transpiler · portable schema (YAML) · stats-driven tabular data
+# statschema — stats transpiler · DDL transpiler · portable schema (YAML) · stats-driven tabular data
 
 > **The only library that transpiles both column statistics and DDL schema across database dialects.**
 > Collect from MySQL. Migrate to PostgreSQL. The optimizer works correctly from day one.
@@ -26,7 +26,7 @@ and *default* statistics is still broken — the query optimizer has no idea how
 rows each table has, which values are common, or what the numeric ranges look like.
 It produces bad query plans from day one.
 
-`schema_parser` introduces the **stats transpiler**: collect column statistics from any
+`statschema` introduces the **stats transpiler**: collect column statistics from any
 source database, store them as dialect-free YAML, and inject them into any target database
 so the optimizer sees production-scale distributions *before a single row is loaded*:
 
@@ -44,7 +44,7 @@ Source DB (MySQL)                        Target DB (PostgreSQL)
 PostgreSQL 18 independently validated this need by shipping `pg_restore_attribute_stats`
 and `pg_dump --statistics-only` — portable optimizer statistics are now a first-class
 deployment artifact in PostgreSQL itself.
-`schema_parser` is the only tool that makes those statistics **cross-dialect**.
+`statschema` is the only tool that makes those statistics **cross-dialect**.
 
 #### What you get per target engine
 
@@ -182,7 +182,7 @@ MySQL / PostgreSQL / SQL Server / Oracle DDL
 ### 1 — Transpile DDL across databases
 
 ```python
-from src.schema_parser import parse_ddl, emit_ddl
+from src.statschema import parse_ddl, emit_ddl
 
 mysql_ddl = """
 CREATE TABLE orders (
@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS "orders" (
 ### 2 — Save as portable schema (YAML)
 
 ```python
-from src.schema_parser import parse_ddl, dump_schema, load_canonical, emit_ddl
+from src.statschema import parse_ddl, dump_schema, load_canonical, emit_ddl
 
 # Parse once — save as portable YAML
 tables = parse_ddl(open("schema.sql").read(), dialect="mysql")
@@ -259,7 +259,7 @@ tables:
 ### 3 — Generate stats-driven tabular data
 
 ```python
-from src.schema_parser import (
+from src.statschema import (
     parse_ddl, make_default_stats,
     collect_table_stats, build_dataframe_from_canonical,
 )
@@ -302,7 +302,7 @@ stabilise within ±15% and cardinality within ±5× after one or two rounds.
 ```python
 import pymysql
 from sqlalchemy import create_engine
-from src.schema_parser import (
+from src.statschema import (
     parse_ddl, emit_ddl,
     make_default_stats, collect_table_stats, dump_stats,
     build_dataframe_from_canonical,
@@ -536,7 +536,7 @@ mysqldump --no-data --routines=0 --triggers=0 \
 ```python
 import os, pymysql
 from dotenv import load_dotenv
-from src.schema_parser import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
 
 load_dotenv()
 
@@ -574,7 +574,7 @@ PGPASSWORD="$PG_PASSWORD" pg_dump --schema-only --no-owner --no-acl \
 ```python
 import os, psycopg2
 from dotenv import load_dotenv
-from src.schema_parser import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
 
 load_dotenv()
 
@@ -616,7 +616,7 @@ mssql-scripter -S "127.0.0.1,$SQLSERVER_PORT" -d mydb -U sa -P "$SQLSERVER_PASS"
 ```python
 import os, pymssql
 from dotenv import load_dotenv
-from src.schema_parser import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
 
 load_dotenv()
 
@@ -666,7 +666,7 @@ EOF > schema.sql
 ```python
 import os, oracledb
 from dotenv import load_dotenv
-from src.schema_parser import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
 
 load_dotenv()
 
@@ -721,7 +721,7 @@ import os
 from dotenv import load_dotenv
 from databricks.connect import DatabricksSession
 from databricks import sql as dbsql
-from src.schema_parser import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
 
 load_dotenv()
 
@@ -761,7 +761,7 @@ Once `schema.yaml` and `stats.yaml` are on disk they can be used without any
 database connection:
 
 ```python
-from src.schema_parser import load_canonical, load_stats, emit_ddl, build_dataframe_from_canonical
+from src.statschema import load_canonical, load_stats, emit_ddl, build_dataframe_from_canonical
 
 tables    = load_canonical("schema.yaml")
 db_stats  = load_stats("stats.yaml")
@@ -793,7 +793,7 @@ immediately, with no data loaded.
 
 ```python
 import pymysql
-from src.schema_parser import collect_table_stats, dump_stats, load_stats, DatabaseStats
+from src.statschema import collect_table_stats, dump_stats, load_stats, DatabaseStats
 
 # 1. Collect statistics from the SOURCE database (MySQL)
 src_conn = pymysql.connect(host="prod-mysql", user="reader", password="…", db="orders_db")
@@ -826,7 +826,7 @@ source database's distributions.  Three levels are available, from zero-dependen
 heuristics to real measurements collected from a live system:
 
 ```python
-from src.schema_parser import make_default_stats, collect_table_stats, load_stats, dump_stats, DatabaseStats
+from src.statschema import make_default_stats, collect_table_stats, load_stats, dump_stats, DatabaseStats
 
 # Level 1 – heuristic defaults (no DB connection required)
 #   Conservative estimates: null_fraction=0.05 for nullable cols, n_distinct from type.
@@ -852,7 +852,7 @@ See **Example 4** above for the full generate → load → collect → regenerat
 ## Schema overrides — rename, retype, rescale
 
 ```python
-from src.schema_parser import load_canonical, load_stats, apply_overrides, OverrideSpec, TableOverride, ColumnOverride
+from src.statschema import load_canonical, load_stats, apply_overrides, OverrideSpec, TableOverride, ColumnOverride
 
 spec = OverrideSpec(tables=[
     TableOverride(

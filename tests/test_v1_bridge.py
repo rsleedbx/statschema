@@ -41,14 +41,14 @@ from dbldatagen.v1.schema import (
     Exponential,
 )
 
-from src.schema_parser import parse_ddl
-from src.schema_parser.model import (
+from src.statschema import parse_ddl
+from src.statschema.model import (
     CanonicalColumn,
     CanonicalForeignKey,
     CanonicalTableSchema,
     GenerationRule,
 )
-from src.schema_parser.v1_bridge import to_v1_plan
+from src.statschema.v1_bridge import to_v1_plan
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -724,7 +724,7 @@ class TestFullPipeline:
     """
 
     def test_multi_source_ddl_to_single_v1_plan(self):
-        from src.schema_parser import dump_schema, load_canonical
+        from src.statschema import dump_schema, load_canonical
 
         # 1. Parse three DDLs from different dialects
         customers = parse_ddl(self.MYSQL_CUSTOMERS, dialect="mysql")[0]
@@ -755,7 +755,7 @@ class TestFullPipeline:
         assert names == {"customers", "products", "orders"}
 
     def test_precision_survives_yaml_to_v1_plan(self):
-        from src.schema_parser import dump_schema, load_canonical
+        from src.statschema import dump_schema, load_canonical
 
         ddl = """
         CREATE TABLE payments (
