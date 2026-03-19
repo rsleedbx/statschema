@@ -1,8 +1,10 @@
-# Zerobus – Local Testing Strategy
+# statschema – local testing strategy
 
 This document is the authoritative guide for running the test suite locally and
 in CI.  It is written to be consumed directly by AI agents (Cursor, Claude, etc.)
 as well as human developers.
+
+**Repo:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema)
 
 ---
 
@@ -179,8 +181,6 @@ python3.11 -m venv .venv_test
 | Test | Reason |
 |------|--------|
 | Any test calling `pytest.importorskip("databricks.connect")` from `.venv_test` | `databricks-connect` intentionally absent |
-
-**ZeroBus ingest** tests live in the **[zerobusdemo](https://github.com/rsleedbx/zerobusdemo)** repository.
 
 ### Live-DB tests: skipped automatically when DB not configured
 

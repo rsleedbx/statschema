@@ -10,7 +10,7 @@ Prerequisites
 -------------
 Oracle XE running inside a Lima QEMU VM (see docs/local-databases.md):
 
-    limactl start --name=oracle ~/github/zerobus/config/lima/oracle.yaml
+    limactl start --name=oracle ~/github/statschema/config/lima/oracle.yaml
     # First boot takes 3-5 minutes; watch progress with:
     limactl shell oracle -- podman logs -f oracle-xe | grep -i "ready"
 
@@ -21,7 +21,7 @@ Environment variables (defaults match the oracle.yaml ORACLE_PWD value):
     ORACLE_USER     default: system
     ORACLE_PASS     default: oracle
     ORACLE_SERVICE  default: XE
-    ORACLE_SCHEMA   default: ZEROBUS_TEST   (test schema/user created by fixture)
+    ORACLE_SCHEMA   default: STATSCHEMA_TEST   (test schema/user created by fixture)
 
 Skip behaviour
 --------------
@@ -47,8 +47,8 @@ _PORT    = int(os.environ.get("ORACLE_PORT",    "1521"))
 _USER    = os.environ.get("ORACLE_USER",    "system")
 _PASS    = os.environ.get("ORACLE_PASS",    "oracle")
 _SERVICE = os.environ.get("ORACLE_SERVICE", "XE")
-_SCHEMA  = os.environ.get("ORACLE_SCHEMA",  "ZEROBUS_TEST").upper()
-_SCHEMA_PASS = "ZerobusTest1"   # password for the test schema user
+_SCHEMA  = os.environ.get("ORACLE_SCHEMA",  "STATSCHEMA_TEST").upper()
+_SCHEMA_PASS = "StatschemaTest1"   # password for the test schema user
 
 
 def _get_connection(user: str = _USER, password: str = _PASS, service: str = _SERVICE):
@@ -98,7 +98,7 @@ def conn():
     """
     Module-scoped connection.
 
-    Creates a dedicated test user (ZEROBUS_TEST) so tests don't pollute the
+    Creates a dedicated test user (STATSCHEMA_TEST) so tests don't pollute the
     SYSTEM schema.  Drops and recreates the user on every run for a clean slate.
     Requires oracledb and a reachable Oracle instance.
     """

@@ -129,14 +129,14 @@ def conn():
         pytest.skip(f"Cannot connect to SQL Server ({p['host']}:{p['port']}): {exc}")
 
     cur = master_conn.cursor()
-    cur.execute("IF DB_ID('zerobus_test') IS NULL CREATE DATABASE zerobus_test")
+    cur.execute("IF DB_ID('statschema_test') IS NULL CREATE DATABASE statschema_test")
     master_conn.close()
 
     # Re-connect directly into the test database
     connection = pymssql.connect(
         server=p["host"], port=p["port"],
         user=p["user"], password=p["password"],
-        database="zerobus_test", login_timeout=5, tds_version="7.4",
+        database="statschema_test", login_timeout=5, tds_version="7.4",
     )
     yield connection
 
@@ -148,7 +148,7 @@ def conn():
         database="master", login_timeout=5, tds_version="7.4",
         autocommit=True,
     )
-    cleanup.cursor().execute("DROP DATABASE IF EXISTS zerobus_test")
+    cleanup.cursor().execute("DROP DATABASE IF EXISTS statschema_test")
     cleanup.close()
 
 

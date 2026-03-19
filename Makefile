@@ -1,4 +1,4 @@
-# ── Zerobus dev shortcuts ────────────────────────────────────────────────────
+# ── Statschema dev shortcuts ───────────────────────────────────────────────
 #
 # Prerequisites
 #   .venv_test  – Python 3.11 venv with requirements-test.txt (local Spark)

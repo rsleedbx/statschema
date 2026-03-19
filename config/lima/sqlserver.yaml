@@ -1,7 +1,7 @@
 # Lima VM – Microsoft SQL Server 2019 (x86_64 Ubuntu 20.04)
 #
 # Usage:
-#   limactl start --name=sqlserver ~/github/zerobus/config/lima/sqlserver.yaml
+#   limactl start --name=sqlserver ~/github/statschema/config/lima/sqlserver.yaml
 #   limactl stop  sqlserver
 #   limactl start sqlserver
 #   limactl delete sqlserver
