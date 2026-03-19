@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic test-live-gitea test-live-chinook test-live-oracle-hr lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -66,6 +66,9 @@ test-live-all:
 	  tests/test_live_sqlserver.py \
 	  tests/test_live_oracle.py \
 	  tests/test_live_mautic.py \
+	  tests/test_live_gitea.py \
+	  tests/test_live_chinook.py \
+	  tests/test_live_oracle_hr.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -101,6 +104,28 @@ test-live-oracle:
 	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
 	ORACLE_SERVICE=$(or $(ORACLE_SERVICE),XE) \
 	$(PYTEST_TEST) tests/test_live_oracle.py -v
+
+## Run live Gitea application tests (Gitea + pg16 Podman containers)
+test-live-gitea:
+	GITEA_PG_HOST=$(or $(GITEA_PG_HOST),127.0.0.1) \
+	GITEA_PG_PORT=$(or $(GITEA_PG_PORT),5416) \
+	GITEA_PG_USER=$(or $(GITEA_PG_USER),gitea) \
+	GITEA_PG_PASS=$(or $(GITEA_PG_PASS),gitea123) \
+	GITEA_PG_DB=$(or $(GITEA_PG_DB),gitea) \
+	$(PYTEST_TEST) tests/test_live_gitea.py -v
+
+## Run live Chinook application tests (Chinook on SQL Server 22 Lima VM)
+test-live-chinook:
+	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	SQLSERVER_PASS=$(SQLSERVER_PASS) \
+	$(PYTEST_TEST) tests/test_live_chinook.py -v
+
+## Run live Oracle HR/CO sample schema tests (Oracle XE Lima VM)
+test-live-oracle-hr:
+	ORACLE_HOST=$(or $(ORACLE_HOST),127.0.0.1) \
+	ORACLE_PORT=$(or $(ORACLE_PORT),1521) \
+	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
+	$(PYTEST_TEST) tests/test_live_oracle_hr.py -v
 
 ## Run live Mautic application tests (Mautic 5 + mysql8 containers; see docs/local-databases.md)
 ## Usage: make test-live-mautic

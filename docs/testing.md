@@ -34,6 +34,9 @@ credentials and are expected).  Live-DB tests add:
 - **14** when SQL Server is running (`test_live_sqlserver.py`)
 - **20** when Oracle XE is running (`test_live_oracle.py`)
 - **19** when Mautic is running (`test_live_mautic.py`)
+- **16** when Gitea is running (`test_live_gitea.py`)
+- **16** when Chinook (SQL Server) is loaded (`test_live_chinook.py`)
+- **20** when Oracle HR/CO schemas are installed (`test_live_oracle_hr.py`)
 - **17** when all live databases and Spark are available (`test_live_synth.py`)
 
 ---
@@ -142,6 +145,9 @@ python3.11 -m venv .venv_test
 | `make test-live-pg` | `pytest tests/test_live_pg.py -v` | Live PostgreSQL 14 + 16 tests (Podman) |
 | `make test-live-oracle` | `pytest tests/test_live_oracle.py -v` | Live Oracle XE tests (Lima VM) |
 | `make test-live-mautic` | `pytest tests/test_live_mautic.py -v` | Live Mautic application tests (Podman) |
+| `make test-live-gitea` | `pytest tests/test_live_gitea.py -v` | Live Gitea application tests (PostgreSQL) |
+| `make test-live-chinook` | `pytest tests/test_live_chinook.py -v` | Live Chinook sample DB tests (SQL Server) |
+| `make test-live-oracle-hr` | `pytest tests/test_live_oracle_hr.py -v` | Live Oracle HR/CO sample schema tests |
 | `make test-live-roundtrip` | `pytest tests/test_live_roundtrip.py -v` | Double round-trip on all live DBs |
 | `make test-live-synth` | `pytest tests/test_live_synth.py -v` | Full synth pipeline on all live DBs |
 | `make test-live-all` | all `test-live-*` targets | Everything against every live DB |
@@ -487,6 +493,85 @@ The live SQL Server tests confirmed the following are intentional:
 
 ---
 
+## Gitea application tests (`test_live_gitea.py`)
+
+Gitea is a self-hosted Git service written in Go with **~112 PostgreSQL tables**.
+It is the PostgreSQL application-level test target, exercising: `BIGINT`, `BOOLEAN`, `TEXT`,
+`TIMESTAMP WITH TIME ZONE`, `BYTEA`, and FK relationships across CI/CD, repository, user, and
+issue management domains.
+
+### What is tested (16 tests)
+
+| Class | Tests | What it checks |
+|-------|-------|----------------|
+| `TestGiteaConnection` | 2 | DB reachable; 7 core tables present |
+| `TestGiteaParse` | 4 | All 112 tables parse; key columns on `user`, `repository`, `issue` |
+| `TestGiteaEmit` | 5 | All 112 tables emit; double round-trip idempotency; cross-dialect to MySQL, SQL Server, Oracle |
+| `TestGiteaMultiInstance` | 3 | `action_task` 3-shard expansion; `notification` aliases; YAML round-trip for `comment` |
+| `TestGiteaCanonicalYaml` | 2 | Full 112-table YAML dump and reload; `repository` YAML content |
+
+### Setup
+
+```bash
+make test-live-gitea
+# See docs/local-databases.md – Gitea section for one-time container setup
+```
+
+---
+
+## Chinook application tests (`test_live_chinook.py`)
+
+[Chinook](https://github.com/lerocha/chinook-database) is the de-facto SQL Server sample database —
+**11 tables** modelling a digital music store (based on iTunes).  It is the SQL Server
+application-level test target, covering: `NVARCHAR`, `INTEGER`, `DECIMAL`, `DATETIME`,
+`NUMERIC`, composite PKs, and multi-level FK chains.
+
+### What is tested (16 tests)
+
+| Class | Tests | What it checks |
+|-------|-------|----------------|
+| `TestChinookConnection` | 2 | DB reachable; all 11 tables present |
+| `TestChinookParse` | 4 | All 11 tables parse; `Track` columns; `Invoice` columns; `PlaylistTrack` composite PK |
+| `TestChinookEmit` | 5 | All 11 tables emit; double round-trip idempotency; cross-dialect to MySQL, PostgreSQL, Oracle |
+| `TestChinookMultiInstance` | 3 | `Track` 5-shard expansion; `Invoice` aliases; Artist/Album YAML round-trip |
+| `TestChinookCanonicalYaml` | 2 | Full 11-table YAML dump and reload; `Track` YAML field content |
+
+### Setup
+
+```bash
+make test-live-chinook
+# See docs/local-databases.md – Chinook section for one-time script loading
+```
+
+---
+
+## Oracle HR/CO application tests (`test_live_oracle_hr.py`)
+
+Oracle's canonical sample schemas from the [oracle-samples/db-sample-schemas](https://github.com/oracle-samples/db-sample-schemas)
+repository.  **14 tables total** (HR: 7 + CO: 7), exercising Oracle-specific types:
+`NUMBER(p,s)`, `VARCHAR2`, `CHAR`, `DATE`, `TIMESTAMP`, `INTERVAL`, and the FK hierarchy
+required by Oracle's semantic constraints.
+
+### What is tested (20 tests)
+
+| Class | Tests | What it checks |
+|-------|-------|----------------|
+| `TestOracleHRConnection` | 2 | HR DB reachable; all 7 HR tables present |
+| `TestOracleHRParse` | 4 | All 7 HR tables parse; EMPLOYEES columns; JOBS salary types; FK graph |
+| `TestOracleHREmit` | 5 | All 7 HR tables emit; double round-trip idempotency; cross-dialect to MySQL, PostgreSQL, SQL Server |
+| `TestOracleCOConnection` | 2 | CO DB reachable; all 7 CO tables present |
+| `TestOracleCOParse` | 3 | All 7 CO tables parse and emit; ORDERS double round-trip |
+| `TestOracleSampleMultiInstance` | 4 | EMPLOYEES 3-shard expansion; ORDERS aliases; full HR YAML round-trip; combined HR+CO 14-table YAML |
+
+### Setup
+
+```bash
+make test-live-oracle-hr
+# See docs/local-databases.md – Oracle HR/CO section for one-time schema creation
+```
+
+---
+
 ## Mautic application tests (`test_live_mautic.py`)
 
 Mautic is an open-source marketing automation platform with ~108 MySQL tables.
@@ -594,6 +679,9 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`tests/test_live_pg.py`](../tests/test_live_pg.py) – live PostgreSQL 14 + 16 test suite
 - [`tests/test_live_oracle.py`](../tests/test_live_oracle.py) – live Oracle XE test suite (20 tests)
 - [`tests/test_live_mautic.py`](../tests/test_live_mautic.py) – live Mautic application test suite (19 tests)
+- [`tests/test_live_gitea.py`](../tests/test_live_gitea.py) – live Gitea application test suite (16 tests, PostgreSQL)
+- [`tests/test_live_chinook.py`](../tests/test_live_chinook.py) – live Chinook sample database suite (16 tests, SQL Server)
+- [`tests/test_live_oracle_hr.py`](../tests/test_live_oracle_hr.py) – live Oracle HR/CO sample schema suite (20 tests, Oracle XE)
 - [`tests/test_live_roundtrip.py`](../tests/test_live_roundtrip.py) – comprehensive double round-trip suite
 - [`tests/test_live_synth.py`](../tests/test_live_synth.py) – live synthetic data pipeline tests
 - [`src/schema_parser/db_stats_collector.py`](../src/schema_parser/db_stats_collector.py) – collect `TableStats` from a live database

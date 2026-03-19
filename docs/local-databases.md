@@ -822,3 +822,154 @@ adding the following to `config/local.php` and rebuilding the cache:
 
 For automated testing, inserting contacts directly via MySQL (as done in step 6 above)
 is more reliable than the REST API and avoids OAuth token management.
+
+---
+
+## Gitea (PostgreSQL application-level testing)
+
+[Gitea](https://gitea.com/) is a lightweight self-hosted Git service (~112 PostgreSQL tables).
+It exercises diverse PostgreSQL types: `BIGINT`, `BOOLEAN`, `TEXT`, `TIMESTAMP WITH TIME ZONE`,
+`BYTEA`, and `JSONB`.  It also has natural multi-instance candidates for CI/CD action tables.
+
+### One-time setup
+
+```bash
+# 1 – Create gitea user and database on pg16
+podman exec pg16 psql -U postgres -c "
+  CREATE USER gitea WITH PASSWORD 'gitea123';
+  CREATE DATABASE gitea OWNER gitea;
+"
+
+# 2 – Create dedicated Podman network
+podman network create gitea_net 2>/dev/null || true
+podman network connect gitea_net pg16 2>/dev/null || true
+
+# 3 – Pull and start Gitea (schema auto-created on first run)
+podman pull docker.io/gitea/gitea:latest
+podman run -d --name gitea --network gitea_net -p 3000:3000 \
+  -e GITEA__database__DB_TYPE=postgres \
+  -e GITEA__database__HOST=pg16:5432 \
+  -e GITEA__database__NAME=gitea \
+  -e GITEA__database__USER=gitea \
+  -e GITEA__database__PASSWD=gitea123 \
+  -e GITEA__security__INSTALL_LOCK=true \
+  -e GITEA__security__SECRET_KEY=zerobus_test_secret_key_32chars0 \
+  -e GITEA__server__ROOT_URL=http://localhost:3000/ \
+  docker.io/gitea/gitea:latest
+
+# 4 – Wait ~30 s for schema creation, then create an admin user
+sleep 30
+podman exec -u git gitea gitea admin user create \
+  --admin --username=gitadmin --password=Gitpass123! \
+  --email=admin@example.com --must-change-password=false
+```
+
+### Running the tests
+
+```bash
+make test-live-gitea
+```
+
+Expected output: **16 passed**.
+
+---
+
+## Chinook (SQL Server application-level testing)
+
+[Chinook](https://github.com/lerocha/chinook-database) is the de-facto SQL Server sample database,
+modelling a digital music store (11 tables, based on the iTunes schema).  It covers
+`NVARCHAR`, `INTEGER`, `DECIMAL`, `DATETIME`, `NUMERIC`, composite PKs, and FK chains.
+
+### One-time setup
+
+```bash
+# Download and load the Chinook T-SQL script into the SQL Server 22 Lima VM
+curl -sL "https://raw.githubusercontent.com/lerocha/chinook-database/master/\
+ChinookDatabase/DataSources/Chinook_SqlServer.sql" -o /tmp/chinook_sqlserver.sql
+
+source .env
+sqlcmd -S "127.0.0.1,${SQLSERVER_PORT:-14330}" -U sa -P "$SQLSERVER_PASS" \
+       -C -i /tmp/chinook_sqlserver.sql
+```
+
+### Running the tests
+
+```bash
+make test-live-chinook
+```
+
+Expected output: **16 passed**.
+
+---
+
+## Oracle HR / CO sample schemas (Oracle application-level testing)
+
+Oracle's canonical sample schemas from [oracle-samples/db-sample-schemas](https://github.com/oracle-samples/db-sample-schemas):
+
+- **HR (Human Resources)** — 7 tables: REGIONS → COUNTRIES → LOCATIONS → DEPARTMENTS → JOBS → EMPLOYEES → JOB_HISTORY
+- **CO (Customer Orders)** — 7 tables: CUSTOMERS → STORES → PRODUCTS → ORDERS → SHIPMENTS → ORDER_ITEMS → INVENTORY
+
+Together they cover Oracle-specific types: `NUMBER(p,s)`, `VARCHAR2`, `CHAR`, `DATE`, `TIMESTAMP`,
+`INTERVAL`, `CLOB`, and the FK graph required by Oracle's semantic rules.
+
+### One-time setup
+
+```bash
+# Download the create scripts
+curl -sL "https://raw.githubusercontent.com/oracle-samples/db-sample-schemas/main/human_resources/hr_create.sql" \
+  -o /tmp/hr_create.sql
+curl -sL "https://raw.githubusercontent.com/oracle-samples/db-sample-schemas/main/customer_orders/co_create.sql" \
+  -o /tmp/co_create.sql
+
+# Create users and schemas via Python (handles SQL*Plus directives)
+.venv_test/bin/python - << 'EOF'
+import oracledb, re
+
+def run_sql_script(conn, script_path, skip_views=True):
+    with open(script_path) as f:
+        content = f.read()
+    content = re.sub(r'^(SET|Prompt|SPOOL|HOST|COLUMN|TTITLE|PAUSE|DEFINE|ACCEPT|REMARK)\b.*$',
+                     '', content, flags=re.IGNORECASE|re.MULTILINE)
+    content = re.sub(r'^rem\b.*$', '', content, flags=re.IGNORECASE|re.MULTILINE)
+    content = re.sub(r'--.*$', '', content, flags=re.MULTILINE)
+    cur = conn.cursor()
+    for stmt in [s.strip() for s in content.split(';') if len(s.strip()) > 5]:
+        if skip_views and re.match(r'CREATE\s+OR\s+REPLACE\s+VIEW', stmt, re.I): continue
+        if re.match(r'COMMENT\s+ON', stmt, re.I): continue
+        try:
+            cur.execute(stmt)
+            conn.commit()
+        except Exception as e:
+            if 'ORA-00955' not in str(e):  # ignore "already exists"
+                print(f"SKIP: {str(e)[:60]}")
+
+sys_conn = oracledb.connect(user='system', password='oracle', dsn='127.0.0.1:1521/XE')
+cur = sys_conn.cursor()
+for user in ['hr', 'oe', 'co']:
+    try: cur.execute(f'DROP USER {user} CASCADE')
+    except: pass
+for stmt in [
+    "CREATE USER hr IDENTIFIED BY hr",
+    "GRANT CONNECT, RESOURCE, CREATE VIEW TO hr",
+    "ALTER USER hr QUOTA UNLIMITED ON USERS",
+    "CREATE USER co IDENTIFIED BY co",
+    "GRANT CONNECT, RESOURCE, CREATE VIEW, CREATE SEQUENCE TO co",
+    "ALTER USER co QUOTA UNLIMITED ON USERS",
+]:
+    cur.execute(stmt)
+sys_conn.commit()
+sys_conn.close()
+
+run_sql_script(oracledb.connect(user='hr', password='hr', dsn='127.0.0.1:1521/XE'), '/tmp/hr_create.sql')
+run_sql_script(oracledb.connect(user='co', password='co', dsn='127.0.0.1:1521/XE'), '/tmp/co_create.sql')
+print("HR and CO schemas created")
+EOF
+```
+
+### Running the tests
+
+```bash
+make test-live-oracle-hr
+```
+
+Expected output: **20 passed**.
