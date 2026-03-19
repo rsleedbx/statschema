@@ -3,7 +3,7 @@
 # Tag the source so the loader uses the YData parser.
 schema_source: ydata
 
-__table_description__: Example table for Zerobus pipeline (YData canonical format)
+__table_description__: Example table for statschema pipeline (YData canonical format)
 
 id:
   type: number

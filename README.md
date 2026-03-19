@@ -1,5 +1,7 @@
 # statschema — stats transpiler · DDL transpiler · portable schema (YAML) · stats-driven tabular data
 
+**Repository:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema) · `git clone https://github.com/rsleedbx/statschema.git`
+
 > **The only library that transpiles both column statistics and DDL schema across database dialects.**
 > Collect from MySQL. Migrate to PostgreSQL. The optimizer works correctly from day one.
 
@@ -16,8 +18,6 @@ flowchart LR
     C <-->|"parse / emit\nany dialect"| B
     B -->|"schema + stats"| D
 ```
-
-**Related:** Databricks **ZeroBus Ingest** (protobuf streaming to Delta), workspace helpers, and FAQ live in **[zerobusdemo](https://github.com/rsleedbx/zerobusdemo)** — not in this repo.
 
 ---
 

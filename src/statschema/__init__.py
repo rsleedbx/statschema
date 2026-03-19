@@ -70,7 +70,7 @@ Full pipeline (DDL → canonical YAML → many targets + data)
           └──→ build_dataframe_from_canonical(spark, ..., stats=table_stats)
                     ↓  dbldatagen (Databricks Labs Data Generator)
                Spark DataFrame (synthetic rows matching cardinality + distributions)
-                    ↓  ZeroBus ingest / Delta write
+                    ↓  Delta / Unity Catalog write
                Populated test table on Unity Catalog
 """
 

@@ -25,7 +25,7 @@ Oracle XE running in the Lima VM (see docs/local-databases.md):
     # Wait for 'DATABASE IS READY TO USE!' in podman logs oracle-xe
 
     # Create HR and CO schemas (run once)
-    cd /path/to/zerobus
+    cd /path/to/statschema   # repo root after clone: https://github.com/rsleedbx/statschema
     .venv_test/bin/python - << 'EOF'
     import oracledb, re
     # (see docs/local-databases.md for the full one-time setup script)

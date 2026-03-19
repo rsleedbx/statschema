@@ -32,7 +32,7 @@ Gitea running against the pg16 container (see docs/local-databases.md):
         -e GITEA__database__USER=gitea \\
         -e GITEA__database__PASSWD=gitea123 \\
         -e GITEA__security__INSTALL_LOCK=true \\
-        -e GITEA__security__SECRET_KEY=zerobus_test_secret_key_32chars0 \\
+        -e GITEA__security__SECRET_KEY=statschema_test_secret_key_32chars0 \\
         -e GITEA__server__ROOT_URL=http://localhost:3000/ \\
         docker.io/gitea/gitea:latest
     # Wait ~30s for schema creation, then create an admin user

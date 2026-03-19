@@ -526,7 +526,7 @@ make test-live-oracle
 
 All 20 tests should pass.  Typical runtime: ~10 seconds (after Oracle XE is up).
 
-The tests create and tear down a dedicated `ZEROBUS_TEST` schema — they do not
+The tests create and tear down a dedicated `STATSCHEMA_TEST` schema — they do not
 touch any existing data in the `system` or `XE` schemas.
 
 Environment variables (defaults match the oracle.yaml values):
@@ -537,7 +537,7 @@ ORACLE_PORT=1521         # default
 ORACLE_USER=system       # default
 ORACLE_PASS=oracle       # default — set via ORACLE_PASSWORD in oracle.yaml
 ORACLE_SERVICE=XE        # default
-ORACLE_SCHEMA=ZEROBUS_TEST  # default — created fresh on each test run
+ORACLE_SCHEMA=STATSCHEMA_TEST  # default — created fresh on each test run
 ```
 
 All are read from `.env` automatically if set there (see `.env.example`).
@@ -853,7 +853,7 @@ podman run -d --name gitea --network gitea_net -p 3000:3000 \
   -e GITEA__database__USER=gitea \
   -e GITEA__database__PASSWD=gitea123 \
   -e GITEA__security__INSTALL_LOCK=true \
-  -e GITEA__security__SECRET_KEY=zerobus_test_secret_key_32chars0 \
+  -e GITEA__security__SECRET_KEY=statschema_test_secret_key_32chars0 \
   -e GITEA__server__ROOT_URL=http://localhost:3000/ \
   docker.io/gitea/gitea:latest
 

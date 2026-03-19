@@ -1,7 +1,7 @@
 # statschema — implementation notes
 
 **Purpose**: Project structure, schema sources, and data-generation wiring for this repo.  
-For goals and scaling experiments that included ZeroBus, see [PLAN.md](PLAN.md) (historical) and the **[zerobusdemo](https://github.com/rsleedbx/zerobusdemo)** repo for live ZeroBus ingest code.
+For historical pipeline goals and scaling notes, see [PLAN.md](PLAN.md).
 
 ---
 
@@ -20,8 +20,6 @@ For goals and scaling experiments that included ZeroBus, see [PLAN.md](PLAN.md) 
 ├── databricks.yml
 └── README.md
 ```
-
-**ZeroBus** helpers (`zbhelper`), protobuf runtime compile, and ZeroBus FAQ previously under `docs/zerobus_faq/` now live in **zerobusdemo**.
 
 ---
 
@@ -75,8 +73,6 @@ See `src/statschema/dbldatagen_builder.py` for the full mapping and edge cases.
 - **Local PySpark**: see `docs/testing.md` and `requirements-test.txt` (`.venv_test`).
 - **Databricks Connect**: `requirements.txt` + `databricks-connect`; use for remote `SparkSession` in notebooks.
 
-Streaming protobuf rows into Unity Catalog via **ZeroBus** is documented and implemented in **zerobusdemo**, not here.
-
 ---
 
 ## References
@@ -84,4 +80,3 @@ Streaming protobuf rows into Unity Catalog via **ZeroBus** is documented and imp
 - [dbldatagen](https://github.com/databrickslabs/dbldatagen)
 - [sqlglot](https://github.com/tobymao/sqlglot)
 - [Databricks Connect](https://docs.databricks.com/en/dev-tools/databricks-connect.html)
-- [ZeroBus Ingest](https://docs.databricks.com/aws/en/ingestion/zerobus-ingest) (product docs; code in zerobusdemo)
