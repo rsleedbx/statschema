@@ -3,6 +3,22 @@
 > **The only library that transpiles both column statistics and DDL schema across database dialects.**
 > Collect from MySQL. Migrate to PostgreSQL. The optimizer works correctly from day one.
 
+### Overview
+
+```mermaid
+flowchart LR
+    A["① Stats Transpiler ⭐\ncollect_table_stats\ndump_stats · load_stats"]
+    B[("② Portable YAML\nschema.yaml · stats.yaml")]
+    C["③ DDL Transpiler\nparse_ddl · emit_ddl"]
+    D["④ Stats-Driven\nTabular Data\nbuild_dataframe"]
+
+    A <-->|"collect / inject\nany dialect"| B
+    C <-->|"parse / emit\nany dialect"| B
+    B -->|"schema + stats"| D
+```
+
+---
+
 ### Why "stats transpiler" is a new concept
 
 Every DDL transpiler stops at the schema. But a migrated database with correct schema
@@ -61,22 +77,6 @@ Three capabilities, each useful alone — more powerful together:
 | **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data | `build_dataframe_from_canonical` |
 
 **Supported dialects**: MySQL · PostgreSQL · SQL Server · Oracle · Databricks
-
----
-
-### Overview
-
-```mermaid
-flowchart LR
-    A["① Stats Transpiler ⭐\ncollect_table_stats\ndump_stats · load_stats"]
-    B[("② Portable YAML\nschema.yaml · stats.yaml")]
-    C["③ DDL Transpiler\nparse_ddl · emit_ddl"]
-    D["④ Stats-Driven\nTabular Data\nbuild_dataframe"]
-
-    A <-->|"collect / inject\nany dialect"| B
-    C <-->|"parse / emit\nany dialect"| B
-    B -->|"schema + stats"| D
-```
 
 ---
 
