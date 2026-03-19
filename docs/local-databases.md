@@ -13,10 +13,10 @@ on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 
 | Database | Method | Arch | Port | Why |
 |----------|--------|------|------|-----|
-| **PostgreSQL** | Podman (native ARM) | arm64 | 5432 | Official ARM64 image |
-| **MySQL** | Podman (native ARM) | arm64 | 3306 | Official ARM64 image |
+| **PostgreSQL** | Podman (native ARM) | arm64 | 5414 / 5416 | Official ARM64 image |
+| **MySQL** | Podman (native ARM) | arm64 | 3357 / 3384 | Official ARM64 image |
 | **SQL Server** | Lima VM + QEMU (x86_64) | x86_64 | **14330** | No ARM64 build exists — see note below |
-| **Oracle XE** | Lima VM + Podman + QEMU (x86_64) | x86_64 | 1521 | No ARM64 build exists |
+| **Oracle XE** | Lima VM + Podman + QEMU (x86_64) | x86_64 | **1521** | No ARM64 build exists |
 
 ### Why SQL Server cannot use Podman/containers on Apple Silicon
 
@@ -409,46 +409,98 @@ limactl shell sqlserver22 -- sudo tail -20 /var/opt/mssql/log/errorlog
 Oracle Database 21c Express Edition (XE) is free for development.  It has no
 ARM64 image, so it runs inside a Lima VM via Podman under QEMU x86_64 emulation.
 
+**Image used**: `docker.io/gvenzl/oracle-xe:21-slim` (Docker Hub, ~800 MB,
+no Oracle registry account or licence acceptance required).  This community
+image is maintained by [Gerald Venzl](https://github.com/gvenzl/oci-oracle-xe)
+and is widely used for development and testing.
+
 ### Prerequisites
 
 ```bash
 brew install lima
 ```
 
-You need a free Oracle account to pull from `container-registry.oracle.com`.
-Sign up at https://login.oracle.com and accept the Oracle Database licence in
-the Container Registry before the first pull.
+No Oracle account needed.  The image pulls from Docker Hub anonymously.
 
-### Start the VM
+Install the Python driver for automated tests:
+
+```bash
+.venv_test/bin/pip install oracledb
+# (already listed in requirements-test.txt after running make venv-test)
+```
+
+### First-time VM creation
 
 ```bash
 limactl start --name=oracle config/lima/oracle.yaml
 ```
 
-First boot takes **3–5 minutes** while Oracle initialises its data files.
-Monitor progress:
+Lima will:
+1. Download an Ubuntu 22.04 x86_64 cloud image (~600 MB, first run only)
+2. Boot the VM under QEMU (~1–2 min)
+3. Install Podman inside the VM
+4. Pull `gvenzl/oracle-xe:21-slim` from Docker Hub (~800 MB)
+5. Start the Oracle XE container
+
+> **Note**: the Ubuntu image download and Oracle XE pull happen in the
+> provisioning script (`cloud-init`).  First-time setup takes **5–10 minutes**
+> depending on your network speed.
+
+### Wait for Oracle XE to be ready
+
+Oracle XE initialises its data files on first start, which takes an additional
+**3–5 minutes** after the container starts.  Poll readiness:
 
 ```bash
-limactl shell oracle -- podman logs -f oracle-xe
+# Wait until DATABASE IS READY TO USE appears in the container logs
+until limactl shell oracle -- podman logs oracle-xe 2>/dev/null \
+      | grep -q "DATABASE IS READY TO USE"; do
+  echo "[$(date +%H:%M:%S)] waiting…"
+  sleep 15
+done
+echo "Oracle XE ready!"
+
+# Confirm port 1521 is open
+nc -z 127.0.0.1 1521 && echo "port 1521 open"
 ```
 
-Wait for:
+### Subsequent starts (after limactl stop/start)
+
+The container is configured to restart automatically via a systemd service.
+After a `limactl stop oracle` + `limactl start oracle`, the container starts
+automatically.  Verify it is up:
+
+```bash
+limactl start oracle
+# Wait ~30 s, then:
+nc -z -w5 127.0.0.1 1521 && echo "Oracle XE ready" || echo "still starting"
 ```
-DATABASE IS READY TO USE!
+
+If the container did not start automatically:
+
+```bash
+limactl shell oracle -- sudo podman start oracle-xe
+# then wait for DATABASE IS READY TO USE (as above)
 ```
 
 ### Connect from macOS
 
-Install the Oracle Instant Client:
+**Python (oracledb — no Instant Client required)**
+
+The `oracledb` driver runs in "thin" mode by default (pure Python, no Oracle
+Instant Client installation required):
+
+```python
+import oracledb
+conn = oracledb.connect(user="system", password="oracle",
+                        dsn="127.0.0.1:1521/XE")
+```
+
+**sqlplus (optional, needs Oracle Instant Client)**
 
 ```bash
 brew tap InstantClientTap/instantclient
 brew install instantclient-basic instantclient-sqlplus
-```
-
-Connect:
-
-```bash
 sqlplus system/oracle@//127.0.0.1:1521/XE
 ```
 
@@ -464,13 +516,80 @@ sqlplus system/oracle@//127.0.0.1:1521/XE
 
 JDBC URL: `jdbc:oracle:thin:@//127.0.0.1:1521/XE`
 
+### Run the automated live tests
+
+```bash
+make test-live-oracle
+# or directly:
+.venv_test/bin/pytest tests/test_live_oracle.py -v
+```
+
+All 20 tests should pass.  Typical runtime: ~10 seconds (after Oracle XE is up).
+
+The tests create and tear down a dedicated `ZEROBUS_TEST` schema — they do not
+touch any existing data in the `system` or `XE` schemas.
+
+Environment variables (defaults match the oracle.yaml values):
+
+```bash
+ORACLE_HOST=127.0.0.1   # default
+ORACLE_PORT=1521         # default
+ORACLE_USER=system       # default
+ORACLE_PASS=oracle       # default — set via ORACLE_PASSWORD in oracle.yaml
+ORACLE_SERVICE=XE        # default
+ORACLE_SCHEMA=ZEROBUS_TEST  # default — created fresh on each test run
+```
+
+All are read from `.env` automatically if set there (see `.env.example`).
+
 ### Common VM operations
 
 ```bash
 limactl stop  oracle
-limactl start oracle    # then: limactl shell oracle -- podman start oracle-xe
-limactl delete oracle
+limactl start oracle          # container restarts automatically
+limactl shell oracle          # open a shell inside the VM
+limactl delete oracle         # destroy completely (data is lost)
+
+# Recreate from scratch:
+limactl delete oracle && limactl start --name=oracle config/lima/oracle.yaml
 ```
+
+Check Oracle container status:
+
+```bash
+limactl shell oracle -- podman ps
+limactl shell oracle -- podman logs oracle-xe | tail -20
+```
+
+### Known type normalizations (Oracle)
+
+| Input type | Canonical type | Emitted as | Reason |
+|------------|----------------|------------|--------|
+| `NUMBER(p)` (no scale, p ≤ 9) | `integer` | `NUMBER(10)` | Widened to canonical integer bucket |
+| `NUMBER(p)` (no scale, 9 < p ≤ 18) | `long` | `NUMBER(19)` | Widened to canonical long bucket |
+| `CHAR(n)` | `string` | `VARCHAR2(n)` | Canonical model normalises CHAR → string |
+| `CLOB` | `string` (no length) | `CLOB` | No-length string round-trips as CLOB |
+| `NUMBER(1)` | `integer` | `NUMBER(10)` | Single-digit NUMBER widens to integer |
+| `BOOLEAN` (PL/SQL only) | `boolean` | `NUMBER(1)` | Oracle has no table-level BOOLEAN |
+
+### Troubleshooting
+
+**`ORA-01031: insufficient privileges` on IDENTITY columns**
+The test user needs `CREATE SEQUENCE` privilege.  The fixture grants it
+automatically; if running manually, grant it from `system`:
+```sql
+GRANT CREATE SEQUENCE TO myuser;
+```
+
+**Container not starting after VM restart**
+```bash
+limactl shell oracle -- sudo systemctl status container-oracle-xe
+# If failed: sudo systemctl restart container-oracle-xe
+```
+
+**Port 1521 not open after container is running**
+Oracle XE takes 3–5 min to initialise data files on first boot.
+Use the polling script in "Wait for Oracle XE to be ready" above.
 
 ---
 
@@ -551,8 +670,10 @@ limactl delete oracle      && limactl start --name=oracle      config/lima/oracl
 - [SQL Server on Linux docs](https://learn.microsoft.com/en-us/sql/linux/)
 - [SQL Server ARM64 feature request (open, no ETA)](https://github.com/microsoft/mssql-docker/issues/864)
 - [Rosetta 2 phase-out announcement](https://arstechnica.com/gadgets/2025/06/apple-details-the-end-of-intel-mac-support-and-a-phaseout-for-rosetta-2/)
-- [Oracle Container Registry](https://container-registry.oracle.com)
+- [gvenzl/oci-oracle-xe Docker Hub image](https://hub.docker.com/r/gvenzl/oracle-xe) — community Oracle XE image (no registry auth needed)
+- [Oracle Container Registry](https://container-registry.oracle.com) — official image (requires account + licence acceptance)
 - [Azure Data Studio](https://azure.microsoft.com/en-us/products/data-studio)
 - [`config/lima/sqlserver.yaml`](../config/lima/sqlserver.yaml) — Lima VM config for SQL Server
 - [`config/lima/oracle.yaml`](../config/lima/oracle.yaml) — Lima VM config for Oracle XE
+- [`tests/test_live_oracle.py`](../tests/test_live_oracle.py) — Oracle live test suite (20 tests)
 - [`docs/testing.md`](testing.md) — local Python test strategy

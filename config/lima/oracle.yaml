@@ -1,18 +1,24 @@
 # Lima VM – Oracle Database 21c XE (x86_64 Ubuntu 22.04, Podman)
 #
+# Image: docker.io/gvenzl/oracle-xe:21-slim  (no Oracle registry account needed)
+#
 # Usage:
-#   limactl start --name=oracle ~/github/zerobus/config/lima/oracle.yaml
+#   limactl start --name=oracle config/lima/oracle.yaml   # first time (~5-10 min)
 #   limactl stop  oracle
-#   limactl start oracle   # then: limactl shell oracle -- podman start oracle-xe
-#   limactl delete oracle
+#   limactl start oracle   # container restarts automatically via systemd
+#   limactl delete oracle  # destroy VM and data completely
+#
+# Wait for Oracle to be ready (first boot takes 3-5 min):
+#   until limactl shell oracle -- podman logs oracle-xe 2>/dev/null \
+#         | grep -q "DATABASE IS READY TO USE"; do sleep 15; done
 #
 # Connection (from macOS host):
-#   sqlplus system/oracle@//127.0.0.1:1521/XE
-#   JDBC: jdbc:oracle:thin:@//127.0.0.1:1521/XE
+#   Python:  oracledb.connect(user="system", password="oracle", dsn="127.0.0.1:1521/XE")
+#   sqlplus: sqlplus system/oracle@//127.0.0.1:1521/XE
+#   JDBC:    jdbc:oracle:thin:@//127.0.0.1:1521/XE
 #
 # NOTE: Oracle XE is free for development use.
-#   You must accept the Oracle Database licence at container-registry.oracle.com
-#   (free Oracle account required) before the first pull.
+#   This config uses gvenzl/oracle-xe from Docker Hub — no login required.
 #
 # Why Lima + QEMU instead of Podman directly on macOS?
 #   Oracle XE has no ARM64 image.  Running the x86_64 image via Rosetta 2
@@ -55,16 +61,18 @@ provision:
       # Allow the lima user to run Podman in rootless mode
       loginctl enable-linger lima 2>/dev/null || true
 
-      # Pull and start Oracle XE (x86_64 image — runs under QEMU emulation)
+      # Pull and start Oracle XE using gvenzl/oracle-xe from Docker Hub.
+      # No Oracle registry login required — publicly available image.
+      # gvenzl/oracle-xe:21-slim is Oracle 21c Express Edition (~800 MB, vs
+      # ~2.5 GB for the official Oracle registry image).
       # The --platform flag is explicit so Podman doesn't complain about arch mismatch.
       podman run -d \
         --name oracle-xe \
         --platform linux/amd64 \
         -p 1521:1521 \
         -p 5500:5500 \
-        -e ORACLE_PWD=oracle \
-        -e ORACLE_CHARACTERSET=AL32UTF8 \
-        container-registry.oracle.com/database/express:21.3.0-xe
+        -e ORACLE_PASSWORD=oracle \
+        docker.io/gvenzl/oracle-xe:21-slim
 
       # Enable auto-restart so oracle-xe survives limactl start/stop cycles
       podman generate systemd --new --name oracle-xe \
@@ -83,5 +91,3 @@ probes:
       Oracle XE is still initialising (first boot takes 3-5 min).
       Run: limactl shell oracle -- podman logs oracle-xe
       Wait for: DATABASE IS READY TO USE!
-    message: |
-      Oracle XE is up and listening on port 1521.

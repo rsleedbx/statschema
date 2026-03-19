@@ -41,6 +41,11 @@ Each question links to its own `.md` file so individual sections can be shared d
 
 16. [What are the key limitations to be aware of?](zerobus_faq/12-key-limitations.md)
 
+## Local development & testing
+
+17. [What is `gvenzl/oracle-xe` and why do we use it?](zerobus_faq/17-what-is-gvenzl-oracle-xe.md)
+18. [Why does Podman require a machine VM on macOS?](zerobus_faq/18-podman-machine-on-macos.md)
+
 ---
 
 *References: [Zerobus overview](https://docs.databricks.com/aws/en/ingestion/zerobus-overview) · [Zerobus connector usage](https://docs.databricks.com/aws/en/ingestion/zerobus-ingest) · [Zerobus limitations](https://docs.databricks.com/aws/en/ingestion/zerobus-limits) · [Zerobus system tables](https://docs.databricks.com/aws/en/admin/system-tables/zerobus-ingest)*

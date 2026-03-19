@@ -103,7 +103,7 @@ _SQLSERVER_DEFAULTS: dict[str, str] = {
 _ORACLE_DEFAULTS: dict[str, str] = {
     "integer":     "NUMBER(10)",
     "long":        "NUMBER(19)",
-    "string":      "VARCHAR2(255)",
+    "string":      "CLOB",           # no-length string → CLOB; VARCHAR2(n) used when length set
     "uuid":        "CHAR(36)",      # Oracle has no UUID type; store as fixed-length string
     "float":       "FLOAT",
     "double":      "FLOAT(53)",
@@ -277,13 +277,14 @@ def _normalize_default(default: str, col_type: str, dialect: str) -> str:
     - SQL Server BIT:      TRUE/true → 1,  FALSE/false → 0
     - MySQL TINYINT(1):    true/false are accepted by MySQL 8 but not universally,
                            normalize to 1/0 for safety across 5.7 and 8.x.
+    - Oracle NUMBER(1):    same as SQL Server/MySQL — use 1/0.
     - PostgreSQL BOOLEAN:  1/0 → TRUE/FALSE (PG rejects bare integers for BOOLEAN)
     - All others:          return default unchanged.
     """
     if col_type != "boolean":
         return default
     lower = default.strip().lower()
-    if dialect in ("sqlserver", "mysql"):
+    if dialect in ("sqlserver", "mysql", "oracle"):
         if lower in _BOOL_TRUE:
             return "1"
         if lower in _BOOL_FALSE:
@@ -314,9 +315,18 @@ def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
     name     = _quote(col.name, dialect)
     col_type = _build_col_type(col, dialect)
     auto     = _auto_increment_clause(col, dialect)
-    null     = _not_null_clause(col)
+    # Oracle IDENTITY columns are implicitly NOT NULL; adding NOT NULL after
+    # GENERATED ALWAYS AS IDENTITY causes ORA-00907.
+    if dialect == "oracle" and col.auto_increment:
+        null = ""
+    else:
+        null = _not_null_clause(col)
     default  = _default_clause(col, dialect)
     unique   = _unique_clause(col)
+    # Oracle requires: type [DEFAULT value] [NOT NULL] — DEFAULT must precede NOT NULL.
+    # All other dialects accept either order; keep the standard type+null+default for them.
+    if dialect == "oracle":
+        return f"  {name} {col_type}{auto}{default}{null}{unique}"
     return f"  {name} {col_type}{auto}{null}{default}{unique}"
 
 

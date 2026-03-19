@@ -45,6 +45,8 @@ pymssql>=2.2.0
 pymysql>=1.1.0
 # PostgreSQL 14 + 16: used by tests/test_live_pg.py
 psycopg2-binary>=2.9.0
+# Oracle XE: used by tests/test_live_oracle.py
+oracledb>=2.0.0
 # SQLAlchemy: used by tests/test_live_synth.py for pandas.to_sql bulk loads
 sqlalchemy>=2.0.0
 
