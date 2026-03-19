@@ -164,10 +164,8 @@ python3.11 -m venv .venv_test
 | File | Tests | Needs Spark | Needs live DB |
 |------|-------|-------------|---------------|
 | `tests/test_ddl_roundtrip.py` | ~185 | No | No |
-| `tests/test_statschema.py` | ~124 | 3 tests | No |
+| `tests/test_schema_parser.py` | ~124 | 3 tests | No |
 | `tests/test_v1_bridge.py` | ~50 | No | No |
-| `tests/test_protobuf_converter.py` | ~40 | No | No |
-| `tests/test_zerobus_ingest.py` | ~60 | No | No (2 integration tests skipped) |
 | `tests/test_live_sqlserver.py` | 14 | No | **Yes** – SQL Server via Lima VM |
 | `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
 | `tests/test_live_pg.py` | ~18 | No | **Yes** – PostgreSQL 14 + 16 via Podman |
@@ -180,9 +178,9 @@ python3.11 -m venv .venv_test
 
 | Test | Reason |
 |------|--------|
-| `TestIngestIntegration::test_phase1_ingest_snapshot` | Requires live Databricks + ZeroBus endpoint |
-| `TestIngestIntegration::test_phase1_ingest_incremental` | Same |
 | Any test calling `pytest.importorskip("databricks.connect")` from `.venv_test` | `databricks-connect` intentionally absent |
+
+**ZeroBus ingest** tests live in the **[zerobusdemo](https://github.com/rsleedbx/zerobusdemo)** repository.
 
 ### Live-DB tests: skipped automatically when DB not configured
 
@@ -332,7 +330,7 @@ make test-live-all SQLSERVER_PASS=<password>
 
 ## How `_create_spark_session` works
 
-`tests/test_statschema.py` contains a helper `_create_spark_session(app_name)`
+`tests/test_schema_parser.py` contains a helper `_create_spark_session(app_name)`
 that is called by every Spark-dependent test.  It tries two strategies in order:
 
 ```

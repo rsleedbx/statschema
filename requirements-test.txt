@@ -7,7 +7,7 @@
 #
 # This file is used by:
 #   make venv-test          → one-time setup
-#   make test               → full suite (2039 tests, 3 Spark data-gen tests)
+#   make test               → full suite (see docs/testing.md for file list)
 #   .venv_test/bin/pytest   → direct pytest invocation
 #
 # Java requirement
@@ -21,11 +21,6 @@ python-dotenv>=1.0
 dbldatagen>=0.4.0
 pyparsing
 jmespath
-databricks-zerobus-ingest-sdk>=0.3.0
-databricks-sdk>=0.20.0
-protobuf>=4.25.0,<7.0
-grpcio-tools>=1.60.0,<2.0
-
 # ── DDL parser ───────────────────────────────────────────────────────────────
 sqlglot>=20.0.0
 

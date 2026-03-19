@@ -1,6 +1,10 @@
 # Zerobus Synthetic Data Pipeline – Plan
 
-**Purpose**: Goals, requirements, scaling dimensions, and technology. For build steps see [implementation.md](implementation.md); for test cases see [testing.md](testing.md).
+> **Scope change (2026):** This repository is now **statschema** (DDL/stats transpiler, canonical YAML, synthetic data).  
+> **ZeroBus ingest**, protobuf streaming, and the Zerobus FAQ moved to **[zerobusdemo](https://github.com/rsleedbx/zerobusdemo)**.  
+> The sections below remain as **historical context** for the original pipeline design.
+
+**Purpose**: Goals, requirements, scaling dimensions, and technology. For current build steps see [implementation.md](implementation.md); for test cases see [testing.md](testing.md).
 
 ---
 

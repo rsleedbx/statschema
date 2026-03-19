@@ -17,6 +17,8 @@ flowchart LR
     B -->|"schema + stats"| D
 ```
 
+**Related:** Databricks **ZeroBus Ingest** (protobuf streaming to Delta), workspace helpers, and FAQ live in **[zerobusdemo](https://github.com/rsleedbx/zerobusdemo)** — not in this repo.
+
 ---
 
 ### Why "stats transpiler" is a new concept
@@ -905,7 +907,7 @@ CanonicalTableSchema + CanonicalForeignKey
                     │
                     ├──  df.write.saveAsTable("catalog.schema.table")  (Databricks)
                     ├──  pandas .to_sql(engine)                        (any DB via SQLAlchemy)
-                    └──  ZeroBus ingest SDK                            (streaming ingest)
+                    └──  write to DB / Delta / warehouse                (your choice)
 ```
 
 ---
