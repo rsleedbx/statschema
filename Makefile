@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-sqlserver test-live-mysql test-live-pg lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -39,11 +39,39 @@ test-fast:
 test-spark:
 	$(PYTEST_TEST) tests/ -v -k "generate_data"
 
-## Run live SQL Server tests (requires: limactl start sqlserver22, SQLSERVER_PASS set)
-## Usage: make test-live-sqlserver SQLSERVER_PASS=<password> SQLSERVER_PORT=14330
+## Run live SQL Server tests (requires: limactl start sqlserver22)
+## Credentials are loaded automatically from .env (copy .env.example → .env and fill in SQLSERVER_PASS).
+## Override via env var: make test-live-sqlserver SQLSERVER_PASS=<password>
 test-live-sqlserver:
 	SQLSERVER_PASS=$(SQLSERVER_PASS) SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
 	$(PYTEST_TEST) tests/test_live_sqlserver.py -v
+
+## Run ALL live DB round-trip tests (MySQL 5.7+8, PG 14+16, SQL Server 22 must be up)
+## Credentials are loaded from .env automatically.  Override with env vars if needed.
+test-live-all:
+	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) \
+	MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
+	PG14_PORT=$(or $(PG14_PORT),5414) \
+	PG16_PORT=$(or $(PG16_PORT),5416) \
+	SQLSERVER_PASS=$(SQLSERVER_PASS) \
+	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	$(PYTEST_TEST) \
+	  tests/test_live_roundtrip.py \
+	  tests/test_live_mysql.py \
+	  tests/test_live_pg.py \
+	  tests/test_live_sqlserver.py \
+	  -v
+
+## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
+## Requires: MySQL 5.7+8, PG 14+16, SQL Server 22.  Credentials from .env.
+test-live-roundtrip:
+	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) \
+	MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
+	PG14_PORT=$(or $(PG14_PORT),5414) \
+	PG16_PORT=$(or $(PG16_PORT),5416) \
+	SQLSERVER_PASS=$(SQLSERVER_PASS) \
+	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	$(PYTEST_TEST) tests/test_live_roundtrip.py -v
 
 ## Run live PostgreSQL tests (PG 14 and 16 containers must be running; see docs/local-databases.md)
 ## Usage: make test-live-pg
@@ -58,6 +86,15 @@ test-live-pg:
 test-live-mysql:
 	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
 	$(PYTEST_TEST) tests/test_live_mysql.py -v
+
+## Run live synthetic data pipeline tests (MySQL 8, PG 16, SQL Server 22; Spark + dbldatagen required)
+## Credentials are loaded from .env automatically.
+test-live-synth:
+	MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
+	PG16_PORT=$(or $(PG16_PORT),5416) \
+	SQLSERVER_PASS=$(SQLSERVER_PASS) \
+	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	$(PYTEST_TEST) tests/test_live_synth.py -v
 
 ## Run a single test file
 # Usage: make test-file FILE=tests/test_ddl_roundtrip.py

@@ -265,9 +265,41 @@ def _not_null_clause(col: CanonicalColumn) -> str:
     return ""
 
 
-def _default_clause(col: CanonicalColumn) -> str:
+_BOOL_TRUE  = {"true",  "1", "yes"}
+_BOOL_FALSE = {"false", "0", "no"}
+
+
+def _normalize_default(default: str, col_type: str, dialect: str) -> str:
+    """
+    Translate boolean literals and other cross-dialect default expressions
+    to the form the target dialect accepts.
+
+    - SQL Server BIT:      TRUE/true → 1,  FALSE/false → 0
+    - MySQL TINYINT(1):    true/false are accepted by MySQL 8 but not universally,
+                           normalize to 1/0 for safety across 5.7 and 8.x.
+    - PostgreSQL BOOLEAN:  1/0 → TRUE/FALSE (PG rejects bare integers for BOOLEAN)
+    - All others:          return default unchanged.
+    """
+    if col_type != "boolean":
+        return default
+    lower = default.strip().lower()
+    if dialect in ("sqlserver", "mysql"):
+        if lower in _BOOL_TRUE:
+            return "1"
+        if lower in _BOOL_FALSE:
+            return "0"
+    elif dialect == "postgres":
+        if lower in _BOOL_TRUE or lower == "1":
+            return "TRUE"
+        if lower in _BOOL_FALSE or lower == "0":
+            return "FALSE"
+    return default
+
+
+def _default_clause(col: CanonicalColumn, dialect: str = "") -> str:
     if col.default is not None:
-        return f" DEFAULT {col.default}"
+        val = _normalize_default(col.default, col.type, dialect) if dialect else col.default
+        return f" DEFAULT {val}"
     return ""
 
 
@@ -283,7 +315,7 @@ def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
     col_type = _build_col_type(col, dialect)
     auto     = _auto_increment_clause(col, dialect)
     null     = _not_null_clause(col)
-    default  = _default_clause(col)
+    default  = _default_clause(col, dialect)
     unique   = _unique_clause(col)
     return f"  {name} {col_type}{auto}{null}{default}{unique}"
 

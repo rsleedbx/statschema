@@ -99,6 +99,7 @@ from .stats_model import (
     TableStats,
 )
 from .override_model import ColumnOverride, OverrideSpec, TableOverride
+from .db_stats_collector import collect_table_stats
 from .stats_io import (
     apply_overrides,
     apply_overrides_all,
@@ -152,6 +153,7 @@ __all__ = [
     "OverrideSpec",
     "TableOverride",
     # Statistics I/O + override application
+    "collect_table_stats",
     "load_stats",
     "dump_stats",
     "make_default_stats",
