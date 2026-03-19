@@ -9,8 +9,12 @@ as well as human developers.
 ## TL;DR – just run the tests
 
 ```bash
-# One-time setup (Python 3.11 + local Spark venv)
+# 1. One-time setup (Python 3.11 + local Spark venv)
 make venv-test
+
+# 2. Copy the credential template and fill in your values
+cp .env.example .env
+# edit .env — at minimum set SQLSERVER_PASS (retrieve from the Lima VM log)
 
 # Run everything (pure-Python + Spark + live-DB tests if configured)
 make test
@@ -21,12 +25,13 @@ make test-fast
 # Only the Spark data-generation tests
 make test-spark
 
-# Only the live SQL Server tests (requires VM running + SQLSERVER_PASS set)
+# Only the live SQL Server tests (requires VM running; credentials from .env)
 make test-live-sqlserver
 ```
 
 Current baseline: **2053 passed, 3 skipped** (the 3 skips require live Databricks
 credentials and are expected).  Live-DB tests add 14 more when SQL Server is running.
+Live synthetic data tests (`test_live_synth.py`) add 17 more when all live databases and Spark are available.
 
 ---
 
@@ -52,6 +57,29 @@ SparkSession.  Running from `.venv_test` (standard `pyspark`, no
 ---
 
 ## One-time machine setup
+
+### 0. Credentials — `.env` file
+
+All passwords and endpoints are stored in a `.env` file at the **repo root** that is
+never committed to git.  `conftest.py` loads it automatically before any test runs
+via `python-dotenv`, so you don't need to export variables in every shell session.
+
+```bash
+cp .env.example .env
+# Open .env and fill in:
+#   SQLSERVER_PASS   – retrieve from the Lima VM cloud-init log (see below)
+#   CLIENT_SECRET    – your Databricks service principal secret
+# All other values have working defaults for the Podman containers in
+# docs/local-databases.md and can be left as-is.
+```
+
+The SQL Server password is generated randomly when the Lima VM first boots:
+
+```bash
+limactl shell sqlserver22 -- \
+  sudo grep 'SQL Server sa password' /var/log/cloud-init-output.log \
+  | tail -1 | awk '{print $NF}'
+```
 
 ### 1. Java (required for local PySpark)
 
@@ -202,6 +230,73 @@ documentation it may use `1433` instead — set `SQLSERVER_PORT` accordingly.
 
 ---
 
+## Comprehensive live round-trip tests (`test_live_roundtrip.py`)
+
+`tests/test_live_roundtrip.py` is the highest-confidence integration test.  It
+reuses every table schema from the in-memory `test_ddl_roundtrip.py` Phase 1
+(structured type × constraint cases) and Phase 2 (60 random tables per dialect),
+then executes them on real databases.
+
+**Test matrix:**
+
+| Dialect | Live servers | Cases per server |
+|---------|-------------|-----------------|
+| MySQL | mysql57 (5.7 x86 emulation) + mysql8 (8.4 ARM64) | 29 + 60 = 89 |
+| PostgreSQL | pg14 + pg16 | 24 + 60 = 84 |
+| SQL Server | sqlserver22 (2022, QEMU) | 22 + 60 = 82 |
+
+**What each case verifies (double round-trip):**
+
+```
+canonical table
+      │
+      ▼
+emit_ddl(dialect)  → ddl1
+      │
+      ▼ execute on live DB  ← proves DDL is valid SQL
+      │
+parse_ddl(ddl1, dialect)  → canonical2
+      │
+      ▼
+emit_ddl(dialect)  → ddl2
+      │ assert ddl1 == ddl2  ← in-memory idempotency
+      │
+      ▼ execute ddl2 on live DB  ← proves round-tripped DDL is also valid
+      │
+parse_ddl(ddl2, dialect)  → canonical3
+      │
+      ▼
+emit_ddl(dialect)  → ddl3
+      │ assert ddl2 == ddl3  ← second round-trip stability
+```
+
+**Cross-dialect pipeline** (`TestCrossDialectLivePipeline`):
+
+Three representative real-world tables (one from each dialect source) travel
+through the full `many DDL → one canonical YAML → many DDL` path:
+
+```
+MySQL DDL ──parse──► canonical YAML ──emit──► MySQL DDL   → run on mysql57+8
+                                   ──emit──► Postgres DDL → run on pg14+16
+                                   ──emit──► SS DDL       → run on sqlserver22
+```
+
+Each target DDL is executed on its live server and parsed back.  The test then
+asserts that column names and count are identical across all three dialect
+representations.
+
+**Run it:**
+
+```bash
+# Quick single-target check (uses env var defaults)
+make test-live-roundtrip SQLSERVER_PASS=<password>
+
+# Everything together (round-trip + type-specific + cross-dialect)
+make test-live-all SQLSERVER_PASS=<password>
+```
+
+---
+
 ## How `_create_spark_session` works
 
 `tests/test_schema_parser.py` contains a helper `_create_spark_session(app_name)`
@@ -254,12 +349,12 @@ In Cursor's agent sandbox, network syscalls are blocked, causing:
 `java.net.SocketException: Operation not permitted`.
 
 **Workaround**: run pytest with `required_permissions: ["all"]`.
-This affects only the 3 `generate_data` tests and the 14 live-DB tests;
+This affects only the 3 `generate_data` tests and all live-DB tests;
 all other ~2036 tests run fine without network access.
 
 ### Live-DB tests also need sandbox bypass
 
-`tests/test_live_sqlserver.py` opens a TCP connection to `127.0.0.1:14330`.
+All live-DB tests open TCP connections to `127.0.0.1`.
 The same `required_permissions: ["all"]` bypass is needed.
 
 ### Lima VM startup is slow
@@ -305,14 +400,78 @@ The live SQL Server tests confirmed the following are intentional:
 
 ## Bugs found by live-DB testing (fixed)
 
-Running `test_live_sqlserver.py` against a real SQL Server 2022 instance
-uncovered three bugs that the fixture-based round-trip tests had not caught:
+### From `test_live_sqlserver.py` (SQL Server 2022)
 
 | Bug | Symptom | Root cause | Fix |
 |-----|---------|------------|-----|
-| `"tsql"` dialect alias not recognised | `DATETIME2`, `MONEY`, `UNIQUEIDENTIFIER` failed to parse when `dialect="tsql"` was passed | `_SG_DIALECT` only mapped `"sqlserver"` → `"tsql"`, not the reverse | Added `"tsql"`, `"mssql"`, `"postgresql"` as accepted aliases |
-| `NULL` keyword parsed as `NOT NULL` | `DECIMAL(18,4) NULL` produced `not_null=True` | sqlglot 30 uses `NotNullColumnConstraint(allow_null=True)` for `NULL` and `allow_null=False` for `NOT NULL`; parser only checked for presence | Changed to read `_nn.args.get("allow_null")` |
-| `UNIQUEIDENTIFIER` lost to `NVARCHAR(MAX)` | Round-tripped `UNIQUEIDENTIFIER` became `NVARCHAR(MAX)` | `DT.UUID` was mapped to canonical `"string"` | New canonical type `"uuid"` with per-dialect emission: `UNIQUEIDENTIFIER` (SS), `UUID` (PG), `CHAR(36)` (MySQL/Oracle) |
+| `"tsql"` dialect alias not recognised | `DATETIME2`, `MONEY`, `UNIQUEIDENTIFIER` failed to parse when `dialect="tsql"` | `_SG_DIALECT` only mapped `"sqlserver"` → `"tsql"`, not the reverse | Added `"tsql"`, `"mssql"`, `"postgresql"` as accepted aliases |
+| `NULL` keyword parsed as `NOT NULL` | `DECIMAL(18,4) NULL` produced `not_null=True` | sqlglot 30 uses `NotNullColumnConstraint(allow_null=True)` for explicit `NULL` | Changed to read `_nn.args.get("allow_null")` |
+| `UNIQUEIDENTIFIER` lost to `NVARCHAR(MAX)` | Round-tripped `UNIQUEIDENTIFIER` became `NVARCHAR(MAX)` | `DT.UUID` was mapped to canonical `"string"` | New canonical type `"uuid"` with per-dialect emission rules |
+
+### From `test_live_roundtrip.py` (cross-dialect pipeline, MySQL 5.7+8.x, PG 14+16, SQL Server 22)
+
+| Bug | Symptom | Root cause | Fix |
+|-----|---------|------------|-----|
+| `DEFAULT TRUE` rejected by SQL Server | PG `BOOLEAN NOT NULL DEFAULT TRUE` → SS `BIT NOT NULL DEFAULT true` caused `OperationalError: name "true" not permitted` | `_default_clause` emitted canonical default verbatim without dialect normalisation | Added `_normalize_default()` in `ddl_emitter.py`: maps `true/false` → `1/0` for SQL Server and MySQL; `1/0` → `TRUE/FALSE` for PostgreSQL |
+
+### From `test_live_synth.py` (live synthetic data pipeline)
+
+| Bug | Symptom | Root cause | Fix |
+|-----|---------|------------|-----|
+| High-cardinality MCV collapse | After stats-driven generation, `customer_id` had only 10 distinct values instead of ~1000 | `dbldatagen_builder.py` applied top-10 MCVs to ALL columns unconditionally when `col_stats.most_common_values` was non-empty — even for random integers where the MCVs cover only 1% of the data | Added `mcv_meaningful` guard: MCVs are only applied when they cover >50% of the data OR `n_distinct ≤ 20` |
+| Boolean MCV type mismatch | Stats-driven generation of boolean `is_paid` raised `DATATYPE_MISMATCH.DATA_DIFF_TYPES` | MCVs from the live DB were string `"0"/"1"` or `"t"/"f"`, but the column uses `BooleanType()` — mixing types in the Spark CASE expression caused a type error | Boolean columns are now excluded from MCV-based generation; they use `random=True` natively |
+| `str - str` in generation | `TypeError: unsupported operand type(s) for -: 'str' and 'str'` when using collected stats for timestamp columns | `min_value`/`max_value` from `collect_table_stats` are stored as strings; passing them verbatim as `minValue`/`maxValue` to dbldatagen causes arithmetic errors | Added `_cast_stat_value()` in `dbldatagen_builder.py`: casts stat strings to `int`/`float` for numeric types; passes strings as-is for timestamps; skips min/max for string/binary columns |
+
+---
+
+## Comprehensive live synthetic data tests (`test_live_synth.py`)
+
+This test file validates the full DDL → Spark → DB → stats → Spark loop on real databases.
+
+### Pipeline (6 tests per database)
+
+```
+1. emit DDL → CREATE TABLE on live DB (table_v1)
+2. build_dataframe_from_canonical(default stats, 1000 rows)
+   → toPandas() → pandas.to_sql() → loaded into table_v1
+3. collect_table_stats(conn, "table_v1") → real ColumnStats
+   (null_fraction, n_distinct, min/max, top-10 MCVs, histogram bounds)
+4. build_dataframe_from_canonical(REAL stats, 1000 rows)  ← stats-driven
+   → loaded into table_v2
+5. collect stats from table_v2
+6. compare table_v1 vs table_v2 stats (null fractions ≤ ±0.15, distinct ratios ≤ ×5)
+```
+
+### Databases covered
+
+| Database | Version | Port |
+|----------|---------|------|
+| MySQL    | 8.4     | 3384 |
+| PostgreSQL | 16    | 5416 |
+| SQL Server | 2022  | 14330 (Lima QEMU) |
+
+### Test table schema
+
+A portable `synth_orders` table with diverse types:
+`INT (PK, auto-increment)`, `INT (FK-like)`, `VARCHAR(20)`, `DECIMAL(10,2)`,
+`FLOAT`, `BOOLEAN/BIT`, `DATETIME/TIMESTAMP`.
+
+### Key design decisions
+
+- **`if_exists="append"`**: tables are created with the DDL-emitted schema first; pandas uses `append` to preserve column types.
+- **`spark.sql.ansi.enabled=false`**: allows DECIMAL overflow to produce NULL (instead of aborting the job) when a generated value slightly exceeds the column precision.
+- **`PYSPARK_PYTHON` pinned**: forces PySpark workers to use the same Python interpreter as the driver (avoids `PYTHON_VERSION_MISMATCH` if a different system Python is found on `$PATH`).
+- **Module-level `_PIPELINE_STATE` dict**: PG and SS connection objects are C-extension types (`psycopg2`, `pymssql`) that don't allow arbitrary attribute assignment, so inter-test state is passed via a plain Python dict.
+
+### How to run
+
+```bash
+# MySQL 8 + PG 16 + SQL Server 22 must be running (see docs/local-databases.md)
+make test-live-synth SQLSERVER_PASS=<password>
+
+# or directly
+SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
+```
 
 ---
 
@@ -332,6 +491,8 @@ uncovered three bugs that the fixture-based round-trip tests had not caught:
 - [`Makefile`](../Makefile) – all dev shortcuts
 - [`conftest.py`](../conftest.py) – auto JAVA_HOME detection
 - [`tests/test_live_sqlserver.py`](../tests/test_live_sqlserver.py) – live SQL Server test suite
+- [`tests/test_live_synth.py`](../tests/test_live_synth.py) – live synthetic data pipeline tests
+- [`src/schema_parser/db_stats_collector.py`](../src/schema_parser/db_stats_collector.py) – collect `TableStats` from a live database
 - [`docs/local-databases.md`](local-databases.md) – how to run real databases locally
 - [`docs/test_plan_ddl_roundtrip.md`](test_plan_ddl_roundtrip.md) – DDL round-trip test plan
 - [`docs/synthetic_data_shortcomings.md`](synthetic_data_shortcomings.md) – known synthetic data limitations

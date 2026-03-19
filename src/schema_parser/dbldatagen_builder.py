@@ -161,6 +161,35 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Stat-value type casting
+# ---------------------------------------------------------------------------
+
+def _cast_stat_value(value: str, canonical_type: str):
+    """
+    Cast a stat string value (from ColumnStats.min_value / max_value) to the
+    Python type expected by dbldatagen for the given canonical column type.
+
+    Returns None if the value cannot be cast (caller skips the kwarg).
+    """
+    if value is None:
+        return None
+    try:
+        if canonical_type in ("integer",):
+            return int(float(value))
+        if canonical_type in ("long",):
+            return int(float(value))
+        if canonical_type in ("float", "double", "decimal"):
+            return float(value)
+        if canonical_type in ("timestamp", "timestamptz", "date"):
+            # Keep as string — dbldatagen accepts ISO date/datetime strings for these.
+            return str(value)
+        # For string, binary, uuid, time, etc.: skip min/max (not meaningful for generation)
+        return None
+    except (ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Core column-spec builder
 # ---------------------------------------------------------------------------
 
@@ -220,18 +249,33 @@ def _spark_type_and_options(
 
     # ── 2. MCV weights from ColumnStats ──────────────────────────────────
     # Shortcoming #2 (hot-spot) and #6 (enum domain)
+    # MCVs are applied only when they genuinely dominate the column distribution:
+    #   - Explicit request via GenerationRule.use_mcv_weights, OR
+    #   - Auto mode: MCVs cover >50% of rows OR column is low-cardinality (≤20 distinct).
+    # Applying sparse MCVs from high-cardinality columns (e.g., 10 random integers out of
+    # 1000 rows) would collapse the generated cardinality to those 10 values.
+    # Boolean columns use random=True natively; MCV strings ("true"/"false"/"0"/"1")
+    # cause type-mismatch errors with BooleanType so they are excluded.
     if (col_stats is not None
             and col_stats.most_common_values
+            and canonical_type != "boolean"
             and (g is None or g.use_mcv_weights)):
-        mcv_values  = [m.value  for m in col_stats.most_common_values]
-        mcv_weights = [m.frequency for m in col_stats.most_common_values]
-        # Only override values/weights if not already explicitly set
-        if g is None or g.values is None:
-            opts["values"]  = mcv_values
-            opts["weights"] = mcv_weights
-            opts.pop("minValue",  None)
-            opts.pop("maxValue",  None)
-            opts["random"] = True
+        total_mcv_freq = sum(m.frequency for m in col_stats.most_common_values)
+        nd = col_stats.n_distinct if col_stats.n_distinct > 0 else float("inf")
+        mcv_meaningful = (
+            (g is not None and g.use_mcv_weights)  # explicit request → always apply
+            or total_mcv_freq > 0.50                # MCVs dominate the distribution
+            or nd <= 20                             # genuinely low-cardinality column
+        )
+        if mcv_meaningful:
+            mcv_values  = [m.value  for m in col_stats.most_common_values]
+            mcv_weights = [m.frequency for m in col_stats.most_common_values]
+            if g is None or g.values is None:
+                opts["values"]  = mcv_values
+                opts["weights"] = mcv_weights
+                opts.pop("minValue",  None)
+                opts.pop("maxValue",  None)
+                opts["random"] = True
 
     # ── 3. NULL injection from ColumnStats ────────────────────────────────
     # Shortcoming #3 (null rates)
@@ -241,11 +285,17 @@ def _spark_type_and_options(
 
     # ── 4. min/max from ColumnStats (when no explicit override) ──────────
     # Shortcoming #4 (boundary values)
-    if col_stats is not None and g is None:
-        if col_stats.min_value is not None and "minValue" not in opts and "values" not in opts:
-            opts["minValue"] = col_stats.min_value
-        if col_stats.max_value is not None and "maxValue" not in opts and "values" not in opts:
-            opts["maxValue"] = col_stats.max_value
+    # min_value / max_value from the stats collector are strings; cast them to the
+    # appropriate Python type so dbldatagen doesn't attempt str - str arithmetic.
+    if col_stats is not None and g is None and "values" not in opts:
+        if col_stats.min_value is not None and "minValue" not in opts:
+            casted = _cast_stat_value(col_stats.min_value, canonical_type)
+            if casted is not None:
+                opts["minValue"] = casted
+        if col_stats.max_value is not None and "maxValue" not in opts:
+            casted = _cast_stat_value(col_stats.max_value, canonical_type)
+            if casted is not None:
+                opts["maxValue"] = casted
 
     # ── 5. format_pattern → template ─────────────────────────────────────
     # Shortcoming #5 (realistic string patterns) and #15 (UUID)
