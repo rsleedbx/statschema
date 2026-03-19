@@ -67,8 +67,11 @@ def _parse_ydata_field(name: str, spec: dict[str, Any]) -> CanonicalColumn:
     return CanonicalColumn(
         name=name,
         type=canonical_type,
-        description=description,
+        length=max_length,   # carry YData max_length as DDL length hint
+        not_null=primary_key,
         primary_key=primary_key,
+        unique=unique,
+        description=description,
         constraints=constraints if constraints else None,
         generation=generation,
         references=references,

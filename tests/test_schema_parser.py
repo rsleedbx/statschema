@@ -676,7 +676,7 @@ CREATE TABLE phase1_table (
         assert tables[0].columns[0].type == "integer"
         assert tables[0].columns[0].primary_key is True
         assert tables[0].columns[1].type == "string"
-        assert tables[0].columns[2].type == "double"
+        assert tables[0].columns[2].type == "decimal"  # NUMERIC(10,2) is fixed-point decimal
 
     def test_load_schema_sqlserver_ddl_from_dict(self):
         ddl = """
@@ -866,7 +866,7 @@ def _create_spark_session(app_name: str):
     except Exception:
         pass
 
-    # Fall back to local PySpark (e.g. .venv_test with pyspark, no databricks-connect)
+    # Fall back to local PySpark (e.g. .venv_test with pyspark>=3.5, no databricks-connect)
     pyspark = pytest.importorskip("pyspark")
     SparkSession = pyspark.sql.SparkSession
     saved = {}
@@ -877,6 +877,9 @@ def _create_spark_session(app_name: str):
         return (
             SparkSession.builder.master("local[1]")
             .appName(app_name)
+            # Avoid hostname-resolution failures in sandboxed/container environments
+            .config("spark.driver.host", "localhost")
+            .config("spark.driver.bindAddress", "127.0.0.1")
             .getOrCreate()
         )
     except RuntimeError:
@@ -1149,7 +1152,7 @@ class TestDDLParser:
         assert tables[0].name == "orders"
         assert tables[0].columns[0].name == "id"
         assert tables[0].columns[0].primary_key is True
-        assert tables[0].columns[2].type == "double"
+        assert tables[0].columns[2].type == "decimal"  # DECIMAL(10,2) is fixed-point
 
     def test_parse_ddl_auto_detect_mysql(self):
         sql = "CREATE TABLE `t` ( `id` int(11) NOT NULL, PRIMARY KEY (`id`) );"
@@ -1294,3 +1297,282 @@ class TestDbldatagenBuilder:
         assert specs[0][2]
         assert specs[1][2].get("random") is True
         assert specs[2][2]
+
+
+# ============================================================================
+# Tests for new synthetic-data shortcoming remediation fields
+# ============================================================================
+
+class TestGenerationRuleEnhancements:
+    """Verify new GenerationRule fields added to address synthetic data shortcomings."""
+
+    def test_default_values(self):
+        g = GenerationRule()
+        assert g.distribution == "auto"
+        assert g.distribution_params == {}
+        assert g.format_pattern is None
+        assert g.inject_boundary_values is True
+        assert g.inject_nulls_from_stats is True
+        assert g.use_mcv_weights is True
+        assert g.inject_rare_events is False
+
+    def test_distribution_explicit(self):
+        g = GenerationRule(distribution="zipf", distribution_params={"a": 1.2})
+        assert g.distribution == "zipf"
+        assert g.distribution_params["a"] == 1.2
+
+    def test_format_pattern_named(self):
+        g = GenerationRule(format_pattern="email")
+        assert g.format_pattern == "email"
+
+    def test_format_pattern_regex(self):
+        g = GenerationRule(format_pattern=r"[A-Z]{2}\d{6}")
+        assert g.format_pattern == r"[A-Z]{2}\d{6}"
+
+    def test_injection_flags_override(self):
+        g = GenerationRule(
+            inject_boundary_values=False,
+            inject_nulls_from_stats=False,
+            use_mcv_weights=False,
+            inject_rare_events=True,
+        )
+        assert g.inject_boundary_values is False
+        assert g.inject_nulls_from_stats is False
+        assert g.use_mcv_weights is False
+        assert g.inject_rare_events is True
+
+    def test_all_named_format_patterns_are_strings(self):
+        named = [
+            "email", "phone_us", "phone_intl", "uuid", "ip_v4", "ip_v6",
+            "url", "postal_us", "postal_uk", "ssn", "credit_card", "iban",
+            "name_first", "name_last", "company", "address", "city",
+            "country_iso2", "currency_iso",
+        ]
+        for p in named:
+            g = GenerationRule(format_pattern=p)
+            assert g.format_pattern == p
+
+    def test_distribution_names(self):
+        for dist in ("auto", "uniform", "normal", "zipf", "exponential", "constant", "sequential"):
+            g = GenerationRule(distribution=dist)
+            assert g.distribution == dist
+
+    def test_extra_still_works(self):
+        g = GenerationRule(extra={"spark_option": "foo"})
+        assert g.extra["spark_option"] == "foo"
+
+
+class TestColumnStatsEnhancements:
+    """Verify skewness/kurtosis added to ColumnStats for distribution shape."""
+
+    def test_defaults_none(self):
+        from src.schema_parser.stats_model import ColumnStats
+        cs = ColumnStats(name="age")
+        assert cs.skewness is None
+        assert cs.kurtosis is None
+
+    def test_right_skewed(self):
+        from src.schema_parser.stats_model import ColumnStats
+        cs = ColumnStats(name="salary", skewness=2.5, kurtosis=6.0)
+        assert cs.skewness == 2.5
+        assert cs.kurtosis == 6.0
+
+    def test_symmetric_normal(self):
+        from src.schema_parser.stats_model import ColumnStats
+        cs = ColumnStats(name="height", skewness=0.0, kurtosis=0.0)
+        assert cs.skewness == 0.0
+        assert cs.kurtosis == 0.0
+
+    def test_yaml_roundtrip_with_skewness(self):
+        """skewness and kurtosis survive a to_dict / from_dict round-trip."""
+        import yaml
+        from src.schema_parser.stats_model import ColumnStats, DatabaseStats, TableStats
+        cs = ColumnStats(
+            name="price",
+            null_fraction=0.02,
+            n_distinct=500,
+            min_value="0.01",
+            max_value="9999.99",
+            skewness=1.8,
+            kurtosis=4.2,
+        )
+        ts = TableStats(name="products", row_count=10000, columns=[cs])
+        db = DatabaseStats(tables=[ts], source_dialect="mysql")
+        yaml_str = yaml.dump(db.to_dict(), sort_keys=False)
+        db2 = DatabaseStats.from_dict(yaml.safe_load(yaml_str))
+        cs2 = db2.tables[0].columns[0]
+        assert cs2.skewness == 1.8
+        assert cs2.kurtosis == 4.2
+
+    def test_yaml_roundtrip_without_skewness(self):
+        """When skewness/kurtosis are None they are omitted from YAML."""
+        import yaml
+        from src.schema_parser.stats_model import ColumnStats, DatabaseStats, TableStats
+        cs = ColumnStats(name="status", null_fraction=0.0, n_distinct=3)
+        ts = TableStats(name="orders", row_count=1000, columns=[cs])
+        db = DatabaseStats(tables=[ts])
+        d = db.to_dict()
+        col_d = d["tables"][0]["columns"][0]
+        assert "skewness" not in col_d
+        assert "kurtosis" not in col_d
+        db2 = DatabaseStats.from_dict(d)
+        assert db2.tables[0].columns[0].skewness is None
+        assert db2.tables[0].columns[0].kurtosis is None
+
+
+class TestTemporalOrderingConstraints:
+    """Verify temporal_ordering_constraints on CanonicalTableSchema."""
+
+    def test_default_empty(self):
+        t = CanonicalTableSchema(name="t", columns=[])
+        assert t.temporal_ordering_constraints == []
+
+    def test_set_constraints(self):
+        t = CanonicalTableSchema(
+            name="orders",
+            columns=[],
+            temporal_ordering_constraints=[
+                "end_date > start_date",
+                "updated_at >= created_at",
+            ],
+        )
+        assert len(t.temporal_ordering_constraints) == 2
+        assert "end_date > start_date" in t.temporal_ordering_constraints
+
+    def test_multiple_table_instances_independent(self):
+        """Each CanonicalTableSchema instance has its own constraint list."""
+        t1 = CanonicalTableSchema(name="a", columns=[])
+        t2 = CanonicalTableSchema(name="b", columns=[])
+        t1.temporal_ordering_constraints.append("end > start")
+        assert t2.temporal_ordering_constraints == []
+
+    def test_all_constraint_operators(self):
+        """All four comparison operators are accepted as plain strings."""
+        constraints = [
+            "end_date > start_date",
+            "updated_at >= created_at",
+            "depart_at < arrive_at",
+            "birth_date <= hire_date",
+        ]
+        t = CanonicalTableSchema(
+            name="t",
+            columns=[],
+            temporal_ordering_constraints=constraints,
+        )
+        assert t.temporal_ordering_constraints == constraints
+
+    def test_realistic_table_schema(self):
+        """A realistic order table has correct constraints and columns."""
+        cols = [
+            CanonicalColumn(name="id",          type="long",        primary_key=True),
+            CanonicalColumn(name="ordered_at",  type="timestamptz", not_null=True),
+            CanonicalColumn(name="shipped_at",  type="timestamptz"),
+            CanonicalColumn(name="delivered_at",type="timestamptz"),
+            CanonicalColumn(name="cancelled_at",type="timestamptz"),
+        ]
+        table = CanonicalTableSchema(
+            name="orders",
+            columns=cols,
+            temporal_ordering_constraints=[
+                "shipped_at > ordered_at",
+                "delivered_at > shipped_at",
+            ],
+        )
+        assert len(table.temporal_ordering_constraints) == 2
+        assert "shipped_at > ordered_at" in table.temporal_ordering_constraints
+
+
+class TestSyntheticShortcomingsCoverageMatrix:
+    """
+    Meta-tests that verify the canonical model carries the fields needed to
+    address each documented synthetic data shortcoming.
+    """
+
+    def test_null_rate_capturable(self):
+        """null_fraction addresses: NULL rates not honoured."""
+        from src.schema_parser.stats_model import ColumnStats
+        cs = ColumnStats(name="optional_col", null_fraction=0.15)
+        assert cs.null_fraction == 0.15
+
+    def test_mcv_weights_available(self):
+        """MCVs + use_mcv_weights address: hot-spot / Zipf distribution not preserved."""
+        from src.schema_parser.stats_model import ColumnStats, MostCommonValue
+        cs = ColumnStats(
+            name="status",
+            most_common_values=[
+                MostCommonValue("active",    0.72),
+                MostCommonValue("inactive",  0.18),
+                MostCommonValue("pending",   0.08),
+                MostCommonValue("deleted",   0.02),
+            ],
+        )
+        g = GenerationRule(use_mcv_weights=True)
+        assert cs.most_common_values[0].frequency == 0.72
+        assert g.use_mcv_weights is True
+
+    def test_boundary_injection_capturable(self):
+        """min_value + max_value + inject_boundary_values address: boundary values missing."""
+        from src.schema_parser.stats_model import ColumnStats
+        cs = ColumnStats(name="age", min_value="18", max_value="120")
+        g = GenerationRule(inject_boundary_values=True)
+        assert cs.min_value == "18"
+        assert cs.max_value == "120"
+        assert g.inject_boundary_values is True
+
+    def test_fk_cardinality_capturable(self):
+        """avg_children_per_parent addresses: FK cardinality ratios lost."""
+        from src.schema_parser.stats_model import ForeignKeyStats
+        fk = ForeignKeyStats(
+            columns=["student_id"],
+            parent_table="students",
+            parent_columns=["id"],
+            avg_children_per_parent=5.1,
+            cardinality_pattern="N:1",
+        )
+        assert fk.avg_children_per_parent == 5.1
+
+    def test_functional_dependency_capturable(self):
+        """CompositeColumnStats.dependencies addresses: correlated columns drift apart."""
+        from src.schema_parser.stats_model import CompositeColumnStats
+        cs = CompositeColumnStats(
+            columns=["zip_code", "city"],
+            dependencies={"zip_code->city": 0.99},
+        )
+        assert cs.dependencies["zip_code->city"] == 0.99
+
+    def test_format_pattern_for_realistic_strings(self):
+        """format_pattern addresses: random strings do not look like emails/phones/UUIDs."""
+        for pattern in ("email", "phone_us", "uuid", "ip_v4", "url"):
+            g = GenerationRule(format_pattern=pattern)
+            assert g.format_pattern == pattern
+
+    def test_rare_event_injection(self):
+        """inject_rare_events addresses: rare/tail events never appear in synthetic data."""
+        g = GenerationRule(inject_rare_events=True)
+        assert g.inject_rare_events is True
+
+    def test_distribution_shape_capturable(self):
+        """skewness/kurtosis address: generator doesn't know true distribution shape."""
+        from src.schema_parser.stats_model import ColumnStats
+        # Income is typically strongly right-skewed (log-normal)
+        cs = ColumnStats(name="income", skewness=3.5, kurtosis=15.0)
+        assert cs.skewness > 0   # right-skewed
+        assert cs.kurtosis > 0   # heavy-tailed
+
+    def test_temporal_ordering_for_consistency(self):
+        """temporal_ordering_constraints addresses: end_date < start_date silently corrupt."""
+        t = CanonicalTableSchema(
+            name="sessions",
+            columns=[],
+            temporal_ordering_constraints=["end_time > start_time"],
+        )
+        assert t.temporal_ordering_constraints == ["end_time > start_time"]
+
+    def test_zipf_distribution_for_hot_spots(self):
+        """Zipf distribution setting addresses: uniform random misses query plan hot-spots."""
+        g = GenerationRule(
+            distribution="zipf",
+            distribution_params={"a": 1.5},
+        )
+        assert g.distribution == "zipf"
+        assert g.distribution_params["a"] == 1.5

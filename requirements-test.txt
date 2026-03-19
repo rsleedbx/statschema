@@ -1,20 +1,23 @@
-# CI / no-credentials test environment (local Spark, no Databricks Connect)
+# Local / CI test environment – local PySpark, no Databricks Connect
 #
-# Use this ONLY in CI pipelines or when no ~/.databrickscfg is available.
-# Intentionally omits databricks-connect so SparkSession.builder.master("local[1]")
-# creates an in-process Spark session instead of raising "remote sessions only".
+# Intentionally omits databricks-connect.  When databricks-connect is present it
+# replaces pyspark with a version that only supports remote Databricks clusters,
+# causing SparkSession.builder.master("local[1]") to raise:
+#   "Only remote Spark sessions using Databricks Connect are supported."
 #
-# For LOCAL DEVELOPMENT, use .venv_3_11 with requirements-dev.txt instead:
-#   .venv_3_11/bin/pip install -r requirements-dev.txt
-#   .venv_3_11/bin/python -m pytest tests/ -v   # needs ~/.databrickscfg
+# This file is used by:
+#   make venv-test          → one-time setup
+#   make test               → full suite (2039 tests, 3 Spark data-gen tests)
+#   .venv_test/bin/pytest   → direct pytest invocation
 #
-# CI setup:
-#   python -m venv .venv_test
-#   .venv_test/bin/pip install -r requirements-test.txt
-#   .venv_test/bin/python -m pytest tests/ -v
+# Java requirement
+#   Local PySpark needs a JVM.  conftest.py (repo root) auto-detects Homebrew
+#   OpenJDK at /opt/homebrew/opt/openjdk@{17,21,11} so JAVA_HOME does not need
+#   to be set manually.  On macOS: brew install openjdk@17
 
-# Same as requirements.txt except databricks-connect (and pyspark is required)
+# ── Core runtime ─────────────────────────────────────────────────────────────
 PyYAML>=6.0
+python-dotenv>=1.0
 dbldatagen>=0.4.0
 pyparsing
 jmespath
@@ -23,12 +26,25 @@ databricks-sdk>=0.20.0
 protobuf>=4.25.0,<7.0
 grpcio-tools>=1.60.0,<2.0
 
-# Local Spark for tests (must be present so Spark-dependent tests don't skip)
-pyspark>=3.5.0
+# ── DDL parser ───────────────────────────────────────────────────────────────
+sqlglot>=20.0.0
 
-# dbldatagen import dependencies (not always declared by dbldatagen)
+# ── Local Spark (no Databricks Connect) ──────────────────────────────────────
+pyspark>=3.5.0
+# PySpark 4.x requires PyArrow ≥ 15.0 for Arrow-based optimisations
+pyarrow>=15.0.0
+
+# ── dbldatagen transitive deps (not always declared by dbldatagen itself) ────
 numpy>=1.20.0
 pandas>=1.0.0
 
-# Dev
+# ── Live database drivers (tests auto-skip when DB not running) ───────────────
+# SQL Server: used by tests/test_live_sqlserver.py
+pymssql>=2.2.0
+# MySQL 5.7 + 8.x: used by tests/test_live_mysql.py
+pymysql>=1.1.0
+# PostgreSQL 14 + 16: used by tests/test_live_pg.py
+psycopg2-binary>=2.9.0
+
+# ── Test runner ───────────────────────────────────────────────────────────────
 pytest>=7.0.0
