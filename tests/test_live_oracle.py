@@ -36,7 +36,7 @@ import textwrap
 
 import pytest
 
-from src.schema_parser import parse_ddl, emit_ddl
+from src.statschema import parse_ddl, emit_ddl
 
 # ---------------------------------------------------------------------------
 # Connection defaults

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from src.schema_parser import (
+from src.statschema import (
     CanonicalColumn,
     CanonicalTableSchema,
     GenerationRule,

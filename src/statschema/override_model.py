@@ -56,8 +56,8 @@ SQL Server → Databricks
 
 Usage
 ------
-    from src.schema_parser.override_model import OverrideSpec
-    from src.schema_parser.stats_io import apply_overrides
+    from src.statschema.override_model import OverrideSpec
+    from src.statschema.stats_io import apply_overrides
 
     spec = OverrideSpec.from_yaml("overrides.yaml")
     schema2, stats2 = apply_overrides(schema, stats, spec)

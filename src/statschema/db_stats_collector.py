@@ -13,7 +13,7 @@ Supported databases
 
 Usage
 -----
-    from src.schema_parser.db_stats_collector import collect_table_stats
+    from src.statschema.db_stats_collector import collect_table_stats
 
     # after generating and loading data into the live DB:
     stats = collect_table_stats(conn, "my_table", dialect="mysql")

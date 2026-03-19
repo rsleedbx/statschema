@@ -1,8 +1,8 @@
 # Synthetic Data Shortcomings and How We Address Them
 
 **Last updated:** 2026-03-04  
-**Relates to:** `src/schema_parser/model.py`, `src/schema_parser/stats_model.py`  
-**Tests:** `tests/test_schema_parser.py::TestSyntheticShortcomingsCoverageMatrix`
+**Relates to:** `src/statschema/model.py`, `src/statschema/stats_model.py`  
+**Tests:** `tests/test_statschema.py::TestSyntheticShortcomingsCoverageMatrix`
 
 ---
 

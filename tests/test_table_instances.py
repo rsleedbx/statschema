@@ -18,7 +18,7 @@ import textwrap
 
 import pytest
 
-from src.schema_parser import (
+from src.statschema import (
     CanonicalColumn,
     CanonicalTableSchema,
     dump_schema,

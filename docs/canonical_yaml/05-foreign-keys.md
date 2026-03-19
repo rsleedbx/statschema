@@ -112,4 +112,4 @@ statistics YAML separately from the schema YAML.
 
 - [Core YAML structure](01-core-structure.md)
 - [Round-trip guarantee](09-round-trip-guarantee.md)
-- [`src/schema_parser/model.py`](../../src/schema_parser/model.py) — `CanonicalForeignKey` dataclass
+- [`src/statschema/model.py`](../../src/statschema/model.py) — `CanonicalForeignKey` dataclass

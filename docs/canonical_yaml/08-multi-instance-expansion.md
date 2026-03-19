@@ -128,7 +128,7 @@ memory by default.  Call `expand_table_instances()` — or use
 ### `expand_table_instances()`
 
 ```python
-from schema_parser import CanonicalTableSchema, CanonicalColumn, expand_table_instances
+from statschema import CanonicalTableSchema, CanonicalColumn, expand_table_instances
 
 table = CanonicalTableSchema(
     name="email_stats",
@@ -142,7 +142,7 @@ tables = expand_table_instances(table)
 ### `load_canonical(path, expand=True)`
 
 ```python
-from schema_parser import load_canonical, emit_ddl
+from statschema import load_canonical, emit_ddl
 
 # Compact form — preserves instance_count for re-serialization
 tables = load_canonical("schema.yaml")
@@ -266,5 +266,5 @@ idempotency, combined `instance_count` + `aliases`).
 
 - [Core YAML structure](01-core-structure.md)
 - [Round-trip guarantee](09-round-trip-guarantee.md)
-- [`src/schema_parser/model.py`](../../src/schema_parser/model.py) — `CanonicalTableSchema`, `expand_table_instances`
+- [`src/statschema/model.py`](../../src/statschema/model.py) — `CanonicalTableSchema`, `expand_table_instances`
 - [`tests/test_table_instances.py`](../../tests/test_table_instances.py) — full test suite for this feature

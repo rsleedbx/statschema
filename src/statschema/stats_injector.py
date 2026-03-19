@@ -783,7 +783,7 @@ def inject_stats_databricks(
         # saveAsTable(format=delta) raises EXTERNAL_METADATA_UNSUPPORTED.
         # Write to a temp path and CREATE TABLE … USING DELTA LOCATION.
         import tempfile, os as _os
-        delta_dir = _os.path.join(tempfile.gettempdir(), "schema_parser_delta", tgt_table)
+        delta_dir = _os.path.join(tempfile.gettempdir(), "statschema_delta", tgt_table)
         (
             df.write
             .format("delta")

@@ -67,10 +67,10 @@ from typing import Any
 
 import pytest
 
-from src.schema_parser import emit_ddl, parse_ddl
-from src.schema_parser.db_stats_collector import collect_table_stats
-from src.schema_parser.dbldatagen_builder import build_dataframe_from_canonical
-from src.schema_parser.stats_io import make_default_stats
+from src.statschema import emit_ddl, parse_ddl
+from src.statschema.db_stats_collector import collect_table_stats
+from src.statschema.dbldatagen_builder import build_dataframe_from_canonical
+from src.statschema.stats_io import make_default_stats
 
 # ---------------------------------------------------------------------------
 # Connection settings — match test_live_mysql.py / test_live_pg.py / test_live_sqlserver.py
@@ -143,7 +143,7 @@ _STATS_COLS = _LOAD_COLS
 
 
 # ---------------------------------------------------------------------------
-# Spark helper (reuse pattern from test_schema_parser.py)
+# Spark helper (reuse pattern from test_statschema.py)
 # ---------------------------------------------------------------------------
 
 def _get_spark():

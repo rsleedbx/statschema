@@ -161,4 +161,4 @@ columns:
 
 - [Column types](02-column-types.md)
 - [Column constraints](03-column-constraints.md)
-- [`src/schema_parser/ddl_emitter.py`](../../src/schema_parser/ddl_emitter.py) — length/precision/scale emission per dialect
+- [`src/statschema/ddl_emitter.py`](../../src/statschema/ddl_emitter.py) — length/precision/scale emission per dialect

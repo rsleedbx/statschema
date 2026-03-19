@@ -39,8 +39,8 @@ import textwrap
 
 import pytest
 
-from src.schema_parser import parse_ddl, emit_ddl
-from src.schema_parser.model import CanonicalTableSchema
+from src.statschema import parse_ddl, emit_ddl
+from src.statschema.model import CanonicalTableSchema
 
 # ---------------------------------------------------------------------------
 # Connection helpers

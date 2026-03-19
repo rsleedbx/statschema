@@ -79,4 +79,4 @@ tables:
 
 ---
 
-*See also: [`docs/testing.md`](testing.md) · [`docs/local-databases.md`](local-databases.md) · [`src/schema_parser/model.py`](../src/schema_parser/model.py)*
+*See also: [`docs/testing.md`](testing.md) · [`docs/local-databases.md`](local-databases.md) · [`src/statschema/model.py`](../src/statschema/model.py)*

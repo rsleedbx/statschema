@@ -16,7 +16,7 @@ from datetime import datetime
 
 import pytest
 
-from src.schema_parser.model import CanonicalColumn, CanonicalTableSchema
+from src.statschema.model import CanonicalColumn, CanonicalTableSchema
 from src.protobuf_converter import (
     _proto_message_name,
     schema_to_proto_str,
@@ -27,7 +27,7 @@ from src.protobuf_converter import (
 
 
 # ---------------------------------------------------------------------------
-# Helper: Spark session (mirrors test_schema_parser.py pattern)
+# Helper: Spark session (mirrors test_statschema.py pattern)
 # ---------------------------------------------------------------------------
 
 def _create_spark_session(app_name: str):
@@ -355,7 +355,7 @@ class TestEndToEnd:
         pytest.importorskip("dbldatagen")
         pytest.importorskip("grpc_tools")
 
-        from src.schema_parser.dbldatagen_builder import build_dataframe_from_canonical
+        from src.statschema.dbldatagen_builder import build_dataframe_from_canonical
 
         table = CanonicalTableSchema(
             name="phase1_table",
@@ -390,7 +390,7 @@ class TestEndToEnd:
         pytest.importorskip("dbldatagen")
         pytest.importorskip("grpc_tools")
 
-        from src.schema_parser.dbldatagen_builder import build_dataframe_from_canonical
+        from src.statschema.dbldatagen_builder import build_dataframe_from_canonical
 
         table = CanonicalTableSchema(
             name="multi_type",

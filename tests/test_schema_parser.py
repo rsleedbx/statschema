@@ -1,5 +1,5 @@
 """
-pytest tests for src/schema_parser.
+pytest tests for src/statschema.
 """
 
 import json
@@ -8,29 +8,29 @@ from pathlib import Path
 
 import pytest
 
-from src.schema_parser.model import (
+from src.statschema.model import (
     CanonicalColumn,
     CanonicalTableSchema,
     GenerationRule,
 )
-from src.schema_parser.ydata_parser import (
+from src.statschema.ydata_parser import (
     parse_ydata_yaml,
     parse_ydata_yaml_file,
     parse_ydata_multi_yaml,
 )
-from src.schema_parser.pipeline_parser import (
+from src.statschema.pipeline_parser import (
     parse_pipeline_tables,
     parse_pipeline_config,
 )
-from src.schema_parser.loader import (
+from src.statschema.loader import (
     load_schema,
     detect_format,
     get_schema_source_from_data,
     SchemaSource,
 )
-from src.schema_parser.sdv_parser import parse_sdv_metadata, parse_sdv_file
-from src.schema_parser.ddl_parser import parse_ddl, parse_ddl_file
-from src.schema_parser.dbldatagen_builder import to_dbldatagen_specs, build_dataframe_from_canonical
+from src.statschema.sdv_parser import parse_sdv_metadata, parse_sdv_file
+from src.statschema.ddl_parser import parse_ddl, parse_ddl_file
+from src.statschema.dbldatagen_builder import to_dbldatagen_specs, build_dataframe_from_canonical
 
 
 # -----------------------------------------------------------------------------
@@ -937,7 +937,7 @@ class TestRonaldbradfordSchema:
         tables = load_schema(path, format_hint=SchemaSource.MYSQL)
         actor = next(t for t in tables if t.name == "actor")
         try:
-            spark = _create_spark_session("schema_parser_ronaldbradford_test")
+            spark = _create_spark_session("statschema_ronaldbradford_test")
         except RuntimeError as e:
             if "Databricks Connect" in str(e) or "remote Spark" in str(e):
                 pytest.skip("Local Spark not available (Databricks Connect only supports remote sessions)")
@@ -1012,7 +1012,7 @@ class TestPostgresDBSamples:
         tables = load_schema(path, format_hint=SchemaSource.POSTGRES)
         actor = next(t for t in tables if t.name == "actor")
         try:
-            spark = _create_spark_session("schema_parser_postgresDBSamples_test")
+            spark = _create_spark_session("statschema_postgresDBSamples_test")
         except RuntimeError as e:
             if "Databricks Connect" in str(e) or "remote Spark" in str(e):
                 pytest.skip("Local Spark not available (Databricks Connect only supports remote sessions)")
@@ -1084,7 +1084,7 @@ class TestNeondatabasePostgresSampleDbs:
         tables = load_schema(path, format_hint=SchemaSource.POSTGRES)
         pt = tables[0]
         try:
-            spark = _create_spark_session("schema_parser_neon_postgres_test")
+            spark = _create_spark_session("statschema_neon_postgres_test")
         except RuntimeError as e:
             if "Databricks Connect" in str(e) or "remote Spark" in str(e):
                 pytest.skip("Local Spark not available (Databricks Connect only supports remote sessions)")
@@ -1366,19 +1366,19 @@ class TestColumnStatsEnhancements:
     """Verify skewness/kurtosis added to ColumnStats for distribution shape."""
 
     def test_defaults_none(self):
-        from src.schema_parser.stats_model import ColumnStats
+        from src.statschema.stats_model import ColumnStats
         cs = ColumnStats(name="age")
         assert cs.skewness is None
         assert cs.kurtosis is None
 
     def test_right_skewed(self):
-        from src.schema_parser.stats_model import ColumnStats
+        from src.statschema.stats_model import ColumnStats
         cs = ColumnStats(name="salary", skewness=2.5, kurtosis=6.0)
         assert cs.skewness == 2.5
         assert cs.kurtosis == 6.0
 
     def test_symmetric_normal(self):
-        from src.schema_parser.stats_model import ColumnStats
+        from src.statschema.stats_model import ColumnStats
         cs = ColumnStats(name="height", skewness=0.0, kurtosis=0.0)
         assert cs.skewness == 0.0
         assert cs.kurtosis == 0.0
@@ -1386,7 +1386,7 @@ class TestColumnStatsEnhancements:
     def test_yaml_roundtrip_with_skewness(self):
         """skewness and kurtosis survive a to_dict / from_dict round-trip."""
         import yaml
-        from src.schema_parser.stats_model import ColumnStats, DatabaseStats, TableStats
+        from src.statschema.stats_model import ColumnStats, DatabaseStats, TableStats
         cs = ColumnStats(
             name="price",
             null_fraction=0.02,
@@ -1407,7 +1407,7 @@ class TestColumnStatsEnhancements:
     def test_yaml_roundtrip_without_skewness(self):
         """When skewness/kurtosis are None they are omitted from YAML."""
         import yaml
-        from src.schema_parser.stats_model import ColumnStats, DatabaseStats, TableStats
+        from src.statschema.stats_model import ColumnStats, DatabaseStats, TableStats
         cs = ColumnStats(name="status", null_fraction=0.0, n_distinct=3)
         ts = TableStats(name="orders", row_count=1000, columns=[cs])
         db = DatabaseStats(tables=[ts])
@@ -1490,13 +1490,13 @@ class TestSyntheticShortcomingsCoverageMatrix:
 
     def test_null_rate_capturable(self):
         """null_fraction addresses: NULL rates not honoured."""
-        from src.schema_parser.stats_model import ColumnStats
+        from src.statschema.stats_model import ColumnStats
         cs = ColumnStats(name="optional_col", null_fraction=0.15)
         assert cs.null_fraction == 0.15
 
     def test_mcv_weights_available(self):
         """MCVs + use_mcv_weights address: hot-spot / Zipf distribution not preserved."""
-        from src.schema_parser.stats_model import ColumnStats, MostCommonValue
+        from src.statschema.stats_model import ColumnStats, MostCommonValue
         cs = ColumnStats(
             name="status",
             most_common_values=[
@@ -1512,7 +1512,7 @@ class TestSyntheticShortcomingsCoverageMatrix:
 
     def test_boundary_injection_capturable(self):
         """min_value + max_value + inject_boundary_values address: boundary values missing."""
-        from src.schema_parser.stats_model import ColumnStats
+        from src.statschema.stats_model import ColumnStats
         cs = ColumnStats(name="age", min_value="18", max_value="120")
         g = GenerationRule(inject_boundary_values=True)
         assert cs.min_value == "18"
@@ -1521,7 +1521,7 @@ class TestSyntheticShortcomingsCoverageMatrix:
 
     def test_fk_cardinality_capturable(self):
         """avg_children_per_parent addresses: FK cardinality ratios lost."""
-        from src.schema_parser.stats_model import ForeignKeyStats
+        from src.statschema.stats_model import ForeignKeyStats
         fk = ForeignKeyStats(
             columns=["student_id"],
             parent_table="students",
@@ -1533,7 +1533,7 @@ class TestSyntheticShortcomingsCoverageMatrix:
 
     def test_functional_dependency_capturable(self):
         """CompositeColumnStats.dependencies addresses: correlated columns drift apart."""
-        from src.schema_parser.stats_model import CompositeColumnStats
+        from src.statschema.stats_model import CompositeColumnStats
         cs = CompositeColumnStats(
             columns=["zip_code", "city"],
             dependencies={"zip_code->city": 0.99},
@@ -1553,7 +1553,7 @@ class TestSyntheticShortcomingsCoverageMatrix:
 
     def test_distribution_shape_capturable(self):
         """skewness/kurtosis address: generator doesn't know true distribution shape."""
-        from src.schema_parser.stats_model import ColumnStats
+        from src.statschema.stats_model import ColumnStats
         # Income is typically strongly right-skewed (log-normal)
         cs = ColumnStats(name="income", skewness=3.5, kurtosis=15.0)
         assert cs.skewness > 0   # right-skewed

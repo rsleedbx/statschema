@@ -51,7 +51,7 @@ from typing import Any
 
 import pytest
 
-from src.schema_parser import (
+from src.statschema import (
     CanonicalTableSchema,
     dump_schema,
     emit_ddl,

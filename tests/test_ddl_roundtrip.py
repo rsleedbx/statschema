@@ -44,7 +44,7 @@ from typing import Any, Optional
 import pytest
 import yaml
 
-from src.schema_parser import (
+from src.statschema import (
     CanonicalColumn,
     CanonicalForeignKey,
     CanonicalTableSchema,
@@ -54,13 +54,13 @@ from src.schema_parser import (
     dump_schema,
     load_canonical,
 )
-from src.schema_parser.dbldatagen_builder import to_dbldatagen_specs
-from src.schema_parser.ddl_parser import (
+from src.statschema.dbldatagen_builder import to_dbldatagen_specs
+from src.statschema.ddl_parser import (
     MYSQL_TYPE_TO_CANONICAL,
     POSTGRES_TYPE_TO_CANONICAL,
     SQLSERVER_TYPE_TO_CANONICAL,
 )
-from src.schema_parser.stats_model import (
+from src.statschema.stats_model import (
     ColumnStats,
     CompositeColumnStats,
     DatabaseStats,
@@ -70,8 +70,8 @@ from src.schema_parser.stats_model import (
     MostCommonValue,
     TableStats,
 )
-from src.schema_parser.override_model import ColumnOverride, OverrideSpec, TableOverride
-from src.schema_parser.stats_io import (
+from src.statschema.override_model import ColumnOverride, OverrideSpec, TableOverride
+from src.statschema.stats_io import (
     apply_overrides,
     apply_overrides_all,
     dump_stats,
@@ -2212,7 +2212,7 @@ class TestPhase8TemporalTypes:
     ])
     def test_emit_no_fsp(self, canonical: str, dialect: str, expected_sql: str):
         """No-fsp canonical type emits to the correct default SQL token."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("ts", canonical)
         table = make_pk_table("t", col)
         ddl = emit_ddl(table, dialect)
@@ -2282,7 +2282,7 @@ class TestPhase8TemporalTypes:
     ])
     def test_fsp_preserved_in_ddl(self, canonical: str, fsp: int, dialect: str):
         """The emitted DDL must contain the fsp value as '(N)' when supported."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("ts", canonical)
         col.fsp = fsp
         table = make_pk_table("t", col)
@@ -2293,7 +2293,7 @@ class TestPhase8TemporalTypes:
 
     def test_databricks_fsp_dropped(self):
         """Databricks does not support fsp; the emitted DDL must NOT contain '(6)'."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("ts", "timestamp")
         col.fsp = 6
         table = make_pk_table("t", col)
@@ -2392,7 +2392,7 @@ class TestPhase8TemporalTypes:
     ])
     def test_oracle_emit(self, canonical: str, fsp, expected_fragment: str):
         """Oracle emitter produces correct temporal DDL fragments."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("ts", canonical)
         col.fsp = fsp
         table = make_pk_table("t", col)
@@ -2452,7 +2452,7 @@ class TestPhase8TemporalTypes:
         When fsp is stored (even fsp=0), the emitter always includes (N) in the
         type string: TIMESTAMP(0), TIMESTAMP(6) WITH TIME ZONE, etc.
         """
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("ts", canonical)
         col.fsp = fsp
         ddl = emit_ddl(make_pk_table("t", col), "oracle")
@@ -2555,7 +2555,7 @@ class TestPhase8TemporalTypes:
 
     def test_timestamptz_cross_dialect_emit(self):
         """A single timestamptz column emits its dialect-native TZ-aware type."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("ts", "timestamptz")
         table = make_pk_table("t", col)
         assert "TIMESTAMP" in emit_ddl(table, "mysql")
@@ -2566,7 +2566,7 @@ class TestPhase8TemporalTypes:
 
     def test_time_cross_dialect_emit(self):
         """time canonical emits TIME on MySQL/PG/SS, TIMESTAMP on Oracle, STRING on Databricks."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("t", "time")
         table = make_pk_table("tbl", col)
         assert "TIME" in emit_ddl(table, "mysql")
@@ -2577,7 +2577,7 @@ class TestPhase8TemporalTypes:
 
     def test_databricks_timestamp_vs_timestamp_ntz(self):
         """Databricks: canonical timestamp → TIMESTAMP_NTZ, timestamptz → TIMESTAMP."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col_ts  = make_col("ts",  "timestamp")
         col_tsz = make_col("tsz", "timestamptz")
         table = make_pk_table("t", col_ts, col_tsz)
@@ -2671,7 +2671,7 @@ class TestPhase9MigrationIssues:
         self, canonical: str, length, dialect: str, parse_d: str, expected_sql: str
     ):
         """Binary canonical emits the correct dialect-native SQL token."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("data", canonical)
         col.length = length
         ddl = emit_ddl(make_pk_table("t", col), dialect)
@@ -2828,14 +2828,14 @@ class TestPhase9MigrationIssues:
 
     def test_mysql_blob_to_postgres_bytea(self):
         """MySQL BLOB (binary, no length) emits BYTEA in PostgreSQL."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("img", "binary")   # parsed from MySQL BLOB
         ddl = emit_ddl(make_pk_table("t", col), "postgres")
         assert "BYTEA" in ddl
 
     def test_mysql_varbinary_to_sqlserver(self):
         """MySQL VARBINARY(255) migrates to SQL Server VARBINARY(255)."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("token", "binary")
         col.length = 255
         ddl = emit_ddl(make_pk_table("t", col), "sqlserver")
@@ -2843,7 +2843,7 @@ class TestPhase9MigrationIssues:
 
     def test_sqlserver_money_to_postgres(self):
         """SQL Server MONEY migrates to PostgreSQL NUMERIC(19,4)."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("price", "decimal")
         col.precision = 19
         col.scale = 4
@@ -2852,7 +2852,7 @@ class TestPhase9MigrationIssues:
 
     def test_sqlserver_money_to_databricks(self):
         """SQL Server MONEY migrates to Databricks DECIMAL(19,4)."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("price", "decimal")
         col.precision = 19
         col.scale = 4
@@ -2861,7 +2861,7 @@ class TestPhase9MigrationIssues:
 
     def test_int_unsigned_to_postgres_bigint(self):
         """MySQL INT UNSIGNED (widened to 'long') emits BIGINT in PostgreSQL."""
-        from src.schema_parser import emit_ddl
+        from src.statschema import emit_ddl
         col = make_col("user_id", "long")  # after widening from INT UNSIGNED
         ddl = emit_ddl(make_pk_table("t", col), "postgres")
         assert "BIGINT" in ddl
@@ -2938,7 +2938,7 @@ class TestPhase10CanonicalYamlPipeline:
     Full pipeline tests: DDL → canonical YAML → DDL and DDL → YAML → data.
 
     Validates the ``many DDL sources → one canonical YAML → many DDL targets + data``
-    architecture that is the central design goal of the schema_parser module.
+    architecture that is the central design goal of the statschema module.
     """
 
     # ── Part A: YAML serialization round-trip ────────────────────────────
@@ -3314,7 +3314,7 @@ class TestPhase11OracleDialect:
 
     def test_auto_detected_as_oracle(self):
         """_detect_dialect should return 'oracle' for Oracle-style DDL."""
-        from src.schema_parser.ddl_parser import _detect_dialect
+        from src.statschema.ddl_parser import _detect_dialect
         assert _detect_dialect(self._ORACLE_DDL) == "oracle"
 
     def test_parses_without_explicit_dialect(self):
@@ -3393,7 +3393,7 @@ class TestPhase11OracleDialect:
     ])
     def test_oracle_source_type_coverage(self, raw_type: str, expected_canonical: str):
         """Every Oracle type in ORACLE_TYPE_TO_CANONICAL round-trips correctly."""
-        from src.schema_parser.ddl_parser import ORACLE_TYPE_TO_CANONICAL
+        from src.statschema.ddl_parser import ORACLE_TYPE_TO_CANONICAL
         ddl = f"CREATE TABLE t (id NUMBER(10) NOT NULL, col {raw_type}, PRIMARY KEY (id))"
         tables = parse_ddl(ddl, dialect="oracle")
         assert tables, f"No tables parsed for Oracle type {raw_type!r}"

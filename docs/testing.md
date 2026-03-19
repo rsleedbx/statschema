@@ -164,7 +164,7 @@ python3.11 -m venv .venv_test
 | File | Tests | Needs Spark | Needs live DB |
 |------|-------|-------------|---------------|
 | `tests/test_ddl_roundtrip.py` | ~185 | No | No |
-| `tests/test_schema_parser.py` | ~124 | 3 tests | No |
+| `tests/test_statschema.py` | ~124 | 3 tests | No |
 | `tests/test_v1_bridge.py` | ~50 | No | No |
 | `tests/test_protobuf_converter.py` | ~40 | No | No |
 | `tests/test_zerobus_ingest.py` | ~60 | No | No (2 integration tests skipped) |
@@ -332,7 +332,7 @@ make test-live-all SQLSERVER_PASS=<password>
 
 ## How `_create_spark_session` works
 
-`tests/test_schema_parser.py` contains a helper `_create_spark_session(app_name)`
+`tests/test_statschema.py` contains a helper `_create_spark_session(app_name)`
 that is called by every Spark-dependent test.  It tries two strategies in order:
 
 ```
@@ -622,7 +622,7 @@ make test-live-oracle-hr
 ## Mautic application tests (`test_live_mautic.py`)
 
 Mautic is an open-source marketing automation platform with ~108 MySQL tables.
-It validates `schema_parser` against a real-world application schema with diverse
+It validates `statschema` against a real-world application schema with diverse
 types, virtual generated columns, and natural multi-instance shard patterns.
 
 ### What is tested (19 tests)
@@ -732,7 +732,7 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`tests/test_live_oracle_hr.py`](../tests/test_live_oracle_hr.py) – live Oracle HR/CO sample schema suite (20 tests, Oracle XE)
 - [`tests/test_live_roundtrip.py`](../tests/test_live_roundtrip.py) – comprehensive double round-trip suite
 - [`tests/test_live_synth.py`](../tests/test_live_synth.py) – live synthetic data pipeline tests
-- [`src/schema_parser/db_stats_collector.py`](../src/schema_parser/db_stats_collector.py) – collect `TableStats` from a live database
+- [`src/statschema/db_stats_collector.py`](../src/statschema/db_stats_collector.py) – collect `TableStats` from a live database
 - [`config/lima/oracle.yaml`](../config/lima/oracle.yaml) – Lima VM config for Oracle XE
 - [`docs/local-databases.md`](local-databases.md) – how to run real databases locally
 - [`docs/test_plan_ddl_roundtrip.md`](test_plan_ddl_roundtrip.md) – DDL round-trip test plan

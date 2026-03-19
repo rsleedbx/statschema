@@ -170,4 +170,4 @@ definition.  The emitter handles this automatically.
 
 - [Column types](02-column-types.md)
 - [Column precision & length](04-column-precision-length.md)
-- [`src/schema_parser/ddl_emitter.py`](../../src/schema_parser/ddl_emitter.py) — `_col_ddl`, `_normalize_default`
+- [`src/statschema/ddl_emitter.py`](../../src/statschema/ddl_emitter.py) — `_col_ddl`, `_normalize_default`

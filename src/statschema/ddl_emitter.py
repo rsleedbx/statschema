@@ -537,7 +537,7 @@ def emit_ddl(
 
     Examples
     --------
-    >>> from src.schema_parser import load_schema, emit_ddl
+    >>> from src.statschema import load_schema, emit_ddl
     >>> tables = load_schema("my_schema.yaml")
     >>> for t in tables:
     ...     print(emit_ddl(t, "databricks"))

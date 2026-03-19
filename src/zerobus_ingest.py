@@ -43,7 +43,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
-from src.schema_parser.model import CanonicalTableSchema
+from src.statschema.model import CanonicalTableSchema
 from src.protobuf_converter import compile_proto, schema_to_proto_str, serialize_row
 
 # ZeroBus SDK — optional at import time (not available in .venv_test).

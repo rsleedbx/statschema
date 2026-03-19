@@ -63,16 +63,16 @@ from typing import Optional
 
 import pytest
 
-from src.schema_parser import (
+from src.statschema import (
     emit_ddl,
     load_canonical,
     parse_ddl,
 )
-from src.schema_parser.model import (
+from src.statschema.model import (
     CanonicalTableSchema,
     expand_table_instances,
 )
-from src.schema_parser.schema_io import dump_schema as dump_canonical
+from src.statschema.schema_io import dump_schema as dump_canonical
 
 # ---------------------------------------------------------------------------
 # Connection configuration

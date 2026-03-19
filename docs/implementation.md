@@ -21,14 +21,14 @@ zerobus/
 ├── src/
 │   ├── __init__.py
 │   ├── config_loader.py          # Load and validate YAML config
-│   ├── schema_parser/            # Canonical schema: YData YAML, pipeline YAML → dbldatagen
+│   ├── statschema/            # Canonical schema: YData YAML, pipeline YAML → dbldatagen
 │   │   ├── __init__.py
 │   │   ├── model.py               # CanonicalColumn, CanonicalTableSchema, GenerationRule
 │   │   ├── ydata_parser.py        # YData/Syda-style YAML → canonical
 │   │   ├── pipeline_parser.py    # Pipeline tables[] YAML → canonical
 │   │   ├── dbldatagen_builder.py  # Canonical → dbldatagen column specs
 │   │   └── loader.py              # load_schema(), detect_format(); future: DB dumps
-│   ├── data_generator.py         # dbldatagen wrapper (uses schema_parser or inline config)
+│   ├── data_generator.py         # dbldatagen wrapper (uses statschema or inline config)
 │   ├── protobuf_converter.py     # DataFrame → Protobuf (dynamic .proto gen)
 │   ├── zerobus_ingest.py         # ZeroBus SDK ingestion
 │   └── pipeline.py               # Orchestrator (generate → convert → ingest)
@@ -53,7 +53,7 @@ zerobus/
 
 ## Canonical schema and schema sources
 
-The **`src/schema_parser`** module supports multiple schema formats. Each is attributed to its source:
+The **`src/statschema`** module supports multiple schema formats. Each is attributed to its source:
 
 - **SDV** (Synthetic Data Vault) – [docs.sdv.dev](https://docs.sdv.dev/sdv/concepts/metadata/metadata-json): JSON or YAML with `METADATA_SPEC_VERSION`, `tables` (primary_key, columns with sdtype), and `relationships`. Well-documented metadata spec.
 - **YData / Syda** – [python.syda.ai](https://python.syda.ai/examples/structured_only/yaml_schemas/): per-field YAML with `type`, `description`, `constraints`, `__table_description__`, `__foreign_keys__`.
@@ -90,7 +90,7 @@ Schema-only dumps from standard tools are supported as **plain `.sql` files** or
 - **From a file:** `load_schema("path/to/schema.sql")` or `load_schema("path/to/schema.sql", format_hint="mysql")`. Dialect is auto-detected from the SQL text if not specified.
 - **From a dict:** `load_schema({"schema_source": "mysql", "ddl": "CREATE TABLE ..."})`. Use `ddl` or `sql` for the CREATE TABLE statements.
 
-The DDL parser (`src/schema_parser/ddl_parser.py`) extracts table names and column definitions (name, type, NOT NULL, PRIMARY KEY), maps dialect-specific types to canonical (integer, long, string, float, double, boolean, timestamp), and returns `list[CanonicalTableSchema]`. Same canonical model and dbldatagen conversion as for SDV/YData/pipeline.
+The DDL parser (`src/statschema/ddl_parser.py`) extracts table names and column definitions (name, type, NOT NULL, PRIMARY KEY), maps dialect-specific types to canonical (integer, long, string, float, double, boolean, timestamp), and returns `list[CanonicalTableSchema]`. Same canonical model and dbldatagen conversion as for SDV/YData/pipeline.
 
 ### SDV metadata example
 
@@ -109,7 +109,7 @@ tables:
 relationships: []
 ```
 
-SDV sdtypes map to canonical types (e.g. `numerical` + `Int32` → integer, `categorical` → string). See `src/schema_parser/sdv_parser.py` and [SDV Metadata JSON](https://docs.sdv.dev/sdv/concepts/metadata/metadata-json).
+SDV sdtypes map to canonical types (e.g. `numerical` + `Int32` → integer, `categorical` → string). See `src/statschema/sdv_parser.py` and [SDV Metadata JSON](https://docs.sdv.dev/sdv/concepts/metadata/metadata-json).
 
 ### YData/Syda YAML example (single table)
 
@@ -147,7 +147,7 @@ The parser was written to match those examples (per-field `type`, `description`,
 ### Using the schema parser
 
 ```python
-from src.schema_parser import load_schema, to_dbldatagen_specs
+from src.statschema import load_schema, to_dbldatagen_specs
 import dbldatagen as dg
 
 # Load from file; use schema_source in file or format_hint (sdv | ydata | pipeline | mysql | postgres | sqlserver)
@@ -170,7 +170,7 @@ df = gen.build()
 Or use the helper that builds the DataFrame in one call:
 
 ```python
-from src.schema_parser import load_schema, build_dataframe_from_canonical
+from src.statschema import load_schema, build_dataframe_from_canonical
 tables = load_schema("config/schema_ydata_example.yaml")
 df = build_dataframe_from_canonical(spark, tables[0], rows=1000, seed=42)
 ```
