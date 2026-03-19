@@ -106,6 +106,14 @@ from .stats_model import (
 )
 from .override_model import ColumnOverride, OverrideSpec, TableOverride
 from .db_stats_collector import collect_table_stats
+from .stats_injector import (
+    inject_stats_databricks,
+    inject_stats_mysql,
+    inject_stats_oracle,
+    inject_stats_postgres,
+    inject_stats_sqlserver,
+    InjectionResult,
+)
 from .stats_io import (
     apply_overrides,
     apply_overrides_all,
@@ -159,6 +167,13 @@ __all__ = [
     "ColumnOverride",
     "OverrideSpec",
     "TableOverride",
+    # Stats injector (stats transpiler → target DB optimizer)
+    "inject_stats_databricks",
+    "inject_stats_mysql",
+    "inject_stats_postgres",
+    "inject_stats_oracle",
+    "inject_stats_sqlserver",
+    "InjectionResult",
     # Statistics I/O + override application
     "collect_table_stats",
     "load_stats",

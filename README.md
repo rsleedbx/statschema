@@ -1,37 +1,185 @@
-# schema_parser — cross-dialect DDL & synthetic data pipeline
+# schema_parser — stats transpiler · DDL transpiler · portable schema (YAML) · stats-driven tabular data
 
-Parse DDL from **any database**, translate it to **any other database**, generate
-**statistics-driven synthetic data** parameterized by real database measurements,
-and verify the generated distributions against live systems — all from a single
-canonical YAML intermediate representation.
+> **The only library that transpiles both column statistics and DDL schema across database dialects.**
+> Collect from MySQL. Migrate to PostgreSQL. The optimizer works correctly from day one.
+
+### Why "stats transpiler" is a new concept
+
+Every DDL transpiler stops at the schema. But a migrated database with correct schema
+and *default* statistics is still broken — the query optimizer has no idea how many
+rows each table has, which values are common, or what the numeric ranges look like.
+It produces bad query plans from day one.
+
+`schema_parser` introduces the **stats transpiler**: collect column statistics from any
+source database, store them as dialect-free YAML, and inject them into any target database
+so the optimizer sees production-scale distributions *before a single row is loaded*:
 
 ```
-MySQL DDL ──┐
-PG DDL  ────┤  parse_ddl()  ──►  CanonicalTableSchema  ──►  emit_ddl("databricks")  ──►  Delta table
-SQL Server ─┤                            │                 ►  emit_ddl("postgres")   ──►  PG table
-YData YAML ─┘                            │                 ►  emit_ddl("mysql")      ──►  MySQL table
-                                         │
-                                         └──►  build_dataframe_from_canonical(spark, rows=N, stats=…)
-                                                       │
-                                               Spark DataFrame  ──►  live DB (table_v1)
-                                                                              │
-                                                               collect_table_stats(conn, "table_v1")
-                                                                              │
-                                                                         TableStats
-                                                                    (null%, cardinality,
-                                                                     min/max, MCVs, histogram)
-                                                                              │
-                                                               build_dataframe_from_canonical(…, stats=real_stats)
-                                                                              │
-                                                               live DB (table_v2)  ──►  compare stats
-                                                               ← distributions converge each iteration ►
+Source DB (MySQL)                        Target DB (PostgreSQL)
+─────────────────                        ──────────────────────
+  schema  ──── DDL transpiler ────────►  CREATE TABLE (correct types)
+  stats   ──── stats transpiler ──────►  pg_restore_attribute_stats(…)
+                                             null_frac, n_distinct,
+                                             most_common_vals, histogram_bounds
+                                         → optimizer plans match production
+                                           before a single row is loaded
+```
+
+PostgreSQL 18 independently validated this need by shipping `pg_restore_attribute_stats`
+and `pg_dump --statistics-only` — portable optimizer statistics are now a first-class
+deployment artifact in PostgreSQL itself.
+`schema_parser` is the only tool that makes those statistics **cross-dialect**.
+
+#### What you get per target engine
+
+Stats injection improves on the baseline (zero statistics = optimizer guesses 1 row
+for every filter) even when it cannot inject everything.  The benefit scales with
+how much the target engine exposes:
+
+| Engine | What injection gives you | Caveats |
+|--------|--------------------------|---------|
+| **PostgreSQL 18** | Full: MCVs, null fractions, n_distinct, histogram bounds for all types | Row count needs a sample loaded first (PG18 scales by physical file size). Extended stats (multi-column) not yet supported. |
+| **MySQL 8.0.31+** | MCVs for low-cardinality columns, null fractions, n_distinct, integer/date histogram bounds | Equi-height histogram string equality predicate bug — string range histograms fall back to `1/row_count`. Requires 8.0.31+. |
+| **Oracle** | Row count, n_distinct, null count per column — enough for correct join ordering | No portable histogram format exists; Oracle uses internal binary encoding that cannot be set externally. |
+| **SQL Server** | Table-level row count — improves join ordering on multi-table queries | Column-level injection API does not exist. `UPDATE STATISTICS WITH ROWCOUNT` is undocumented. |
+| **Databricks** | Bootstrap an empty table before first data load | Delta collects file stats on every write; UC managed tables with Predictive Optimization run ANALYZE automatically — injection rarely needed. |
+
+> **Stats injection is a bootstrap, not a permanent substitute.**  Always run native
+> `ANALYZE` / `UPDATE STATISTICS` / `DBMS_STATS.GATHER_TABLE_STATS` after loading
+> production data to replace the bootstrap with real statistics.
+>
+> Full details, per-engine workarounds, and function reference: [`docs/stats_transpiler.md`](docs/stats_transpiler.md)
+
+---
+
+Three capabilities, each useful alone — more powerful together:
+
+| Pillar | What it does | Key functions |
+|--------|-------------|---------------|
+| **Stats transpiler** ⭐ | Collect column statistics (null rates, cardinality, MCVs, histograms) from any database; store as dialect-free YAML; inject into any target so the query optimizer sees production-scale distributions immediately | `collect_table_stats` / `dump_stats` / `load_stats` |
+| **DDL transpiler** | Parse `CREATE TABLE` from any dialect; emit correct DDL for any other — types, defaults, constraints, all semantics preserved | `parse_ddl` / `emit_ddl` |
+| **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data | `build_dataframe_from_canonical` |
+
+**Supported dialects**: MySQL · PostgreSQL · SQL Server · Oracle · Databricks
+
+---
+
+### Overview
+
+```mermaid
+flowchart LR
+    A["① Stats Transpiler ⭐\ncollect_table_stats\ndump_stats · load_stats"]
+    B[("② Portable YAML\nschema.yaml · stats.yaml")]
+    C["③ DDL Transpiler\nparse_ddl · emit_ddl"]
+    D["④ Stats-Driven\nTabular Data\nbuild_dataframe"]
+
+    A <-->|"collect / inject\nany dialect"| B
+    C <-->|"parse / emit\nany dialect"| B
+    B -->|"schema + stats"| D
+```
+
+---
+
+### Expanded view
+
+```mermaid
+flowchart LR
+    subgraph SRC["Source DB (any dialect)"]
+        S1["MySQL DDL"]
+        S2["PostgreSQL DDL"]
+        S3["SQL Server DDL"]
+        S4["Oracle DDL"]
+    end
+
+    subgraph YAML["Portable YAML (dialect-free)"]
+        SCH[("schema.yaml")]
+        STA[("stats.yaml")]
+    end
+
+    subgraph TGT["Target DB (any dialect)"]
+        T1["Databricks DDL"]
+        T2["PostgreSQL DDL"]
+        T3["MySQL DDL"]
+        T4["SQL Server DDL"]
+    end
+
+    subgraph GEN["Stats-Driven Tabular Data"]
+        DF["Spark DataFrame"]
+        DB[("Loaded DB")]
+        ST["TableStats\nnull% · cardinality · min/max · MCVs"]
+    end
+
+    SRC -- "① collect_table_stats()" --> STA
+    STA -- "① inject into target optimizer" --> TGT
+    SRC -- "③ parse_ddl()" --> SCH
+    SCH -- "③ emit_ddl()" --> TGT
+    SCH -- "④ schema" --> DF
+    STA -- "④ stats" --> DF
+    DF  -- "load rows" --> DB
+    DB  -- "collect_table_stats()" --> ST
+    ST  -. "stats feedback loop" .-> DF
+```
+
+---
+
+### Detail
+
+**① Stats transpiler** ⭐ — collect statistics from any source, inject into any target:
+```
+  collect_table_stats(mysql_conn, "orders", dialect="mysql")
+        │
+        ▼  dump_stats(db_stats, "orders_stats.yaml")   ←  portable, dialect-free
+        │
+        ▼  load_stats("orders_stats.yaml")             →  DatabaseStats object
+        │
+        ├──►  build_dataframe_from_canonical(…, stats)  →  generate matching tabular data
+        │
+        └──►  [TODO] inject into PostgreSQL 18:  pg_restore_attribute_stats(…)
+              inject into SQL Server:             UPDATE STATISTICS WITH ROWCOUNT
+              inject into Oracle:                 DBMS_STATS.SET_COLUMN_STATS(…)
+              → query optimizer sees production distributions before data is loaded
+```
+
+**③ DDL transpiler** — parse any dialect, emit any dialect:
+```
+MySQL / PostgreSQL / SQL Server / Oracle DDL
+        │
+        ▼  parse_ddl(sql, dialect="…")
+  CanonicalTableSchema  ──────────────────►  schema.yaml  (portable YAML)
+        │
+        ├──►  emit_ddl("databricks")   →  Databricks / Delta Lake
+        ├──►  emit_ddl("postgres")     →  PostgreSQL
+        ├──►  emit_ddl("mysql")        →  MySQL
+        └──►  emit_ddl("sqlserver")    →  SQL Server
+```
+
+**② Portable schema** — one YAML file, any target:
+```
+  dump_schema(tables, "schema.yaml")   ←  version-controllable, dialect-free
+  load_canonical("schema.yaml")        →  list[CanonicalTableSchema]
+  emit_ddl(tables[0], "oracle")        →  ready to run on any database
+```
+
+**③ Stats-driven tabular data** — collect real statistics, generate matching rows:
+```
+  schema.yaml  +  TableStats (optional)
+        │
+        ▼  build_dataframe_from_canonical(spark, rows=N, stats=…)
+  Spark DataFrame  ──►  load into live DB
+                                │
+                                ▼  collect_table_stats(conn, "table")
+                           TableStats
+                     (null%, cardinality, min/max, MCVs)
+                                │
+                                └──►  feed back  ──►  next generation
+                                      (distributions converge each round)
 ```
 
 ---
 
 ## Three copy-paste examples
 
-### 1 — Translate DDL across databases
+### 1 — Transpile DDL across databases
 
 ```python
 from src.schema_parser import parse_ddl, emit_ddl
@@ -76,7 +224,7 @@ CREATE TABLE IF NOT EXISTS "orders" (
 
 ---
 
-### 2 — Save / load the canonical schema as YAML
+### 2 — Save as portable schema (YAML)
 
 ```python
 from src.schema_parser import parse_ddl, dump_schema, load_canonical, emit_ddl
@@ -108,7 +256,7 @@ tables:
 
 ---
 
-### 3 — Generate statistics-driven synthetic data
+### 3 — Generate stats-driven tabular data
 
 ```python
 from src.schema_parser import (
@@ -142,7 +290,7 @@ The generated DataFrame is parameterized by:
 
 ---
 
-### 4 — Stats feedback loop: generate → load → measure → improve
+### 4 — Stats feedback loop: transpile → load → measure → improve
 
 This is the full production workflow.  Generate an initial dataset using heuristic
 defaults, load it into a real database, measure what the database actually contains,
@@ -242,7 +390,9 @@ columns (e.g. random integers) use min/max ranges instead, preserving full sprea
 
 ---
 
-## Supported inputs
+## Supported dialects for transpilation
+
+### Inputs — parse DDL from
 
 | Format | Function | Notes |
 |--------|----------|-------|
@@ -251,29 +401,35 @@ columns (e.g. random integers) use min/max ranges instead, preserving full sprea
 | SQL Server DDL (SSMS Scripts) | `parse_ddl(sql, "sqlserver")` | |
 | Oracle DDL | `parse_ddl(sql, "oracle")` | |
 | Databricks DDL | `parse_ddl(sql, "databricks")` | |
-| Canonical YAML | `load_canonical("schema.yaml")` | round-trip format |
+| Portable schema YAML | `load_canonical("schema.yaml")` | dialect-free round-trip format |
 | YData / Syda YAML | `parse_ydata_yaml(data)` | |
 | SDV metadata JSON | `parse_sdv_metadata(data)` | |
 | Pipeline YAML | `parse_pipeline_tables(data)` | |
-| **Auto-detect** | `load_schema("file")` | detects format from content |
+| **Auto-detect** | `load_schema("file")` | infers format from content |
 
-## Supported outputs
+### Outputs — transpile DDL to
 
-| Target | emit_ddl dialect |
-|--------|-----------------|
+| Target dialect | `emit_ddl` argument |
+|----------------|---------------------|
 | Databricks / Delta Lake | `"databricks"` |
 | PostgreSQL | `"postgres"` |
 | MySQL | `"mysql"` |
 | SQL Server | `"sqlserver"` |
 | Oracle | `"oracle"` |
 
+Every semantic correction is applied automatically during transpilation —
+e.g. `TINYINT(1)` → `BOOLEAN` (PostgreSQL), `DATETIME` → `DATETIME2` (SQL Server),
+`AUTO_INCREMENT` → `SERIAL` (PostgreSQL) / `GENERATED ALWAYS AS IDENTITY` (Oracle).
+
 ---
 
-## Canonical YAML formats
+## Portable schema — canonical YAML formats
 
-Both DDL schemas and statistics are stored as dialect-agnostic YAML.  Either file
-can be committed to version control, shared across teams, and loaded against any
-target database without modification.
+The portable schema YAML is the central intermediate representation.  Both the
+DDL schema and the column statistics are stored as dialect-agnostic YAML files
+that can be committed to version control, shared across teams, and retargeted at
+any database without modification.  A schema collected from MySQL today can drive
+a Databricks Delta table or an Oracle schema tomorrow — no manual conversion needed.
 
 ### Schema YAML (`schema.yaml`)
 
@@ -621,9 +777,53 @@ df = build_dataframe_from_canonical(spark, tables[0], rows=100_000,
 
 ---
 
-## Statistics — three levels of fidelity
+## Stats transpiler — the database migration use case
 
-Statistics determine which distribution properties are reflected in the generated data.  Three levels are available:
+When you migrate a database, the query optimizer on the target knows nothing about
+your data.  Its statistics are either empty or based on a tiny test dataset.
+Bad statistics → bad query plans → slow queries → frustrated users on day one.
+
+The conventional fix is to load all production data, then run `ANALYZE` / `UPDATE STATISTICS`.
+That takes hours or days on large databases, and requires production data to be present.
+
+**The stats transpiler approach**: collect statistics from the source database *before*
+migration, store them as portable YAML, then inject them directly into the target
+database's statistics catalog.  The optimizer sees production-scale distributions
+immediately, with no data loaded.
+
+```python
+import pymysql
+from src.schema_parser import collect_table_stats, dump_stats, load_stats, DatabaseStats
+
+# 1. Collect statistics from the SOURCE database (MySQL)
+src_conn = pymysql.connect(host="prod-mysql", user="reader", password="…", db="orders_db")
+stats = [collect_table_stats(src_conn, t, dialect="mysql") for t in ["orders", "customers"]]
+dump_stats(DatabaseStats(tables=stats), "production_stats.yaml")
+
+# 2. Migrate DDL (transpile schema)
+#    parse_ddl(…, dialect="mysql") → emit_ddl(…, dialect="postgres")  [see Example 1]
+
+# 3. Inject statistics into TARGET database (PostgreSQL)
+#    [TODO: pg_restore_attribute_stats() bridge — see roadmap]
+pg_stats = load_stats("production_stats.yaml")
+# → optimizer knows: orders has 50M rows, status has 4 distinct values (42% 'pending'),
+#   total ranges from $4.99–$9987, created_at histogram spans 5 years
+#   → index vs sequential scan decisions match production from minute one
+```
+
+> **Status**: statistics collection and portable YAML are production-ready.
+> Injecting into target optimizer statistics catalogs (`pg_restore_attribute_stats`,
+> `DBMS_STATS.SET_COLUMN_STATS`, `UPDATE STATISTICS WITH ROWCOUNT`) is on the roadmap —
+> see the TODO item.  PostgreSQL 18 independently validated this need by shipping
+> `pg_dump --statistics-only` for the same reason.
+
+---
+
+## Stats-driven tabular data — three levels of fidelity
+
+Column statistics control how closely the generated tabular data matches the
+source database's distributions.  Three levels are available, from zero-dependency
+heuristics to real measurements collected from a live system:
 
 ```python
 from src.schema_parser import make_default_stats, collect_table_stats, load_stats, dump_stats, DatabaseStats
@@ -676,7 +876,7 @@ handled through the same override mechanism.
 
 ---
 
-## Full pipeline
+## Full pipeline — transpile · portable schema · tabular data
 
 ```
 Source schema (any format)
@@ -746,11 +946,11 @@ make test-live-synth      # full generate → load → stats → regenerate → 
 
 ---
 
-## Verified round-trip coverage
+## Verified transpiler coverage
 
-`make test-live-all` executes **~2600 parametrized tests** against real databases.
-Every canonical type, constraint, and default is verified with a full
-DDL → YAML → DDL → execute → introspect → compare cycle.
+`make test-live-all` executes **~2600 parametrized tests** against real databases,
+verifying the full transpile → YAML → retranspile → execute → introspect → compare cycle
+for every canonical type, constraint, and default.
 
 | Database | Versions tested |
 |----------|----------------|
@@ -765,7 +965,7 @@ distributions match within ±15% null fraction and ±5× cardinality.
 
 ---
 
-## For AI agents (Cursor, Claude, etc.)
+## API for AI agents (Cursor, Claude, etc.)
 
 The public API is intentionally narrow and composable:
 

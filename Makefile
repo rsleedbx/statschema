@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -70,6 +70,7 @@ test-live-all:
 	  tests/test_live_adventureworks.py \
 	  tests/test_live_chinook.py \
 	  tests/test_live_oracle_hr.py \
+	  tests/test_live_stats_transpiler.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -144,6 +145,23 @@ test-live-mautic:
 	MAUTIC_MYSQL_PASS=$(or $(MAUTIC_MYSQL_PASS),mauticpass) \
 	MAUTIC_MYSQL_DB=$(or $(MAUTIC_MYSQL_DB),mautic) \
 	$(PYTEST_TEST) tests/test_live_mautic.py -v
+
+## Run live stats transpiler tests (proves stats injection works on PG18, Oracle, SQL Server)
+## Prerequisites: pg18 Podman container, Oracle XE Lima VM, SQL Server 22 Lima VM
+## pg18:  podman run -d --name pg18 -e POSTGRES_PASSWORD=postgres -p 5418:5432 postgres:18
+test-live-stats-transpiler:
+	ORACLE_HOST=$(or $(ORACLE_HOST),127.0.0.1) \
+	ORACLE_PORT=$(or $(ORACLE_PORT),1521) \
+	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
+	SQLSERVER_PASS=$(SQLSERVER_PASS) \
+	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
+	$(PYTEST_TEST) tests/test_live_stats_transpiler.py -v
+
+## Run Databricks stats injection tests using local PySpark + delta-spark (no live Databricks cluster needed)
+## The tests use table_format="parquet" locally (delta-spark 4.x ANALYZE TABLE workaround).
+## Prerequisites: delta-spark is included in requirements-test.txt (make venv-test installs it).
+test-live-stats-databricks:
+	$(PYTEST_TEST) tests/test_live_stats_transpiler.py::TestDatabricksStatsInjection -v
 
 ## Run live synthetic data pipeline tests (MySQL 8, PG 16, SQL Server 22; Spark + dbldatagen required)
 ## Credentials are loaded from .env automatically.
