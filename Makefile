@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -62,9 +62,12 @@ test-live-all:
 	ORACLE_SERVICE=$(or $(ORACLE_SERVICE),XE) \
 	CRDB_SINGLE_PORT=$(or $(CRDB_SINGLE_PORT),26257) \
 	CRDB_MULTI_PORT=$(or $(CRDB_MULTI_PORT),26267) \
+	MARIADB_LTS_PORT=$(or $(MARIADB_LTS_PORT),3310) \
+	MARIADB_NEW_PORT=$(or $(MARIADB_NEW_PORT),3311) \
 	$(PYTEST_TEST) \
 	  tests/test_live_roundtrip.py \
 	  tests/test_live_mysql.py \
+	  tests/test_live_mariadb.py \
 	  tests/test_live_pg.py \
 	  tests/test_live_sqlserver.py \
 	  tests/test_live_oracle.py \
@@ -102,6 +105,12 @@ test-live-pg:
 test-live-mysql:
 	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
 	$(PYTEST_TEST) tests/test_live_mysql.py -v
+
+## Usage: make test-live-mariadb
+## Override ports: make test-live-mariadb MARIADB_LTS_PORT=3310 MARIADB_NEW_PORT=3311
+test-live-mariadb:
+	MARIADB_LTS_PORT=$(or $(MARIADB_LTS_PORT),3310) MARIADB_NEW_PORT=$(or $(MARIADB_NEW_PORT),3311) \
+	$(PYTEST_TEST) tests/test_live_mariadb.py -v
 
 ## Run live Oracle XE tests (requires: limactl start --name=oracle config/lima/oracle.yaml)
 ## Credentials are loaded from .env automatically.

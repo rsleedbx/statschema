@@ -100,6 +100,7 @@ CI: keep `make test` as the default job; run `test-live-*` only when containers/
 | **NeonDB** | Done | Aliases `neon` / `neondb` → Postgres DDL path. Live tests use [`neondatabase/neon_local`](https://hub.docker.com/r/neondatabase/neon_local) (cloud proxy), not `neondatabase/neon` (storage binaries). `sslmode=require` by default; prefer `NEON_DATABASE_URL` if discrete host/port settings fail. |
 | **CockroachDB** | Done | Aliases `cockroach` / `cockroachdb` / `crdb` → Postgres DDL path. Two Podman topologies: single-node (port 26257) and 3-node multi-region (ports 26267–26269). `INT` is 64-bit (`int8`) in CRDB vs 32-bit in Postgres. `BYTEA` is accepted but `information_schema` reports `bytes`. Multi-region tests cover `LOCALITY GLOBAL`, `REGIONAL BY TABLE`, and `REGIONAL BY ROW`. |
 | **CockroachDB (new grammar)** | Not needed | Standard Postgres DDL executes on CockroachDB without modification. Multi-region DDL (`LOCALITY …`) is CRDB-specific syntax that is not round-tripped through the canonical model — it is applied directly in the live tests. |
+| **MariaDB** | Done | Aliases `mariadb` / `maria` / `mariadb_columnstore` → MySQL DDL path. Two Podman versions: 10.11 LTS (port 3310) and 11.4 (port 3311). `JSON` stored as `longtext` in `information_schema` on MariaDB ≤ 10.4; reported as `json` from 10.5+. Native `UUID` type added in 10.7. DDL emitted with `dialect="mysql"` executes unchanged. |
 
 ---
 

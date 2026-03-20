@@ -148,6 +148,7 @@ python3.11 -m venv .venv_test
 | `make test-spark` | `pytest tests/ -v -k "generate_data"` | Only the 3 Spark data-gen tests |
 | `make test-live-sqlserver` | `SQLSERVER_PASS=… SQLSERVER_PORT=14330 pytest tests/test_live_sqlserver.py -v` | Live SQL Server tests (Lima VM) |
 | `make test-live-mysql` | `pytest tests/test_live_mysql.py -v` | Live MySQL 5.7 + 8.x tests (Podman) |
+| `make test-live-mariadb` | `pytest tests/test_live_mariadb.py -v` | Live MariaDB 10.11 LTS + 11.4 tests (Podman) |
 | `make test-live-pg` | `pytest tests/test_live_pg.py -v` | Live PostgreSQL 14 + 16 tests (Podman) |
 | `make test-live-neon` | `pytest tests/test_live_neon.py -v` | Live Neon via [Neon Local](https://hub.docker.com/r/neondatabase/neon_local) (cloud API key) |
 | `make test-live-cockroachdb` | `CRDB_SINGLE_PORT=26257 CRDB_MULTI_PORT=26267 pytest tests/test_live_cockroachdb.py -v` | Live CockroachDB — single-node + multi-region (Podman) |
@@ -175,6 +176,7 @@ python3.11 -m venv .venv_test
 | `tests/test_v1_bridge.py` | ~50 | No | No |
 | `tests/test_live_sqlserver.py` | 14 | No | **Yes** – SQL Server via Lima VM |
 | `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
+| `tests/test_live_mariadb.py` | ~20 | No | **Yes** – MariaDB 10.11 + 11.4 via Podman |
 | `tests/test_live_pg.py` | ~18 | No | **Yes** – PostgreSQL 14 + 16 via Podman |
 | `tests/test_live_neon.py` | 4 | No | **Yes** – Neon Local proxy (`neondatabase/neon_local`) |
 | `tests/test_live_cockroachdb.py` | ~20 | No | **Yes** – CockroachDB single-node + multi-region (Podman) |
@@ -198,6 +200,7 @@ required credentials are not set, so `make test` always completes cleanly:
 |-----------|----------------|
 | `test_live_sqlserver.py` | `SQLSERVER_PASS` not set or port closed |
 | `test_live_mysql.py` | port 3357 or 3384 closed |
+| `test_live_mariadb.py` | port 3310 or 3311 closed |
 | `test_live_pg.py` | port 5414 or 5416 closed |
 | `test_live_neon.py` | Neon Local port closed (default `NEON_LOCAL_PORT`) |
 | `test_live_cockroachdb.py` | `CRDB_SINGLE_PORT` (26257) and `CRDB_MULTI_PORT` (26267) both closed |
@@ -730,6 +733,7 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`conftest.py`](../conftest.py) – auto JAVA_HOME detection
 - [`tests/test_live_sqlserver.py`](../tests/test_live_sqlserver.py) – live SQL Server test suite
 - [`tests/test_live_mysql.py`](../tests/test_live_mysql.py) – live MySQL 5.7 + 8.x test suite
+- [`tests/test_live_mariadb.py`](../tests/test_live_mariadb.py) – live MariaDB 10.11 LTS + 11.4 test suite
 - [`tests/test_live_pg.py`](../tests/test_live_pg.py) – live PostgreSQL 14 + 16 test suite
 - [`tests/test_live_neon.py`](../tests/test_live_neon.py) – live Neon Local test suite (Neon cloud + `neon_local` proxy)
 - [`tests/test_live_oracle.py`](../tests/test_live_oracle.py) – live Oracle XE test suite (20 tests)
