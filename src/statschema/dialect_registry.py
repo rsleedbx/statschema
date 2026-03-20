@@ -26,6 +26,9 @@ DIALECT_ALIASES: dict[str, str] = {
     "cockroach":   "postgres",   # CockroachDB — Postgres wire protocol; DDL is Postgres-compatible
     "cockroachdb": "postgres",
     "crdb":        "postgres",
+    "mariadb":     "mysql",      # MariaDB — MySQL wire protocol; DDL is MySQL-compatible
+    "maria":       "mysql",
+    "mariadb_columnstore": "mysql",
     "mssql":       "sqlserver",
     "tsql":        "sqlserver",
     "azure_sql":   "sqlserver",
@@ -49,6 +52,11 @@ SCHEMA_SOURCE_POSTGRES_ALIASES: frozenset[str] = frozenset(
     {"postgresql", "pg", "neon", "neondb", "cockroach", "cockroachdb", "crdb"}
 )
 
+# ``schema_source`` / ``format_hint`` strings that mean MySQL-flavored DDL (not enum members).
+SCHEMA_SOURCE_MYSQL_ALIASES: frozenset[str] = frozenset(
+    {"mariadb", "maria", "mariadb_columnstore"}
+)
+
 # All strings valid as ``load_schema(..., format_hint=...)`` when loading a ``.sql`` path.
 DDL_FILE_FORMAT_HINTS: frozenset[str] = frozenset(DIALECT_ALIASES.keys()) | frozenset(
     CANONICAL_DIALECTS
@@ -70,6 +78,7 @@ __all__ = [
     "CANONICAL_DIALECTS",
     "DDL_FILE_FORMAT_HINTS",
     "DIALECT_ALIASES",
+    "SCHEMA_SOURCE_MYSQL_ALIASES",
     "SCHEMA_SOURCE_POSTGRES_ALIASES",
     "SQLGLOT_DIALECT",
     "normalize_dialect",

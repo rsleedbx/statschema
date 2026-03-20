@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from .dialect_registry import DDL_FILE_FORMAT_HINTS, SCHEMA_SOURCE_POSTGRES_ALIASES
+from .dialect_registry import DDL_FILE_FORMAT_HINTS, SCHEMA_SOURCE_MYSQL_ALIASES, SCHEMA_SOURCE_POSTGRES_ALIASES
 from .model import CanonicalTableSchema
 from .ydata_parser import parse_ydata_yaml, parse_ydata_multi_yaml
 from .pipeline_parser import parse_pipeline_config
@@ -41,6 +41,8 @@ def get_schema_source_from_data(data: dict[str, Any]) -> SchemaSource | None:
             return SchemaSource.YDATA
         if s in SCHEMA_SOURCE_POSTGRES_ALIASES:
             return SchemaSource.POSTGRES
+        if s in SCHEMA_SOURCE_MYSQL_ALIASES:
+            return SchemaSource.MYSQL
         try:
             return SchemaSource(s)
         except ValueError:
@@ -143,6 +145,8 @@ def load_schema(
         raw = format_hint.strip().lower()
         if raw in SCHEMA_SOURCE_POSTGRES_ALIASES:
             format_hint = SchemaSource.POSTGRES
+        elif raw in SCHEMA_SOURCE_MYSQL_ALIASES:
+            format_hint = SchemaSource.MYSQL
         elif raw:
             try:
                 format_hint = SchemaSource(raw)

@@ -1,6 +1,6 @@
 # Running Real Databases Locally on macOS (Apple Silicon)
 
-This guide shows how to run **SQL Server, MySQL, PostgreSQL, Oracle, NeonDB, and CockroachDB** locally
+This guide shows how to run **SQL Server, MySQL, MariaDB, PostgreSQL, Oracle, NeonDB, and CockroachDB** locally
 on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 
 > **Podman, not Docker.**  Docker Desktop requires a paid commercial licence for
@@ -17,6 +17,7 @@ on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 | **Neon** | Podman + [Neon Local](https://hub.docker.com/r/neondatabase/neon_local) | any | 55433→5432 (example) | Local proxy to Neon cloud; not the [`neondatabase/neon`](https://hub.docker.com/r/neondatabase/neon) binaries image |
 | **CockroachDB** | Podman (native ARM64) | arm64 | 26257 (single) / 26267–26269 (multi-region) | Official ARM64 image (v22+); single-node and 3-node multi-region |
 | **MySQL** | Podman (native ARM) | arm64 | 3357 / 3384 | Official ARM64 image |
+| **MariaDB** | Podman (native ARM64) | arm64 | 3310 / 3311 | Official ARM64 image; MySQL DDL-compatible |
 | **SQL Server** | Lima VM + QEMU (x86_64) | x86_64 | **14330** | No ARM64 build exists — see note below |
 | **Oracle XE** | Lima VM + Podman + QEMU (x86_64) | x86_64 | **1521** | No ARM64 build exists |
 
@@ -440,6 +441,77 @@ brew install mysql
 brew services start mysql
 mysql -u root
 ```
+
+---
+
+## MariaDB (Podman, native ARM64)
+
+The live test suite (`tests/test_live_mariadb.py`) runs against **MariaDB 10.11 (LTS)** and
+**MariaDB 11.4** in one `pytest` run.  Both containers must be running before executing the tests.
+
+MariaDB ships official ARM64 images and runs at native speed inside the Podman VM.  DDL is
+MySQL-compatible, so the same `emit_ddl(dialect="mysql")` output runs on both.  The `dialect=
+"mariadb"` alias and `schema_source: mariadb` tag resolve to `mysql` through the dialect registry.
+
+### Start both versions
+
+```bash
+# MariaDB 10.11 LTS
+podman run -d --name mariadb1011 \
+  -e MARIADB_ROOT_PASSWORD=testpass \
+  -e MARIADB_DATABASE=testdb \
+  -p 3310:3306 \
+  docker.io/library/mariadb:10.11
+
+# MariaDB 11.4
+podman run -d --name mariadb114 \
+  -e MARIADB_ROOT_PASSWORD=testpass \
+  -e MARIADB_DATABASE=testdb \
+  -p 3311:3306 \
+  docker.io/library/mariadb:11.4
+```
+
+### Run the live tests
+
+```bash
+make test-live-mariadb
+# or directly:
+.venv_test/bin/pytest tests/test_live_mariadb.py -v
+```
+
+Override port defaults:
+
+```bash
+MARIADB_LTS_PORT=3310 MARIADB_NEW_PORT=3311 make test-live-mariadb
+```
+
+### Connect manually
+
+```bash
+# MariaDB 10.11
+mysql -h 127.0.0.1 -P 3310 -u root -ptestpass testdb
+
+# MariaDB 11.4
+mysql -h 127.0.0.1 -P 3311 -u root -ptestpass testdb
+```
+
+### Stop / remove
+
+```bash
+podman stop mariadb1011 mariadb114
+podman rm   mariadb1011 mariadb114
+```
+
+### Known type normalizations (MariaDB)
+
+| Input type | `information_schema` reports | Notes |
+|---|---|---|
+| `TINYINT(1)` / `BOOLEAN` | `tinyint` | MariaDB's boolean idiom; same as MySQL |
+| `TEXT` / `LONGTEXT` | `text` | Both map to canonical unbounded string; `emit_ddl` re-emits as `TEXT` |
+| `JSON` | `text` | MariaDB stores JSON as LONGTEXT+CHECK; round-trip emits `TEXT` |
+| `UUID` | `uuid` (10.7+), `char` / `varchar` (older) | Native UUID type added in 10.7 |
+| `BIGINT UNSIGNED` | `decimal` | No signed 64-bit equivalent; widened to DECIMAL(20,0) |
+| `CHAR(n)` | `char` | Canonical model preserves CHAR on re-emit |
 
 ---
 
