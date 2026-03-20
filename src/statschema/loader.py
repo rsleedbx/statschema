@@ -1,6 +1,6 @@
 """
 Detect schema format and load into canonical table(s).
-Supports: sdv, ydata, pipeline; mysql, postgres, sqlserver (schema-only DDL from mysqldump, pg_dump, mssql-scripter).
+Supports: sdv, ydata, pipeline; mysql, postgres (incl. Neon), sqlserver (schema-only DDL from mysqldump, pg_dump, mssql-scripter).
 """
 
 import json
@@ -38,6 +38,8 @@ def get_schema_source_from_data(data: dict[str, Any]) -> SchemaSource | None:
         s = str(val).strip().lower()
         if s == "syda":
             return SchemaSource.YDATA
+        if s in ("neon", "neondb"):
+            return SchemaSource.POSTGRES
         try:
             return SchemaSource(s)
         except ValueError:
@@ -127,7 +129,7 @@ def load_schema(
             dialect = None
             if format_hint is not None:
                 hint = format_hint.value if isinstance(format_hint, SchemaSource) else str(format_hint).strip().lower()
-                dialect = hint if hint in ("mysql", "postgres", "sqlserver") else None
+                dialect = hint if hint in ("mysql", "postgres", "neon", "neondb", "sqlserver") else None
             return parse_ddl_file(path, dialect=dialect)
         data, stem_name = _load_data_from_path(path)
         if table_name is None and stem_name:
@@ -138,7 +140,9 @@ def load_schema(
     # Normalize format_hint to SchemaSource
     if isinstance(format_hint, str):
         raw = format_hint.strip().lower()
-        if raw:
+        if raw in ("neon", "neondb"):
+            format_hint = SchemaSource.POSTGRES
+        elif raw:
             try:
                 format_hint = SchemaSource(raw)
             except ValueError:

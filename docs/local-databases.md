@@ -1,6 +1,6 @@
 # Running Real Databases Locally on macOS (Apple Silicon)
 
-This guide shows how to run **SQL Server, MySQL, PostgreSQL, and Oracle** locally
+This guide shows how to run **SQL Server, MySQL, PostgreSQL, Oracle, and NeonDB (via Neon Local)** locally
 on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 
 > **Podman, not Docker.**  Docker Desktop requires a paid commercial licence for
@@ -14,6 +14,7 @@ on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 | Database | Method | Arch | Port | Why |
 |----------|--------|------|------|-----|
 | **PostgreSQL** | Podman (native ARM) | arm64 | 5414 / 5416 | Official ARM64 image |
+| **Neon** | Podman + [Neon Local](https://hub.docker.com/r/neondatabase/neon_local) | any | 55433→5432 (example) | Local proxy to Neon cloud; not the [`neondatabase/neon`](https://hub.docker.com/r/neondatabase/neon) binaries image |
 | **MySQL** | Podman (native ARM) | arm64 | 3357 / 3384 | Official ARM64 image |
 | **SQL Server** | Lima VM + QEMU (x86_64) | x86_64 | **14330** | No ARM64 build exists — see note below |
 | **Oracle XE** | Lima VM + Podman + QEMU (x86_64) | x86_64 | **1521** | No ARM64 build exists |
@@ -126,6 +127,39 @@ PGPASSWORD=testpass psql -h 127.0.0.1 -p 5416 -U postgres -d testdb
 ```bash
 podman stop pg14 pg16
 podman rm   pg14 pg16
+```
+
+## Neon (Neon Local — cloud-backed Postgres endpoint)
+
+[Neon](https://github.com/neondatabase/neon) is serverless PostgreSQL. For **application-style tests**
+(`psycopg2`, DDL, `information_schema`), use the **`neondatabase/neon_local`** image on
+[Docker Hub](https://hub.docker.com/r/neondatabase/neon_local), which exposes Postgres on **5432**
+inside the container. It requires a [Neon API key and project ID](https://neon.tech/docs/local/neon-local).
+
+The **`neondatabase/neon`** image ([Docker Hub](https://hub.docker.com/r/neondatabase/neon)) contains
+storage/compute binaries and defaults to **pageserver**, not a Postgres wire port — do not use it for
+these integration tests.
+
+### Start Neon Local (Podman)
+
+```bash
+podman run -d --name neon-local \
+  -p 55433:5432 \
+  -e NEON_API_KEY=<your_api_key> \
+  -e NEON_PROJECT_ID=<your_project_id> \
+  docker.io/neondatabase/neon_local:latest
+```
+
+Connection (see also `.env.example`): user `neon`, password `npg`, database often `neondb`.
+
+**TLS (common failure):** Neon and Neon Local expect an encrypted session. The live tests default to
+`sslmode=require`. If you still see connection errors, set **`NEON_DATABASE_URL`** in `.env` to the
+full connection string from the Neon console (it includes the correct SSL mode). For a broken TLS
+proxy in local-only experiments only, try `NEON_SSLMODE=disable`.
+
+```bash
+make test-live-neon
+# or: .venv_test/bin/pytest tests/test_live_neon.py -v
 ```
 
 ### Known type normalizations (PostgreSQL)

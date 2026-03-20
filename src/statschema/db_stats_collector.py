@@ -8,7 +8,7 @@ so that synthetic data is driven by real measured distributions.
 Supported databases
 -------------------
   mysql       pymysql connection  (or any PEP-249 connection to MySQL/MariaDB)
-  postgres    psycopg2 connection (or any PEP-249 connection to PostgreSQL)
+  postgres    psycopg2 connection (or any PEP-249 connection to PostgreSQL / Neon)
   sqlserver   pymssql connection  (or any PEP-249 connection to SQL Server)
 
 Usage
@@ -62,7 +62,7 @@ def collect_table_stats(
     ----------
     conn        PEP-249 database connection (autocommit or manual commit OK).
     table       Table name (unquoted).
-    dialect     One of "mysql", "postgres", "sqlserver".
+    dialect     One of "mysql", "postgres" (or "neon" / "neondb"), "sqlserver".
     schema      Schema / database name (optional; uses current schema if None).
     columns     List of column names to collect stats for.
                 If None, introspects via information_schema.
@@ -72,7 +72,7 @@ def collect_table_stats(
     TableStats  Populated with row_count and per-column ColumnStats.
     """
     d = dialect.lower().strip()
-    if d in ("postgresql", "pg"):
+    if d in ("postgresql", "pg", "neon", "neondb"):
         d = "postgres"
     if d in ("mssql", "tsql"):
         d = "sqlserver"

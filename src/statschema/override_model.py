@@ -349,7 +349,7 @@ class OverrideSpec:
             return self.reserved_words
         if dialect == "oracle":
             return self.ORACLE_RESERVED
-        if dialect in ("postgres", "postgresql"):
+        if dialect in ("postgres", "postgresql", "neon", "neondb"):
             return self.POSTGRES_RESERVED
         if dialect in ("sqlserver", "mssql"):
             return self.SQLSERVER_RESERVED

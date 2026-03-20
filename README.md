@@ -1009,7 +1009,8 @@ connection, Spark session, or Java installation.
 | Document | Contents |
 |----------|----------|
 | [`docs/testing.md`](docs/testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
-| [`docs/local-databases.md`](docs/local-databases.md) | Running MySQL, PostgreSQL, SQL Server, Oracle locally with Podman / Lima |
+| [`docs/adding-a-database.md`](docs/adding-a-database.md) | Checklist for new engines (DDL/stats, Podman, live tests, **NeonDB** done; **CockroachDB** next) |
+| [`docs/local-databases.md`](docs/local-databases.md) | Running MySQL, PostgreSQL, SQL Server, Oracle, Neon Local locally with Podman / Lima |
 | [`docs/test_plan_ddl_roundtrip.md`](docs/test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
 | [`docs/synthetic_data_shortcomings.md`](docs/synthetic_data_shortcomings.md) | Known limitations of synthetic data generation and mitigations |
 | [`docs/PLAN.md`](docs/PLAN.md) | Architecture and implementation notes |

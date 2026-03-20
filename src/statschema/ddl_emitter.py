@@ -29,7 +29,7 @@ dialect defaults are used:
 Supported target dialects
 --------------------------
   mysql       MySQL 8+ / MariaDB / Aurora MySQL
-  postgres    PostgreSQL 13+ / Aurora PostgreSQL / Cloud SQL
+  postgres    PostgreSQL 13+ / Aurora PostgreSQL / Cloud SQL / Neon (neondatabase/neon)
   sqlserver   SQL Server 2019+ / Azure SQL / Synapse
   oracle      Oracle 19c+
   databricks  Databricks SQL / Unity Catalog Delta tables
@@ -490,6 +490,8 @@ _EMITTERS: dict[str, Callable[[CanonicalTableSchema, bool], str]] = {
 
 _DIALECT_ALIASES: dict[str, str] = {
     "postgresql":  "postgres",
+    "neon":        "postgres",   # Neon — serverless Postgres; same DDL as PostgreSQL
+    "neondb":      "postgres",
     "mssql":       "sqlserver",
     "tsql":        "sqlserver",
     "azure_sql":   "sqlserver",
@@ -519,7 +521,7 @@ def emit_ddl(
         Canonical table schema (from ``load_schema()`` or any parser).
     dialect:
         Target SQL dialect.  Supported values (and common aliases):
-        ``"mysql"``, ``"postgres"`` (postgresql),
+        ``"mysql"``, ``"postgres"`` (postgresql, neon, neondb),
         ``"sqlserver"`` (mssql, tsql, azure_sql, synapse),
         ``"oracle"``, ``"databricks"`` (spark, delta, dbsql).
     if_not_exists:
