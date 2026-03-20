@@ -1,0 +1,118 @@
+# Lima VM – IBM Db2 Community Edition 11.5 (x86_64 Ubuntu 22.04, Podman)
+#
+# Image: icr.io/db2_community/db2  (replaces the deprecated ibmcom/db2 on Docker Hub)
+# Note: No ARM64 image exists for Db2. Lima + QEMU emulates x86_64 stably.
+#
+# Usage:
+#   limactl start --name=db2 config/lima/db2.yaml   # first boot takes 5-10 min
+#   limactl stop  db2
+#   limactl start db2                                # container restarts via systemd
+#   limactl delete db2                               # destroy VM and all data
+#
+# Wait for Db2 to be ready (first boot):
+#   until limactl shell db2 -- podman logs db2ce 2>/dev/null \
+#         | grep -q "Setup has completed"; do echo "waiting..."; sleep 15; done
+#
+# Connection (from macOS host):
+#   Python (ibm_db_dbi):
+#     import ibm_db_dbi
+#     conn = ibm_db_dbi.connect(
+#         "DATABASE=TESTDB;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=testpass;",
+#         "", "")
+#   db2 CLI (inside VM):
+#     limactl shell db2 -- su - db2inst1 -c "db2 connect to testdb"
+#
+# Why Lima + QEMU instead of Podman directly on macOS?
+#   IBM Db2 has no ARM64 Linux image. Lima + QEMU provides stable x86_64
+#   emulation independently of Rosetta 2.
+#
+# Why Podman inside the VM?
+#   Daemonless, rootless-capable, no commercial licence requirement.
+
+arch: "x86_64"
+
+# icr.io/db2_community/db2:latest (11.5.9+) requires x86-64-v2 microarchitecture
+# (SSE4.2, POPCNT, etc.).  QEMU's default "qemu64" CPU model is baseline x86-64 (v1)
+# and triggers "Fatal glibc error: CPU does not support x86-64-v2".
+# Haswell emulates a 2013-era Intel Core i7 which satisfies all x86-64-v2 requirements.
+cpuType:
+  x86_64: "Haswell-noTSX-IBRS"
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
+
+memory: "4GiB"
+cpus: 2
+disk: "40GiB"
+
+mounts:
+  - location: "~"
+  - location: "/tmp/lima"
+    writable: true
+
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestPort: 50000
+    hostIP: "0.0.0.0"
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -e
+      apt-get update -y
+      apt-get install -y podman netcat-openbsd
+
+      # Allow the lima user to run Podman in rootless mode
+      loginctl enable-linger lima 2>/dev/null || true
+
+      # Create a directory for persistent Db2 database storage
+      mkdir -p /opt/db2data
+      chown -R lima:lima /opt/db2data
+
+      # Pull and start IBM Db2 Community Edition.
+      # Requires --privileged (Db2 needs kernel capabilities for IPC and shared memory).
+      # icr.io/db2_community/db2 is the IBM Container Registry location;
+      # ibmcom/db2 on Docker Hub is deprecated/sunsetted.
+      podman run -d \
+        --name db2ce \
+        --privileged=true \
+        -p 50000:50000 \
+        -e LICENSE=accept \
+        -e DB2INST1_PASSWORD=testpass \
+        -e DBNAME=testdb \
+        -e ARCHIVE_LOGS=false \
+        -e AUTOCONFIG=false \
+        -v /opt/db2data:/database \
+        icr.io/db2_community/db2
+
+      # Enable auto-restart on VM start/stop cycles
+      podman generate systemd --new --name db2ce \
+        > /etc/systemd/system/container-db2ce.service
+      systemctl enable --now container-db2ce
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 600s bash -c "
+        until podman logs db2ce 2>/dev/null | grep -q 'Setup has completed'; do
+          sleep 10
+        done
+      "; then
+        echo >&2 "Db2 CE did not finish setup within 10 minutes"
+        exit 1
+      fi
+      # Extra wait for port to be ready after setup completes
+      sleep 15
+      if ! nc -z localhost 50000; then
+        echo >&2 "Db2 port 50000 not listening after setup"
+        exit 1
+      fi
+    hint: |
+      Db2 CE is still initialising (first boot takes 5-10 min).
+      Watch progress: limactl shell db2 -- podman logs -f db2ce
+      Wait for: "Setup has completed"

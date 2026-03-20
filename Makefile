@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -64,6 +64,9 @@ test-live-all:
 	CRDB_MULTI_PORT=$(or $(CRDB_MULTI_PORT),26267) \
 	MARIADB_LTS_PORT=$(or $(MARIADB_LTS_PORT),3310) \
 	MARIADB_NEW_PORT=$(or $(MARIADB_NEW_PORT),3311) \
+	DB2_HOST=$(or $(DB2_HOST),127.0.0.1) \
+	DB2_PORT=$(or $(DB2_PORT),50000) \
+	DB2_PASS=$(or $(DB2_PASS),testpass) \
 	$(PYTEST_TEST) \
 	  tests/test_live_roundtrip.py \
 	  tests/test_live_mysql.py \
@@ -79,6 +82,7 @@ test-live-all:
 	  tests/test_live_stats_transpiler.py \
 	  tests/test_live_neon.py \
 	  tests/test_live_cockroachdb.py \
+	  tests/test_live_db2.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -111,6 +115,15 @@ test-live-mysql:
 test-live-mariadb:
 	MARIADB_LTS_PORT=$(or $(MARIADB_LTS_PORT),3310) MARIADB_NEW_PORT=$(or $(MARIADB_NEW_PORT),3311) \
 	$(PYTEST_TEST) tests/test_live_mariadb.py -v
+
+## Usage: make test-live-db2
+## Requires: limactl start --name=db2 config/lima/db2.yaml (first boot ~5-10 min)
+## Override: make test-live-db2 DB2_PORT=50000 DB2_PASS=testpass
+test-live-db2:
+	DB2_HOST=$(or $(DB2_HOST),127.0.0.1) \
+	DB2_PORT=$(or $(DB2_PORT),50000) \
+	DB2_PASS=$(or $(DB2_PASS),testpass) \
+	$(PYTEST_TEST) tests/test_live_db2.py -v
 
 ## Run live Oracle XE tests (requires: limactl start --name=oracle config/lima/oracle.yaml)
 ## Credentials are loaded from .env automatically.
