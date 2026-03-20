@@ -1,6 +1,6 @@
 # Running Real Databases Locally on macOS (Apple Silicon)
 
-This guide shows how to run **SQL Server, MySQL, PostgreSQL, Oracle, and NeonDB (via Neon Local)** locally
+This guide shows how to run **SQL Server, MySQL, PostgreSQL, Oracle, NeonDB, and CockroachDB** locally
 on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 
 > **Podman, not Docker.**  Docker Desktop requires a paid commercial licence for
@@ -15,6 +15,7 @@ on macOS with Apple Silicon (M1/M2/M3/M4) for development and testing.
 |----------|--------|------|------|-----|
 | **PostgreSQL** | Podman (native ARM) | arm64 | 5414 / 5416 | Official ARM64 image |
 | **Neon** | Podman + [Neon Local](https://hub.docker.com/r/neondatabase/neon_local) | any | 55433→5432 (example) | Local proxy to Neon cloud; not the [`neondatabase/neon`](https://hub.docker.com/r/neondatabase/neon) binaries image |
+| **CockroachDB** | Podman (native ARM64) | arm64 | 26257 (single) / 26267–26269 (multi-region) | Official ARM64 image (v22+); single-node and 3-node multi-region |
 | **MySQL** | Podman (native ARM) | arm64 | 3357 / 3384 | Official ARM64 image |
 | **SQL Server** | Lima VM + QEMU (x86_64) | x86_64 | **14330** | No ARM64 build exists — see note below |
 | **Oracle XE** | Lima VM + Podman + QEMU (x86_64) | x86_64 | **1521** | No ARM64 build exists |
@@ -190,6 +191,156 @@ brew install postgresql@16
 brew services start postgresql@16
 psql -U $(whoami) -d postgres
 ```
+
+---
+
+## CockroachDB (Podman, native ARM64)
+
+[CockroachDB](https://www.cockroachlabs.com) uses the Postgres wire protocol; `psycopg2` connects without modification.
+The live test suite (`tests/test_live_cockroachdb.py`) parametrises over two topologies:
+
+| Topology | Containers | Ports | Purpose |
+|----------|-----------|-------|---------|
+| **single-node** | `crdb-single` | 26257 (SQL) / 8080 (UI) | DDL round-trip tests, type normalization |
+| **multi-region** | `crdb1` `crdb2` `crdb3` | 26267–26269 (SQL) / 8083–8085 (UI) | LOCALITY GLOBAL / REGIONAL BY TABLE / REGIONAL BY ROW |
+
+Both use `--insecure` (no TLS); `sslmode=disable` in psycopg2.
+
+### Single-node setup
+
+```bash
+podman run -d --name crdb-single \
+  -p 26257:26257 -p 8080:8080 \
+  cockroachdb/cockroach:latest start-single-node \
+  --insecure \
+  --listen-addr=0.0.0.0:26257 \
+  --http-addr=0.0.0.0:8080 \
+  --advertise-addr=127.0.0.1:26257
+
+# Wait for cluster initialisation (~5 s), then create test database
+sleep 5
+podman exec crdb-single \
+  cockroach sql --insecure --host=localhost:26257 \
+  -e "CREATE DATABASE IF NOT EXISTS testdb;"
+```
+
+### Run the single-node live tests
+
+```bash
+make test-live-cockroachdb
+# or directly:
+.venv_test/bin/python -m pytest tests/test_live_cockroachdb.py -v -k single-node
+```
+
+### Connect manually (single-node)
+
+```bash
+podman exec -it crdb-single cockroach sql --insecure --host=localhost:26257 --database=testdb
+# Admin UI: http://localhost:8080
+```
+
+---
+
+### Multi-region setup (3-node cluster)
+
+Three nodes each with a different locality region; node-1 is the test entry point.
+
+```bash
+# 1 – shared Podman network
+podman network create crdb_net
+
+# 2 – Node 1 (us-east1)
+podman run -d --name crdb1 --network crdb_net \
+  -p 26267:26257 -p 8083:8080 \
+  cockroachdb/cockroach:latest start \
+  --insecure \
+  --locality=region=us-east1 \
+  --advertise-addr=crdb1 \
+  --join=crdb1,crdb2,crdb3 \
+  --listen-addr=0.0.0.0:26257 \
+  --http-addr=0.0.0.0:8080
+
+# 3 – Node 2 (us-central1)
+podman run -d --name crdb2 --network crdb_net \
+  -p 26268:26257 -p 8084:8080 \
+  cockroachdb/cockroach:latest start \
+  --insecure \
+  --locality=region=us-central1 \
+  --advertise-addr=crdb2 \
+  --join=crdb1,crdb2,crdb3 \
+  --listen-addr=0.0.0.0:26257 \
+  --http-addr=0.0.0.0:8080
+
+# 4 – Node 3 (us-west1)
+podman run -d --name crdb3 --network crdb_net \
+  -p 26269:26257 -p 8085:8080 \
+  cockroachdb/cockroach:latest start \
+  --insecure \
+  --locality=region=us-west1 \
+  --advertise-addr=crdb3 \
+  --join=crdb1,crdb2,crdb3 \
+  --listen-addr=0.0.0.0:26257 \
+  --http-addr=0.0.0.0:8080
+
+# 5 – Bootstrap the cluster (run once after all nodes are up)
+sleep 5
+podman exec crdb1 cockroach init --insecure --host=crdb1:26257
+
+# 6 – Create the test database with multi-region configuration
+sleep 5
+podman exec crdb1 cockroach sql --insecure --host=crdb1:26257 -e "
+  CREATE DATABASE IF NOT EXISTS testdb PRIMARY REGION 'us-east1';
+  ALTER DATABASE testdb ADD REGION 'us-central1';
+  ALTER DATABASE testdb ADD REGION 'us-west1';
+"
+```
+
+### Run the multi-region live tests
+
+```bash
+make test-live-cockroachdb
+# or directly:
+.venv_test/bin/python -m pytest tests/test_live_cockroachdb.py -v -k multi-region
+```
+
+Multi-region tests verify:
+- `SHOW REGIONS FROM DATABASE` reports ≥ 2 regions.
+- `LOCALITY GLOBAL` tables are created and reported correctly.
+- `LOCALITY REGIONAL BY TABLE IN <region>` pins a table to one region.
+- `LOCALITY REGIONAL BY ROW` auto-injects the `crdb_region` column.
+- `emit_ddl(dialect="postgres")` output executes unchanged on the multi-region cluster.
+
+### Connect manually (multi-region)
+
+```bash
+# Connect to any node; cluster state is shared across all three
+podman exec -it crdb1 cockroach sql --insecure --host=crdb1:26257 --database=testdb
+# Admin UI (node-1): http://localhost:8083
+```
+
+### Stop / remove
+
+```bash
+# Single-node
+podman stop crdb-single && podman rm crdb-single
+
+# Multi-region
+podman stop crdb1 crdb2 crdb3 && podman rm crdb1 crdb2 crdb3
+podman network rm crdb_net
+```
+
+### Known type normalizations (CockroachDB)
+
+| Postgres input type | Canonical type | CockroachDB udt_name | Note |
+|--------------------|----------------|----------------------|------|
+| `INTEGER` | `integer` | `int8` | CockroachDB `INT` is 64-bit; Postgres `INT` is 32-bit |
+| `BIGINT` | `long` | `int8` | Same 64-bit backing type |
+| `BYTEA` | `binary` | `bytes` | CRDB native name; `BYTEA` accepted as alias |
+| `TEXT` / `VARCHAR(n)` | `string` | `text` | CRDB normalises all string types to `text` |
+| `FLOAT` / `DOUBLE PRECISION` | `float` / `double` | `float8` | Same 64-bit backing type |
+| `DECIMAL(p,s)` / `NUMERIC(p,s)` | `decimal` | `numeric` | Identical behaviour |
+| `TIMESTAMPTZ` | `timestamptz` | `timestamptz` | CRDB stores all timestamps as UTC |
+| `UUID` | `uuid` | `uuid` | Native UUID type; `gen_random_uuid()` available |
 
 ---
 

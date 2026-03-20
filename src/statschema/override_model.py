@@ -71,6 +71,8 @@ from typing import Any, Optional
 
 import yaml
 
+from .dialect_registry import normalize_dialect
+
 
 # ---------------------------------------------------------------------------
 # Column-level override
@@ -347,11 +349,12 @@ class OverrideSpec:
         """Return the reserved word set to use — caller-supplied or dialect default."""
         if self.reserved_words:
             return self.reserved_words
-        if dialect == "oracle":
+        d = normalize_dialect(dialect)
+        if d == "oracle":
             return self.ORACLE_RESERVED
-        if dialect in ("postgres", "postgresql", "neon", "neondb"):
+        if d == "postgres":
             return self.POSTGRES_RESERVED
-        if dialect in ("sqlserver", "mssql"):
+        if d == "sqlserver":
             return self.SQLSERVER_RESERVED
         return set()
 

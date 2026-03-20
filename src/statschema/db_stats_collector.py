@@ -41,6 +41,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .dialect_registry import normalize_dialect
 from .stats_model import ColumnStats, MostCommonValue, TableStats
 
 
@@ -71,11 +72,7 @@ def collect_table_stats(
     -------
     TableStats  Populated with row_count and per-column ColumnStats.
     """
-    d = dialect.lower().strip()
-    if d in ("postgresql", "pg", "neon", "neondb"):
-        d = "postgres"
-    if d in ("mssql", "tsql"):
-        d = "sqlserver"
+    d = normalize_dialect(dialect)
 
     if columns is None:
         columns = _introspect_columns(conn, table, d, schema)

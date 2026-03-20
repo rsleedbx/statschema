@@ -680,6 +680,15 @@ CREATE TABLE phase1_table (
         assert tables[0].columns[1].type == "string"
         assert tables[0].columns[2].type == "decimal"  # NUMERIC(10,2) is fixed-point decimal
 
+    def test_load_schema_postgresql_and_pg_schema_source_aliases(self):
+        """``schema_source`` values ``postgresql`` / ``pg`` resolve like Postgres (see ``dialect_registry``)."""
+        ddl = "CREATE TABLE t ( id integer PRIMARY KEY );"
+        for tag in ("postgresql", "pg"):
+            tables = load_schema({"schema_source": tag, "ddl": ddl})
+            assert len(tables) == 1
+            assert tables[0].name == "t"
+            assert tables[0].columns[0].type == "integer"
+
     def test_load_schema_sqlserver_ddl_from_dict(self):
         ddl = """
         CREATE TABLE [dbo].[customers] (
@@ -1246,8 +1255,7 @@ class TestDbldatagenBuilder:
         specs = to_dbldatagen_specs(table)
         assert len(specs) == 1
         assert specs[0][0] == "x"
-        # When pyspark is available, fallback is string; when not, _SPARK_TYPES is empty so still string
-        assert specs[0][2]  # kwargs present
+        assert specs[0][2]  # unknown types fall back to "string" opts
 
     def test_to_dbldatagen_specs_with_random_type_choice(self):
         table = CanonicalTableSchema(

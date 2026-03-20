@@ -74,6 +74,15 @@ Full pipeline (DDL → canonical YAML → many targets + data)
                Populated test table on Unity Catalog
 """
 
+from .dialect_registry import (
+    CANONICAL_DIALECTS,
+    DDL_FILE_FORMAT_HINTS,
+    DIALECT_ALIASES,
+    SCHEMA_SOURCE_POSTGRES_ALIASES,
+    SQLGLOT_DIALECT,
+    normalize_dialect,
+    sqlglot_dialect_name,
+)
 from .model import (
     CanonicalColumn,
     CanonicalForeignKey,
@@ -123,6 +132,14 @@ from .stats_io import (
 )
 
 __all__ = [
+    # Dialect registry (aliases, sqlglot mapping, loader hints)
+    "CANONICAL_DIALECTS",
+    "DDL_FILE_FORMAT_HINTS",
+    "DIALECT_ALIASES",
+    "SCHEMA_SOURCE_POSTGRES_ALIASES",
+    "SQLGLOT_DIALECT",
+    "normalize_dialect",
+    "sqlglot_dialect_name",
     # Canonical model
     "CanonicalColumn",
     "CanonicalForeignKey",
