@@ -15,6 +15,7 @@ CANONICAL_DIALECTS: tuple[str, ...] = (
     "sqlserver",
     "oracle",
     "databricks",
+    "db2",
 )
 
 # Dump labels / product names → canonical. Used by ``emit_ddl``, ``parse_ddl``, stats, loader hints.
@@ -29,6 +30,12 @@ DIALECT_ALIASES: dict[str, str] = {
     "mariadb":     "mysql",      # MariaDB — MySQL wire protocol; DDL is MySQL-compatible
     "maria":       "mysql",
     "mariadb_columnstore": "mysql",
+    "ibmdb2":      "db2",        # IBM Db2 — own wire protocol and DDL; no sqlglot support
+    "ibm_db2":     "db2",
+    "db2luw":      "db2",        # Db2 LUW (Linux/Unix/Windows)
+    "db2z":        "db2",        # Db2 for z/OS
+    "db2i":        "db2",        # Db2 for i (AS/400)
+    "dashdb":      "db2",        # IBM dashDB (Db2 on Cloud predecessor)
     "mssql":       "sqlserver",
     "tsql":        "sqlserver",
     "azure_sql":   "sqlserver",
@@ -40,11 +47,12 @@ DIALECT_ALIASES: dict[str, str] = {
 
 # sqlglot ``dialect=`` argument per canonical dialect
 SQLGLOT_DIALECT: dict[str, str] = {
-    "mysql": "mysql",
-    "postgres": "postgres",
-    "sqlserver": "tsql",
-    "oracle": "oracle",
+    "mysql":      "mysql",
+    "postgres":   "postgres",
+    "sqlserver":  "tsql",
+    "oracle":     "oracle",
     "databricks": "databricks",
+    "db2":        "",            # sqlglot has no Db2 dialect; use ANSI SQL (empty string)
 }
 
 # ``schema_source`` / ``format_hint`` strings that mean Postgres-flavored DDL (not enum members).
@@ -55,6 +63,11 @@ SCHEMA_SOURCE_POSTGRES_ALIASES: frozenset[str] = frozenset(
 # ``schema_source`` / ``format_hint`` strings that mean MySQL-flavored DDL (not enum members).
 SCHEMA_SOURCE_MYSQL_ALIASES: frozenset[str] = frozenset(
     {"mariadb", "maria", "mariadb_columnstore"}
+)
+
+# ``schema_source`` / ``format_hint`` strings that mean Db2 DDL (not enum members).
+SCHEMA_SOURCE_DB2_ALIASES: frozenset[str] = frozenset(
+    {"ibmdb2", "ibm_db2", "db2luw", "db2z", "db2i", "dashdb"}
 )
 
 # All strings valid as ``load_schema(..., format_hint=...)`` when loading a ``.sql`` path.
@@ -78,6 +91,7 @@ __all__ = [
     "CANONICAL_DIALECTS",
     "DDL_FILE_FORMAT_HINTS",
     "DIALECT_ALIASES",
+    "SCHEMA_SOURCE_DB2_ALIASES",
     "SCHEMA_SOURCE_MYSQL_ALIASES",
     "SCHEMA_SOURCE_POSTGRES_ALIASES",
     "SQLGLOT_DIALECT",

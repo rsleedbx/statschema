@@ -33,6 +33,9 @@ Supported target dialects
   sqlserver   SQL Server 2019+ / Azure SQL / Synapse
   oracle      Oracle 19c+
   databricks  Databricks SQL / Unity Catalog Delta tables
+  db2         IBM Db2 LUW 11.1+ (Community Edition / on Cloud)
+              Note: sqlglot has no Db2 dialect — DDL is emitted via a custom hand-written
+              emitter.  ``parse_ddl(dialect="db2")`` uses ANSI SQL parsing.
 """
 
 from __future__ import annotations
@@ -118,6 +121,23 @@ _ORACLE_DEFAULTS: dict[str, str] = {
     "binary":      "BLOB",          # no-length default; RAW(N) when length ≤ 2000
 }
 
+_DB2_DEFAULTS: dict[str, str] = {
+    "integer":     "INTEGER",
+    "long":        "BIGINT",
+    "string":      "CLOB",           # no-length string → CLOB; VARCHAR(n) when length is set
+    "uuid":        "CHAR(36)",       # Db2 has no UUID type; store as fixed-length CHAR
+    "float":       "REAL",
+    "double":      "DOUBLE",
+    "boolean":     "BOOLEAN",        # Db2 11.1+
+    "timestamp":   "TIMESTAMP",
+    "timestamptz": "TIMESTAMP WITH TIME ZONE",
+    "time":        "TIME",
+    "timetz":      "TIME",           # Db2 has no timezone-aware TIME type; degrade to TIME
+    "date":        "DATE",
+    "decimal":     "DECIMAL(18,4)",
+    "binary":      "BLOB",           # no-length default; BLOB(n) when length is set
+}
+
 _DATABRICKS_DEFAULTS: dict[str, str] = {
     "integer":     "INT",
     "long":        "BIGINT",
@@ -141,12 +161,13 @@ _DEFAULT_MAPS: dict[str, dict[str, str]] = {
     "sqlserver":  _SQLSERVER_DEFAULTS,
     "oracle":     _ORACLE_DEFAULTS,
     "databricks": _DATABRICKS_DEFAULTS,
+    "db2":        _DB2_DEFAULTS,
 }
 
 # Identifier quoting conventions
 _BACKTICK_DIALECTS  = {"mysql", "databricks"}
 _BRACKET_DIALECTS   = {"sqlserver"}
-_DQUOTE_DIALECTS    = {"postgres", "oracle"}
+_DQUOTE_DIALECTS    = {"postgres", "oracle", "db2"}
 
 
 def _quote(name: str, dialect: str) -> str:
@@ -182,6 +203,8 @@ def _build_col_type(col: CanonicalColumn, dialect: str) -> str:
                 return f"NVARCHAR({col.length})"
             if dialect == "oracle":
                 return f"VARCHAR2({col.length})"
+            if dialect == "db2":
+                return f"VARCHAR({col.length})"
             # Databricks: STRING has no length
             return defaults.get(key, "STRING")
         return defaults.get(key, "TEXT")
@@ -198,6 +221,8 @@ def _build_col_type(col: CanonicalColumn, dialect: str) -> str:
             if dialect == "oracle":
                 # Oracle RAW supports up to 2000 bytes; larger → BLOB
                 return f"RAW({col.length})" if col.length <= 2000 else "BLOB"
+            if dialect == "db2":
+                return f"BLOB({col.length})"
             # Databricks: BINARY type (no length in Databricks DDL)
             return "BINARY"
         return defaults.get(key, "VARBINARY(MAX)")
@@ -255,7 +280,7 @@ def _auto_increment_clause(col: CanonicalColumn, dialect: str) -> str:
         return ""  # expressed via SERIAL / BIGSERIAL type
     if dialect == "sqlserver":
         return " IDENTITY(1,1)"
-    if dialect in ("oracle", "databricks"):
+    if dialect in ("oracle", "databricks", "db2"):
         return " GENERATED ALWAYS AS IDENTITY"
     return ""
 
@@ -290,6 +315,12 @@ def _normalize_default(default: str, col_type: str, dialect: str) -> str:
             return "1"
         if lower in _BOOL_FALSE:
             return "0"
+    elif dialect == "db2":
+        # Db2 BOOLEAN accepts TRUE/FALSE literals (Db2 11.1+)
+        if lower in _BOOL_TRUE or lower == "1":
+            return "TRUE"
+        if lower in _BOOL_FALSE or lower == "0":
+            return "FALSE"
     elif dialect == "postgres":
         if lower in _BOOL_TRUE or lower == "1":
             return "TRUE"
@@ -375,9 +406,9 @@ def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
     name     = _quote(col.name, dialect)
     col_type = _build_col_type(col, dialect)
     auto     = _auto_increment_clause(col, dialect)
-    # Oracle IDENTITY columns are implicitly NOT NULL; adding NOT NULL after
-    # GENERATED ALWAYS AS IDENTITY causes ORA-00907.
-    if dialect == "oracle" and col.auto_increment:
+    # Oracle and Db2 IDENTITY columns are implicitly NOT NULL; the constraint
+    # clause after GENERATED ALWAYS AS IDENTITY causes a syntax error on both.
+    if dialect in ("oracle", "db2") and col.auto_increment:
         null = ""
     else:
         null = _not_null_clause(col)
@@ -464,6 +495,22 @@ def _emit_oracle(table: CanonicalTableSchema, if_not_exists: bool) -> str:
     return ddl
 
 
+def _emit_db2(table: CanonicalTableSchema, if_not_exists: bool) -> str:
+    # Db2 normalises unquoted names to uppercase internally.
+    # Quote with double-quotes (ANSI SQL) to preserve case exactly.
+    tname = _quote(table.name.upper(), "db2")
+    lines = [_col_ddl(c, "db2") for c in table.columns]
+    pk    = _primary_key_constraint(table, "db2")
+    if pk:
+        lines.append(pk)
+    body  = ",\n".join(lines)
+    ddl   = f"CREATE TABLE {tname} (\n{body}\n);"
+    if if_not_exists:
+        # Db2 11.1+ supports CREATE TABLE IF NOT EXISTS
+        ddl = f"CREATE TABLE IF NOT EXISTS {tname} (\n{body}\n);"
+    return ddl
+
+
 def _emit_databricks(table: CanonicalTableSchema, if_not_exists: bool) -> str:
     ine   = " IF NOT EXISTS" if if_not_exists else ""
     tname = _quote(table.name, "databricks")
@@ -478,6 +525,7 @@ def _emit_databricks(table: CanonicalTableSchema, if_not_exists: bool) -> str:
 _EMITTERS: dict[str, Callable[[CanonicalTableSchema, bool], str]] = {
     "mysql":      _emit_mysql,
     "postgres":   _emit_postgres,
+    "db2":        _emit_db2,
     "sqlserver":  _emit_sqlserver,
     "oracle":     _emit_oracle,
     "databricks": _emit_databricks,
@@ -532,7 +580,7 @@ def emit_ddl(
         raise ValueError(
             f"Unsupported dialect: {dialect!r}. "
             f"Supported: {SUPPORTED_DIALECTS} "
-            f"(aliases: {sorted(_DIALECT_ALIASES)})"
+            f"(aliases: {sorted(DIALECT_ALIASES)})"
         )
     return _EMITTERS[normalized](table, if_not_exists)
 
