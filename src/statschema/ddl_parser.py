@@ -15,7 +15,7 @@ semantics.
 
 Supported source dialects (auto-detected or explicit):
   mysql       mysqldump --no-data / Aurora MySQL
-  postgres    pg_dump -s / Cloud SQL PG
+  postgres    pg_dump -s / Cloud SQL PG / Neon (neondatabase/neon)
   sqlserver   mssql-scripter / SSMS Generate Scripts
   oracle      Oracle expdp DDL / SQL*Plus spool (first-class, not a fallback)
   databricks  Databricks SQL / Unity Catalog Delta
@@ -671,18 +671,24 @@ def parse_ddl(sql: str, dialect: str | None = None) -> list[CanonicalTableSchema
         Full schema dump text (mysqldump --no-data, pg_dump -s, mssql-scripter,
         Oracle expdp DDL, Databricks SHOW CREATE TABLE, …).
     dialect : str | None
-        "mysql" | "postgres" | "sqlserver" | "oracle" | "databricks" | None.
+        "mysql" | "postgres" | "neon" | "neondb" | "sqlserver" | "oracle" | "databricks" | None.
         When None, the dialect is auto-detected from SQL content.
+        ``neon`` / ``neondb`` are aliases for PostgreSQL (Neon is wire- and DDL-compatible).
     """
     if dialect is None:
         dialect = _detect_dialect(sql)
     dialect = dialect.lower().strip()
+    # Normalise aliases before _SG_DIALECT lookup so neon/postgresql/tsql resolve correctly.
+    _DIALECT_ALIASES = {
+        "tsql": "sqlserver",
+        "mssql": "sqlserver",
+        "postgresql": "postgres",
+        "neon": "postgres",
+        "neondb": "postgres",
+    }
+    dialect = _DIALECT_ALIASES.get(dialect, dialect)
     if dialect not in _SG_DIALECT:
         dialect = "mysql"   # unknown dialect: MySQL grammar is most permissive
-
-    # Normalise aliases so semantic correction logic uses canonical names
-    _DIALECT_ALIASES = {"tsql": "sqlserver", "mssql": "sqlserver", "postgresql": "postgres"}
-    dialect = _DIALECT_ALIASES.get(dialect, dialect)
 
     sg_dialect = _SG_DIALECT[dialect]
     # Minimal pre-processing for types sqlglot doesn't support in a given dialect.

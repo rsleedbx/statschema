@@ -97,6 +97,29 @@ _table = make_table
 assert_roundtrip = assert_ddl_roundtrip
 
 
+class TestNeonDialectAliases:
+    """Neon (neondatabase/neon) is Postgres-compatible; neon/neondb are dialect aliases."""
+
+    def test_emit_neon_matches_postgres(self):
+        t = _table(
+            "t",
+            _col("id", "integer", primary_key=True, not_null=True),
+            _col("name", "string", length=50),
+        )
+        pg = emit_ddl(t, "postgres", if_not_exists=False)
+        assert emit_ddl(t, "neon", if_not_exists=False) == pg
+        assert emit_ddl(t, "neondb", if_not_exists=False) == pg
+
+    def test_parse_ddl_neon_matches_postgres(self):
+        ddl = "CREATE TABLE t (id SERIAL PRIMARY KEY, body TEXT);"
+        a = parse_ddl(ddl, dialect="neon")
+        b = parse_ddl(ddl, dialect="postgres")
+        assert len(a) == len(b) == 1
+        assert emit_ddl(a[0], "postgres", if_not_exists=False) == emit_ddl(
+            b[0], "postgres", if_not_exists=False
+        )
+
+
 def _roundtrip(table, emit_dialect, parse_dialect):
     return ddl_roundtrip(table, emit_dialect, parse_dialect)
 

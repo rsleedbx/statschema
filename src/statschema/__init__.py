@@ -43,7 +43,7 @@ Goals
 
    canonical → ``emit_ddl(dialect)`` → executable DDL for the target system
 
-   Supported target dialects: mysql, postgres, sqlserver, oracle, databricks.
+   Supported target dialects: mysql, postgres (incl. Neon), sqlserver, oracle, databricks.
 
 Full pipeline (DDL → canonical YAML → many targets + data)
 -----------------------------------------------------------
@@ -57,7 +57,7 @@ Full pipeline (DDL → canonical YAML → many targets + data)
           ├──→ dump_schema("schema.yaml")          ← portable interchange format
           │
           ├──→ emit_ddl("databricks")  →  CREATE TABLE on Databricks / Unity Catalog
-          ├──→ emit_ddl("postgres")    →  CREATE TABLE on PostgreSQL (test DB)
+          ├──→ emit_ddl("postgres")    →  CREATE TABLE on PostgreSQL or Neon
           ├──→ emit_ddl("mysql")       →  CREATE TABLE on MySQL (test DB)
           ├──→ emit_ddl("sqlserver")   →  CREATE TABLE on SQL Server
           ├──→ emit_ddl("oracle")      →  CREATE TABLE on Oracle

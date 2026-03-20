@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -48,6 +48,7 @@ test-live-sqlserver:
 
 ## Run ALL live DB round-trip tests (MySQL 5.7+8, PG 14+16, SQL Server 22 must be up)
 ## Credentials are loaded from .env automatically.  Override with env vars if needed.
+## NeonDB: test_live_neon.py skips if Neon Local is not reachable (optional; see docs/local-databases.md).
 test-live-all:
 	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) \
 	MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
@@ -71,6 +72,7 @@ test-live-all:
 	  tests/test_live_chinook.py \
 	  tests/test_live_oracle_hr.py \
 	  tests/test_live_stats_transpiler.py \
+	  tests/test_live_neon.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -134,6 +136,11 @@ test-live-oracle-hr:
 	ORACLE_PORT=$(or $(ORACLE_PORT),1521) \
 	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
 	$(PYTEST_TEST) tests/test_live_oracle_hr.py -v
+
+## Run live Neon tests (Neon Local proxy; see docs/local-databases.md — neondatabase/neon_local, not neondatabase/neon)
+## Requires: podman run neon_local with NEON_API_KEY / NEON_PROJECT_ID; port mapped to NEON_LOCAL_PORT (default 55433)
+test-live-neon:
+	$(PYTEST_TEST) tests/test_live_neon.py -v
 
 ## Run live Mautic application tests (Mautic 5 + mysql8 containers; see docs/local-databases.md)
 ## Usage: make test-live-mautic

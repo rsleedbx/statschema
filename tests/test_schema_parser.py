@@ -446,6 +446,8 @@ class TestLoader:
         assert get_schema_source_from_data({"schema_format": "sdv"}) == SchemaSource.SDV
         assert get_schema_source_from_data({"format": "mysql"}) == SchemaSource.MYSQL
         assert get_schema_source_from_data({"schema_format": "postgres"}) == SchemaSource.POSTGRES
+        assert get_schema_source_from_data({"schema_source": "neon"}) == SchemaSource.POSTGRES
+        assert get_schema_source_from_data({"schema_source": "NEONDB"}) == SchemaSource.POSTGRES
 
     def test_load_schema_empty_file_raises(self, tmp_path):
         """load_schema from empty YAML/JSON file raises (ValueError for YAML; JSONDecodeError for empty JSON)."""
@@ -706,6 +708,19 @@ CREATE TABLE phase1_table (
         assert tables[0].columns[0].type == "integer"
         assert tables[0].columns[1].type == "string"
 
+    def test_load_schema_sql_file_with_format_hint_neon(self, tmp_path):
+        """NeonDB DDL path is Postgres-compatible; format hint ``neon`` must parse like PG."""
+        sql_path = tmp_path / "neon_schema.sql"
+        sql_path.write_text(
+            "CREATE TABLE t ( id integer PRIMARY KEY, label character varying(50) );",
+            encoding="utf-8",
+        )
+        tables = load_schema(sql_path, format_hint="neon")
+        assert len(tables) == 1
+        assert tables[0].name == "t"
+        assert tables[0].columns[0].type == "integer"
+        assert tables[0].columns[1].type == "string"
+
     def test_load_schema_sql_file_with_format_hint_sqlserver(self, tmp_path):
         sql_path = tmp_path / "mssql_schema.sql"
         sql_path.write_text(
@@ -806,6 +821,15 @@ class TestLoadSchemaAllFormats:
         assert len(tables[0].columns) == 2
         specs = to_dbldatagen_specs(tables[0], rows=10)
         assert len(specs) == 2
+
+    def test_load_schema_neon_alias(self):
+        data = {
+            "schema_source": "neon",
+            "ddl": "CREATE TABLE events ( id integer PRIMARY KEY, name text );",
+        }
+        tables = load_schema(data)
+        assert len(tables) == 1
+        assert tables[0].name == "events"
 
     def test_load_schema_sqlserver(self):
         data = {
