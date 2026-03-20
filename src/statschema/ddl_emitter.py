@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from .dialect_registry import DIALECT_ALIASES, normalize_dialect
 from .model import CanonicalColumn, CanonicalTableSchema
 
 
@@ -342,14 +343,8 @@ def _source_type_comment(col: CanonicalColumn, emitted_type: str, emit_dialect: 
     if not source_type:
         return ""
 
-    # Normalise dialect names for comparison (tsql/mssql → sqlserver, postgresql → postgres)
-    _DIALECT_ALIASES = {
-        "tsql": "sqlserver", "mssql": "sqlserver",
-        "postgresql": "postgres", "pg": "postgres",
-        "db2": "db2",
-    }
-    norm_src  = _DIALECT_ALIASES.get(source_dialect, source_dialect)
-    norm_emit = _DIALECT_ALIASES.get(emit_dialect, emit_dialect)
+    norm_src  = normalize_dialect(source_dialect) if source_dialect else source_dialect
+    norm_emit = normalize_dialect(emit_dialect)
 
     # Suppress for same-dialect: round-trips must be idempotent
     if norm_src and norm_src == norm_emit:
@@ -488,19 +483,6 @@ _EMITTERS: dict[str, Callable[[CanonicalTableSchema, bool], str]] = {
     "databricks": _emit_databricks,
 }
 
-_DIALECT_ALIASES: dict[str, str] = {
-    "postgresql":  "postgres",
-    "neon":        "postgres",   # Neon — serverless Postgres; same DDL as PostgreSQL
-    "neondb":      "postgres",
-    "mssql":       "sqlserver",
-    "tsql":        "sqlserver",
-    "azure_sql":   "sqlserver",
-    "synapse":     "sqlserver",
-    "spark":       "databricks",
-    "delta":       "databricks",
-    "dbsql":       "databricks",
-}
-
 SUPPORTED_DIALECTS: list[str] = sorted(_EMITTERS)
 
 
@@ -545,7 +527,7 @@ def emit_ddl(
     ...     print(emit_ddl(t, "databricks"))
     ...     print(emit_ddl(t, "postgres"))
     """
-    normalized = _DIALECT_ALIASES.get(dialect.lower().strip(), dialect.lower().strip())
+    normalized = normalize_dialect(dialect)
     if normalized not in _EMITTERS:
         raise ValueError(
             f"Unsupported dialect: {dialect!r}. "

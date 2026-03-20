@@ -138,26 +138,32 @@ try:
         StringType,
         TimestampType,
     )
-    _SPARK_TYPES: dict[str, tuple[Any, dict[str, Any]]] = {
-        "integer":    (IntegerType(),   {"minValue": 0, "maxValue": 2**31 - 1, "random": True}),
-        "long":       (LongType(),      {"minValue": 0, "maxValue": 2**63 - 1, "random": True}),
-        "string":     (StringType(),    {"prefix": "v", "random": True}),
-        "float":      (FloatType(),     {"minValue": 0.0, "maxValue": 1.0, "random": True}),
-        "double":     (DoubleType(),    {"minValue": 0.0, "maxValue": 1.0, "random": True}),
-        "boolean":    (BooleanType(),   {"random": True}),
-        "timestamp":  (TimestampType(), {"begin": "2020-01-01 00:00:00",
-                                         "end": "2024-12-31 00:00:00", "random": True}),
-        "timestamptz":(TimestampType(), {"begin": "2020-01-01 00:00:00",
-                                         "end": "2024-12-31 00:00:00", "random": True}),
-        "date":       (DateType(),      {"begin": "2020-01-01", "end": "2024-12-31",
-                                         "random": True}),
-        "decimal":    (DecimalType(18, 4), {"minValue": 0.0, "maxValue": 1e12, "random": True}),
-        "binary":     (BinaryType(),    {"random": True}),
-        "time":       (StringType(),    {"template": r"dd:dd:dd", "random": True}),
-        "timetz":     (StringType(),    {"template": r"dd:dd:dd+dd:dd", "random": True}),
-    }
-except ImportError:
-    _SPARK_TYPES = {}
+except ImportError as _pyspark_import_error:
+    raise ImportError(
+        "pyspark is required for data generation (to_dbldatagen_specs / build_dataframe_from_canonical). "
+        "Install it via: pip install pyspark>=3.5  "
+        "or run: make venv-test  "
+        f"(original error: {_pyspark_import_error})"
+    ) from _pyspark_import_error
+
+_SPARK_TYPES: dict[str, tuple[Any, dict[str, Any]]] = {
+    "integer":    (IntegerType(),      {"minValue": 0, "maxValue": 2**31 - 1, "random": True}),
+    "long":       (LongType(),         {"minValue": 0, "maxValue": 2**63 - 1, "random": True}),
+    "string":     (StringType(),       {"prefix": "v", "random": True}),
+    "float":      (FloatType(),        {"minValue": 0.0, "maxValue": 1.0, "random": True}),
+    "double":     (DoubleType(),       {"minValue": 0.0, "maxValue": 1.0, "random": True}),
+    "boolean":    (BooleanType(),      {"random": True}),
+    "timestamp":  (TimestampType(),    {"begin": "2020-01-01 00:00:00",
+                                        "end": "2024-12-31 00:00:00", "random": True}),
+    "timestamptz":(TimestampType(),    {"begin": "2020-01-01 00:00:00",
+                                        "end": "2024-12-31 00:00:00", "random": True}),
+    "date":       (DateType(),         {"begin": "2020-01-01", "end": "2024-12-31",
+                                        "random": True}),
+    "decimal":    (DecimalType(18, 4), {"minValue": 0.0, "maxValue": 1e12, "random": True}),
+    "binary":     (BinaryType(),       {"random": True}),
+    "time":       (StringType(),       {"template": r"dd:dd:dd", "random": True}),
+    "timetz":     (StringType(),       {"template": r"dd:dd:dd+dd:dd", "random": True}),
+}
 
 
 # ---------------------------------------------------------------------------

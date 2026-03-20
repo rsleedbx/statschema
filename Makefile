@@ -12,14 +12,14 @@
 
 VENV_TEST  := .venv_test
 PYTHON_TEST := $(VENV_TEST)/bin/python
-PYTEST_TEST := $(VENV_TEST)/bin/pytest
+PYTEST_TEST := $(PYTHON_TEST) -m pytest
 
 VENV_DEV   := .venv
 PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -48,7 +48,7 @@ test-live-sqlserver:
 
 ## Run ALL live DB round-trip tests (MySQL 5.7+8, PG 14+16, SQL Server 22 must be up)
 ## Credentials are loaded from .env automatically.  Override with env vars if needed.
-## NeonDB: test_live_neon.py skips if Neon Local is not reachable (optional; see docs/local-databases.md).
+## NeonDB + CockroachDB: skip automatically if containers are not running.
 test-live-all:
 	MYSQL57_PORT=$(or $(MYSQL57_PORT),3357) \
 	MYSQL8_PORT=$(or $(MYSQL8_PORT),3384) \
@@ -60,6 +60,8 @@ test-live-all:
 	ORACLE_PORT=$(or $(ORACLE_PORT),1521) \
 	ORACLE_PASS=$(or $(ORACLE_PASS),oracle) \
 	ORACLE_SERVICE=$(or $(ORACLE_SERVICE),XE) \
+	CRDB_SINGLE_PORT=$(or $(CRDB_SINGLE_PORT),26257) \
+	CRDB_MULTI_PORT=$(or $(CRDB_MULTI_PORT),26267) \
 	$(PYTEST_TEST) \
 	  tests/test_live_roundtrip.py \
 	  tests/test_live_mysql.py \
@@ -73,6 +75,7 @@ test-live-all:
 	  tests/test_live_oracle_hr.py \
 	  tests/test_live_stats_transpiler.py \
 	  tests/test_live_neon.py \
+	  tests/test_live_cockroachdb.py \
 	  -v
 
 ## Run comprehensive live round-trip tests (all Phase 1+2 cases × all live DBs + cross-dialect pipeline)
@@ -141,6 +144,13 @@ test-live-oracle-hr:
 ## Requires: podman run neon_local with NEON_API_KEY / NEON_PROJECT_ID; port mapped to NEON_LOCAL_PORT (default 55433)
 test-live-neon:
 	$(PYTEST_TEST) tests/test_live_neon.py -v
+
+## Run live CockroachDB tests (single-node and/or multi-region containers; see docs/local-databases.md)
+## Each topology skips automatically if its port is unreachable.
+test-live-cockroachdb:
+	CRDB_SINGLE_PORT=$(or $(CRDB_SINGLE_PORT),26257) \
+	CRDB_MULTI_PORT=$(or $(CRDB_MULTI_PORT),26267) \
+	$(PYTEST_TEST) tests/test_live_cockroachdb.py -v
 
 ## Run live Mautic application tests (Mautic 5 + mysql8 containers; see docs/local-databases.md)
 ## Usage: make test-live-mautic

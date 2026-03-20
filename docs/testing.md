@@ -150,6 +150,7 @@ python3.11 -m venv .venv_test
 | `make test-live-mysql` | `pytest tests/test_live_mysql.py -v` | Live MySQL 5.7 + 8.x tests (Podman) |
 | `make test-live-pg` | `pytest tests/test_live_pg.py -v` | Live PostgreSQL 14 + 16 tests (Podman) |
 | `make test-live-neon` | `pytest tests/test_live_neon.py -v` | Live Neon via [Neon Local](https://hub.docker.com/r/neondatabase/neon_local) (cloud API key) |
+| `make test-live-cockroachdb` | `CRDB_SINGLE_PORT=26257 CRDB_MULTI_PORT=26267 pytest tests/test_live_cockroachdb.py -v` | Live CockroachDB — single-node + multi-region (Podman) |
 | `make test-live-oracle` | `pytest tests/test_live_oracle.py -v` | Live Oracle XE tests (Lima VM) |
 | `make test-live-mautic` | `pytest tests/test_live_mautic.py -v` | Live Mautic application tests (Podman) |
 | `make test-live-gitea` | `pytest tests/test_live_gitea.py -v` | Live Gitea application tests (PostgreSQL) |
@@ -176,6 +177,7 @@ python3.11 -m venv .venv_test
 | `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
 | `tests/test_live_pg.py` | ~18 | No | **Yes** – PostgreSQL 14 + 16 via Podman |
 | `tests/test_live_neon.py` | 4 | No | **Yes** – Neon Local proxy (`neondatabase/neon_local`) |
+| `tests/test_live_cockroachdb.py` | ~20 | No | **Yes** – CockroachDB single-node + multi-region (Podman) |
 | `tests/test_live_oracle.py` | 20 | No | **Yes** – Oracle XE via Lima VM |
 | `tests/test_live_mautic.py` | 19 | No | **Yes** – Mautic 5 + MySQL 8 via Podman |
 | `tests/test_live_roundtrip.py` | ~300 | No | **Yes** – MySQL + PG + SQL Server |
@@ -198,6 +200,7 @@ required credentials are not set, so `make test` always completes cleanly:
 | `test_live_mysql.py` | port 3357 or 3384 closed |
 | `test_live_pg.py` | port 5414 or 5416 closed |
 | `test_live_neon.py` | Neon Local port closed (default `NEON_LOCAL_PORT`) |
+| `test_live_cockroachdb.py` | `CRDB_SINGLE_PORT` (26257) and `CRDB_MULTI_PORT` (26267) both closed |
 | `test_live_oracle.py` | port 1521 closed (or `oracledb` not installed) |
 | `test_live_mautic.py` | `mautic` DB unreachable on port 3384 |
 | `test_live_roundtrip.py` | any required port closed |

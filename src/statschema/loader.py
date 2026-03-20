@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from .dialect_registry import DDL_FILE_FORMAT_HINTS, SCHEMA_SOURCE_POSTGRES_ALIASES
 from .model import CanonicalTableSchema
 from .ydata_parser import parse_ydata_yaml, parse_ydata_multi_yaml
 from .pipeline_parser import parse_pipeline_config
@@ -38,7 +39,7 @@ def get_schema_source_from_data(data: dict[str, Any]) -> SchemaSource | None:
         s = str(val).strip().lower()
         if s == "syda":
             return SchemaSource.YDATA
-        if s in ("neon", "neondb"):
+        if s in SCHEMA_SOURCE_POSTGRES_ALIASES:
             return SchemaSource.POSTGRES
         try:
             return SchemaSource(s)
@@ -129,7 +130,7 @@ def load_schema(
             dialect = None
             if format_hint is not None:
                 hint = format_hint.value if isinstance(format_hint, SchemaSource) else str(format_hint).strip().lower()
-                dialect = hint if hint in ("mysql", "postgres", "neon", "neondb", "sqlserver") else None
+                dialect = hint if hint in DDL_FILE_FORMAT_HINTS else None
             return parse_ddl_file(path, dialect=dialect)
         data, stem_name = _load_data_from_path(path)
         if table_name is None and stem_name:
@@ -140,7 +141,7 @@ def load_schema(
     # Normalize format_hint to SchemaSource
     if isinstance(format_hint, str):
         raw = format_hint.strip().lower()
-        if raw in ("neon", "neondb"):
+        if raw in SCHEMA_SOURCE_POSTGRES_ALIASES:
             format_hint = SchemaSource.POSTGRES
         elif raw:
             try:

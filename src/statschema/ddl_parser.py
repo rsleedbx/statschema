@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Optional
 
 import sqlglot
+
+from .dialect_registry import SQLGLOT_DIALECT, normalize_dialect, sqlglot_dialect_name
 from sqlglot import exp
 from sqlglot.expressions import DataType as SgDataType
 
@@ -244,19 +246,6 @@ _FIXED_MONEY_PRECISION: dict[DT, tuple[int, int]] = {
     DT.SMALLMONEY: (10, 4),   # SQL Server SMALLMONEY → DECIMAL(10,4)
 }
 
-# sqlglot dialect name for each of our supported dialects
-_SG_DIALECT: dict[str, str] = {
-    "mysql":      "mysql",
-    "postgres":   "postgres",
-    "postgresql": "postgres",   # common alias
-    "sqlserver":  "tsql",
-    "tsql":       "tsql",       # allow "tsql" as an alias for "sqlserver"
-    "mssql":      "tsql",       # allow "mssql" as an alias for "sqlserver"
-    "oracle":     "oracle",
-    "databricks": "databricks",
-}
-
-
 # ---------------------------------------------------------------------------
 # Dialect auto-detection (heuristic on raw SQL text)
 # ---------------------------------------------------------------------------
@@ -318,7 +307,7 @@ def _source_type_str(dt: SgDataType, dialect: str) -> str:
     downstream emitted DDL) can record what the original type was, even when the
     canonical model normalises it to a wider or less-specific type.
     """
-    sg_dialect = _SG_DIALECT.get(dialect, dialect) or None
+    sg_dialect = sqlglot_dialect_name(dialect) or None
     try:
         s = dt.sql(dialect=sg_dialect).strip()
         # Strip redundant parentheses on bare types: "TIMESTAMP()" → "TIMESTAMP"
@@ -515,7 +504,7 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
         if dft_constraint:
             dft_expr = dft_constraint.args.get("this")
             if dft_expr is not None and not isinstance(dft_expr, exp.Null):
-                raw = dft_expr.sql(dialect=_SG_DIALECT.get(dialect, dialect))
+                raw = dft_expr.sql(dialect=sqlglot_dialect_name(dialect))
                 # sqlglot normalises booleans to TRUE/FALSE; lower them for
                 # consistency with conventional SQL style.
                 if raw.upper() in ("TRUE", "FALSE"):
@@ -677,20 +666,11 @@ def parse_ddl(sql: str, dialect: str | None = None) -> list[CanonicalTableSchema
     """
     if dialect is None:
         dialect = _detect_dialect(sql)
-    dialect = dialect.lower().strip()
-    # Normalise aliases before _SG_DIALECT lookup so neon/postgresql/tsql resolve correctly.
-    _DIALECT_ALIASES = {
-        "tsql": "sqlserver",
-        "mssql": "sqlserver",
-        "postgresql": "postgres",
-        "neon": "postgres",
-        "neondb": "postgres",
-    }
-    dialect = _DIALECT_ALIASES.get(dialect, dialect)
-    if dialect not in _SG_DIALECT:
+    dialect = normalize_dialect(dialect)
+    if dialect not in SQLGLOT_DIALECT:
         dialect = "mysql"   # unknown dialect: MySQL grammar is most permissive
 
-    sg_dialect = _SG_DIALECT[dialect]
+    sg_dialect = sqlglot_dialect_name(dialect)
     # Minimal pre-processing for types sqlglot doesn't support in a given dialect.
     # Oracle DDL auto-detected above → uses oracle dialect, no preprocessing needed.
     # Explicit dialect="mysql" with Oracle syntax → backward-compat preprocessing.
