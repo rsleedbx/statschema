@@ -1,12 +1,10 @@
 # statschema – local testing strategy
 
-This document is the authoritative guide for running the test suite locally and
-in CI.  It is written to be consumed directly by AI agents (Cursor, Claude, etc.)
-as well as human developers.
+How to run the test suite locally and in CI.
 
 **Repo:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema)
 
-**New database integration** (NeonDB, CockroachDB, …): follow [`docs/adding-a-database.md`](adding-a-database.md).
+**New database integration**: follow [`docs/adding-a-database.md`](adding-a-database.md) — the single contributor guide for adding any engine (Neon, CockroachDB, MariaDB, Db2, and more already done).
 
 ---
 
@@ -74,7 +72,7 @@ SparkSession.  Running from `.venv_test` (standard `pyspark`, no
 
 All passwords and endpoints are stored in a `.env` file at the **repo root** that is
 never committed to git.  `conftest.py` loads it automatically before any test runs
-via `python-dotenv`, so you don't need to export variables in every shell session.
+via `python-dotenv`.
 
 ```bash
 cp .env.example .env
@@ -102,9 +100,7 @@ Standard PyPI `pyspark` needs a JVM even in `local[1]` mode.
 brew install openjdk@17
 ```
 
-`conftest.py` at the repo root auto-detects Homebrew OpenJDK at
-`/opt/homebrew/opt/openjdk@{17,21,11}` and sets `JAVA_HOME` before any test
-runs, so you never need to export it manually.
+`conftest.py` sets `JAVA_HOME` when unset, searching `/opt/homebrew/opt/openjdk@{17,21,11}`.
 
 To make `java` available in every new shell as well (recommended):
 
@@ -218,8 +214,7 @@ required credentials are not set, so `make test` always completes cleanly:
 
 See [`docs/local-databases.md`](local-databases.md) for full setup of all databases.
 PostgreSQL and MySQL use **Podman** (native ARM64 containers — free, no licence).
-SQL Server uses **Lima + QEMU** — there is no ARM64 build of SQL Server for Linux
-and Rosetta 2-based emulation is being phased out by Apple (~macOS 28, 2027).
+SQL Server uses **Lima + QEMU**; no linux/arm64 mssql image is published.
 
 Quick-start summary for SQL Server:
 
@@ -355,8 +350,7 @@ that is called by every Spark-dependent test.  It tries two strategies in order:
       .config("spark.driver.bindAddress", "127.0.0.1")
 ```
 
-The `localhost` / `127.0.0.1` config prevents Spark from trying to resolve the
-machine's canonical hostname, which fails in sandboxed or container environments.
+Spark config: `spark.driver.host=localhost`, `spark.driver.bindAddress=127.0.0.1`.
 
 If neither strategy succeeds the calling test is **skipped** (not failed).
 
@@ -366,8 +360,7 @@ If neither strategy succeeds the calling test is **skipped** (not failed).
 
 `conftest.py` at the repo root runs automatically before any pytest collection.
 It finds a Homebrew JDK and sets `JAVA_HOME` / `PATH` if not already set.
-This makes `make test` and `.venv_test/bin/pytest tests/` work out-of-the-box
-with no shell setup required.
+
 
 ```python
 # conftest.py  (repo root)
@@ -386,7 +379,7 @@ if not os.environ.get("JAVA_HOME"):
 
 ---
 
-## Note for AI agents running tests
+## Sandboxed test runs (Cursor agent)
 
 ### Spark tests need network sandbox bypass
 
@@ -394,9 +387,7 @@ Local PySpark binds to `127.0.0.1` sockets even in `local[1]` mode.
 In Cursor's agent sandbox, network syscalls are blocked, causing:
 `java.net.SocketException: Operation not permitted`.
 
-**Workaround**: run pytest with `required_permissions: ["all"]`.
-This affects only the 3 `generate_data` tests and all live-DB tests;
-all other ~2036 tests run fine without network access.
+Run pytest with `required_permissions: ["all"]` for `generate_data` and live-DB tests.
 
 ### Live-DB tests also need sandbox bypass
 
@@ -424,8 +415,7 @@ nc -zv 127.0.0.1 14330
 ```
 
 **Oracle XE** takes 3–5 minutes to initialise its data files on first boot.
-The container restarts automatically when the VM boots, but you must wait
-for the database to be fully ready before running tests.  Use polling:
+Wait until `podman logs` shows `DATABASE IS READY TO USE`:
 
 ```bash
 until limactl shell oracle -- podman logs oracle-xe 2>/dev/null \
@@ -436,8 +426,7 @@ done
 nc -z 127.0.0.1 1521 && echo "Oracle port 1521 open"
 ```
 
-After subsequent restarts (`limactl stop oracle` + `limactl start oracle`),
-Oracle typically becomes ready within 30–60 seconds (no data file creation).
+After the first boot, Oracle is typically ready within 30–60 seconds on restart.
 
 ---
 
@@ -529,7 +518,7 @@ issue management domains.
 
 ```bash
 make test-live-gitea
-# See docs/local-databases.md – Gitea section for one-time container setup
+# See docs/databases/gitea.md for one-time container setup
 ```
 
 ---
@@ -574,7 +563,7 @@ SQL Server test target, exercising user-defined types, `MONEY`, `UNIQUEIDENTIFIE
 
 ```bash
 make test-live-adventureworks
-# See docs/local-databases.md – AdventureWorks section for one-time restore
+# See docs/databases/adventureworks.md for one-time restore
 ```
 
 ---
@@ -600,7 +589,7 @@ application-level test target, covering: `NVARCHAR`, `INTEGER`, `DECIMAL`, `DATE
 
 ```bash
 make test-live-chinook
-# See docs/local-databases.md – Chinook section for one-time script loading
+# See docs/databases/chinook.md for one-time script loading
 ```
 
 ---
@@ -627,7 +616,7 @@ required by Oracle's semantic constraints.
 
 ```bash
 make test-live-oracle-hr
-# See docs/local-databases.md – Oracle HR/CO section for one-time schema creation
+# See docs/databases/oracle-hr.md for one-time schema creation
 ```
 
 ---
@@ -652,15 +641,14 @@ types, virtual generated columns, and natural multi-instance shard patterns.
 
 | Mautic pattern | Handled by |
 |----------------|------------|
-| `GENERATED ALWAYS AS … VIRTUAL` column | Column silently dropped by `sqlglot` (not in the canonical model — this is correct behaviour) |
+| `GENERATED ALWAYS AS … VIRTUAL` column | Column silently dropped by `sqlglot` (not in the canonical model) |
 | `BIGINT UNSIGNED` FK refs | Widened to canonical `long` → emits as `BIGINT` |
 | `TINYINT(1)` boolean flags | Canonical `integer` (Mautic uses 0/1 not `BOOLEAN`) |
 | `LONGTEXT` with `DC2Type:array` comments | Canonical `string` |
 
 ### Setup
 
-See [docs/local-databases.md – Mautic section](local-databases.md#mautic-application-level-testing) for the
-full one-time setup commands.
+See [`docs/databases/mautic.md`](databases/mautic.md) for the full one-time setup commands.
 
 ```bash
 make test-live-mautic
@@ -710,7 +698,7 @@ A portable `synth_orders` table with diverse types:
 ### How to run
 
 ```bash
-# MySQL 8 + PG 16 + SQL Server 22 must be running (see docs/local-databases.md)
+# MySQL 8 + PG 16 + SQL Server 22 must be running (see docs/databases/ for setup)
 make test-live-synth SQLSERVER_PASS=<password>
 
 # or directly
@@ -750,6 +738,7 @@ SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 - [`tests/test_live_synth.py`](../tests/test_live_synth.py) – live synthetic data pipeline tests
 - [`src/statschema/db_stats_collector.py`](../src/statschema/db_stats_collector.py) – collect `TableStats` from a live database
 - [`config/lima/oracle.yaml`](../config/lima/oracle.yaml) – Lima VM config for Oracle XE
-- [`docs/local-databases.md`](local-databases.md) – how to run real databases locally
+- [`docs/local-databases.md`](local-databases.md) – index of all local database setup guides
+- [`docs/databases/`](databases/) – per-database setup pages
 - [`docs/test_plan_ddl_roundtrip.md`](test_plan_ddl_roundtrip.md) – DDL round-trip test plan
 - [`docs/synthetic_data_shortcomings.md`](synthetic_data_shortcomings.md) – known synthetic data limitations

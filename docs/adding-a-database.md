@@ -6,7 +6,7 @@ Use this checklist when integrating a new engine as **source/target** for DDL, s
 
 ## 0. Pre-checks (before writing any code)
 
-Run these four checks up front.  Each one determines how much work is ahead.
+Run these four checks before implementation.
 
 ### 0a. sqlglot dialect support
 
@@ -49,7 +49,7 @@ docker manifest inspect <image>:<tag> | grep architecture
 ### 0d. Wire protocol compatibility
 
 Does this engine speak Postgres wire protocol?  MySQL wire protocol?  If so, aliasing may be
-sufficient; no new emitter or canonical dialect is needed.
+
 
 | Protocol | Action |
 |----------|--------|
@@ -160,12 +160,18 @@ def _emit_mydb(table: CanonicalTableSchema, if_not_exists: bool) -> str:
 
 ## 3b. Podman or Lima setup
 
-Add a section under [`docs/local-databases.md`](local-databases.md):
+Create **`docs/databases/<engine>.md`** using the existing files as templates
+([`postgres.md`](databases/postgres.md), [`oracle.md`](databases/oracle.md),
+[`db2.md`](databases/db2.md)), then add a row to the strategy table in
+[`docs/local-databases.md`](local-databases.md).
+
+The per-database file should contain:
 
 - Image name (Docker Hub / ghcr.io / ICR), ports, environment variables.
-- Start/stop commands.
-- **Arch note**: does an ARM64 image exist?  If not, use `config/lima/<engine>.yaml` (see the
-  Oracle and Db2 configs as templates).
+- Start/stop/delete commands (self-contained — no cross-referencing required).
+- **Arch note**: does an ARM64 image exist?  If not, add `config/lima/<engine>.yaml` (use
+  [`config/lima/oracle.yaml`](../config/lima/oracle.yaml) or
+  [`config/lima/db2.yaml`](../config/lima/db2.yaml) as templates).
 - Type normalizations table (what introspection returns vs what was emitted).
 - Troubleshooting section for the two or three most common startup failures.
 
@@ -185,8 +191,7 @@ Add `tests/test_live_<engine>.py`:
   view (`information_schema.COLUMNS`, `SYSCAT.COLUMNS`, `ALL_TAB_COLUMNS`, etc.).
 - Include at least one test that verifies the dialect alias (`dialect='ibmdb2'` etc.) round-trips.
 - Include at least one test that verifies `schema_source: <alias>` resolves via `load_schema`.
-- Document type differences in the module docstring — this becomes the reference for future
-  assertion fixes when the engine returns unexpected type names.
+- Document type differences in the module docstring.
 
 **Common assertion pattern:**
 ```python
@@ -219,8 +224,7 @@ make test-live-<engine>          # only the new module (container/VM running)
 make test-live-all               # all live modules
 ```
 
-`make test` uses `$(PYTHON_TEST) -m pytest` (not the venv-generated `pytest` script) — this
-avoids shebang path issues when the repo is cloned to a different location.
+`make test` uses `$(PYTHON_TEST) -m pytest`.
 
 CI: keep `make test` as the default job; run `test-live-*` only when containers/secrets are available.
 
@@ -242,4 +246,5 @@ CI: keep `make test` as the default job; run `test-live-*` only when containers/
 - [`src/statschema/dialect_registry.py`](../src/statschema/dialect_registry.py) — single source of truth for dialect aliases
 - [`src/statschema/ddl_emitter.py`](../src/statschema/ddl_emitter.py) — per-dialect DDL emitters (add custom emitters here)
 - [`docs/testing.md`](testing.md) — test layout and Makefile targets
-- [`docs/local-databases.md`](local-databases.md) — local container/VM recipes
+- [`docs/local-databases.md`](local-databases.md) — local database index (links to per-database setup pages)
+- [`docs/databases/`](databases/) — per-database setup pages (postgres, mysql, mariadb, cockroachdb, sqlserver, oracle, db2, neon)

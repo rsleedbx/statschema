@@ -78,7 +78,7 @@ Three capabilities, each useful alone — more powerful together:
 | **DDL transpiler** | Parse `CREATE TABLE` from any dialect; emit correct DDL for any other — types, defaults, constraints, all semantics preserved | `parse_ddl` / `emit_ddl` |
 | **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data | `build_dataframe_from_canonical` |
 
-**Supported dialects**: MySQL · PostgreSQL · SQL Server · Oracle · Databricks
+**Supported dialects**: MySQL · MariaDB · PostgreSQL · CockroachDB · Neon · SQL Server · Oracle · IBM Db2 · Databricks
 
 ---
 
@@ -399,9 +399,12 @@ columns (e.g. random integers) use min/max ranges instead, preserving full sprea
 | Format | Function | Notes |
 |--------|----------|-------|
 | MySQL DDL (`mysqldump --no-data`) | `parse_ddl(sql, "mysql")` | |
+| MariaDB DDL | `parse_ddl(sql, "mariadb")` | alias → mysql path |
 | PostgreSQL DDL (`pg_dump -s`) | `parse_ddl(sql, "postgres")` | |
+| CockroachDB DDL | `parse_ddl(sql, "cockroachdb")` | alias → postgres path |
 | SQL Server DDL (SSMS Scripts) | `parse_ddl(sql, "sqlserver")` | |
 | Oracle DDL | `parse_ddl(sql, "oracle")` | |
+| IBM Db2 DDL | `parse_ddl(sql, "db2")` | ANSI SQL parse (no sqlglot Db2 dialect) |
 | Databricks DDL | `parse_ddl(sql, "databricks")` | |
 | Portable schema YAML | `load_canonical("schema.yaml")` | dialect-free round-trip format |
 | YData / Syda YAML | `parse_ydata_yaml(data)` | |
@@ -414,14 +417,15 @@ columns (e.g. random integers) use min/max ranges instead, preserving full sprea
 | Target dialect | `emit_ddl` argument |
 |----------------|---------------------|
 | Databricks / Delta Lake | `"databricks"` |
-| PostgreSQL | `"postgres"` |
-| MySQL | `"mysql"` |
+| PostgreSQL / Neon / CockroachDB | `"postgres"` |
+| MySQL / MariaDB | `"mysql"` |
 | SQL Server | `"sqlserver"` |
 | Oracle | `"oracle"` |
+| IBM Db2 LUW | `"db2"` |
 
 Every semantic correction is applied automatically during transpilation —
 e.g. `TINYINT(1)` → `BOOLEAN` (PostgreSQL), `DATETIME` → `DATETIME2` (SQL Server),
-`AUTO_INCREMENT` → `SERIAL` (PostgreSQL) / `GENERATED ALWAYS AS IDENTITY` (Oracle).
+`AUTO_INCREMENT` → `SERIAL` (PostgreSQL) / `GENERATED ALWAYS AS IDENTITY` (Oracle / Db2).
 
 ---
 
@@ -948,6 +952,25 @@ make test-live-synth      # full generate → load → stats → regenerate → 
 
 ---
 
+## Contributing: adding a new database
+
+**[`docs/adding-a-database.md`](docs/adding-a-database.md)** is the single contributor guide for integrating a new engine as a source or target for DDL transpilation, stats collection, and live testing.  It covers everything from pre-checks (sqlglot support, ARM64 availability, wire protocol) through dialect registration, optional custom DDL emitter, local container/VM setup, live test module, and Makefile wiring.
+
+Local database setup recipes live in **[`docs/local-databases.md`](docs/local-databases.md)** (index) and individual per-database pages under **[`docs/databases/`](docs/databases/)**:
+
+| Page | Method |
+|------|--------|
+| [postgres.md](docs/databases/postgres.md) | Podman, native ARM64 |
+| [neon.md](docs/databases/neon.md) | Podman + Neon Local cloud proxy |
+| [cockroachdb.md](docs/databases/cockroachdb.md) | Podman, native ARM64 (single-node + multi-region) |
+| [mysql.md](docs/databases/mysql.md) | Podman, native ARM64 |
+| [mariadb.md](docs/databases/mariadb.md) | Podman, native ARM64 |
+| [sqlserver.md](docs/databases/sqlserver.md) | Lima VM + QEMU (x86_64) |
+| [oracle.md](docs/databases/oracle.md) | Lima VM + Podman + QEMU (x86_64) |
+| [db2.md](docs/databases/db2.md) | Lima VM + Podman + QEMU (x86_64) |
+
+---
+
 ## Verified transpiler coverage
 
 `make test-live-all` executes **~2600 parametrized tests** against real databases,
@@ -957,8 +980,13 @@ for every canonical type, constraint, and default.
 | Database | Versions tested |
 |----------|----------------|
 | MySQL | 5.7, 8.4 |
+| MariaDB | 10.11 LTS, 11.4 |
 | PostgreSQL | 14, 16 |
+| CockroachDB | latest (single-node + 3-node multi-region) |
+| Neon | Neon Local proxy |
 | SQL Server | 2022 |
+| Oracle | XE 21c |
+| IBM Db2 | CE 11.5 |
 | Databricks | Unity Catalog (via `databricks-connect`) |
 
 Live synthetic data tests (`make test-live-synth`) additionally verify that
@@ -1009,8 +1037,9 @@ connection, Spark session, or Java installation.
 | Document | Contents |
 |----------|----------|
 | [`docs/testing.md`](docs/testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
-| [`docs/adding-a-database.md`](docs/adding-a-database.md) | Checklist for new engines (DDL/stats, Podman, live tests, **NeonDB** done; **CockroachDB** next) |
-| [`docs/local-databases.md`](docs/local-databases.md) | Running MySQL, PostgreSQL, SQL Server, Oracle, Neon Local locally with Podman / Lima |
+| [`docs/adding-a-database.md`](docs/adding-a-database.md) | **Contributor guide**: add a new engine end-to-end (pre-checks, dialect registry, emitter, tests, docs) |
+| [`docs/local-databases.md`](docs/local-databases.md) | Index of all local database setup guides |
+| [`docs/databases/`](docs/databases/) | Per-database setup pages (postgres, mysql, mariadb, cockroachdb, sqlserver, oracle, db2, neon, …) |
 | [`docs/test_plan_ddl_roundtrip.md`](docs/test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
 | [`docs/synthetic_data_shortcomings.md`](docs/synthetic_data_shortcomings.md) | Known limitations of synthetic data generation and mitigations |
 | [`docs/PLAN.md`](docs/PLAN.md) | Architecture and implementation notes |
