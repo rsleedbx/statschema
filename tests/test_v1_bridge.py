@@ -783,3 +783,142 @@ class TestFullPipeline:
         assert plan.seed == 12345
         # Table seed derived deterministically from global seed
         assert plan.tables[0].seed == 12345  # first table: seed + 0
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# J. FK distribution control
+# ───────────────────────────────────────────────────────────────────────────
+
+class TestFKDistribution:
+    """
+    CanonicalForeignKey distribution fields → ForeignKeyRef distribution object.
+
+    Covers:
+    - Model round-trip (to_dict / from_dict)
+    - Default serialisation is compact (zipf omitted)
+    - All supported distributions flow through _fk_v1_distribution
+    - fk_constraints wiring in to_v1_plan (preferred over legacy foreign_keys)
+    - Legacy foreign_keys dict still defaults to Zipf (backward compat)
+    - Composite FK aligns child→parent column by index
+    """
+
+    ORDERS_DDL = """
+    CREATE TABLE orders (
+        order_id    BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        customer_id BIGINT NOT NULL,
+        total       DECIMAL(12,2) NOT NULL
+    );
+    """
+
+    def _orders_with_fk(self, **fk_kwargs) -> CanonicalForeignKey:
+        return CanonicalForeignKey(
+            columns=["customer_id"],
+            parent_table="customers",
+            parent_columns=["customer_id"],
+            **fk_kwargs,
+        )
+
+    def _orders_table(self, fk: CanonicalForeignKey):
+        from src.statschema import parse_ddl
+        table = parse_ddl(self.ORDERS_DDL, dialect="mysql")[0]
+        table.fk_constraints = [fk]
+        return table
+
+    # ── _fk_v1_distribution → correct v1 object ───────────────────────────
+
+    @pytest.mark.parametrize("dist,params,expected_type,check", [
+        ("zipf",        {},                    Zipf,        lambda d: d.exponent == 1.2),
+        ("zipf",        {"exponent": 2.5},     Zipf,        lambda d: d.exponent == 2.5),
+        ("uniform",     {},                    None,        None),   # Uniform has no attrs to check
+        ("exponential", {"rate": 0.5},         None,        None),
+    ])
+    def test_fk_v1_distribution(self, dist, params, expected_type, check):
+        from src.statschema.v1_bridge import _fk_v1_distribution
+        fk = self._orders_with_fk(fk_distribution=dist, fk_distribution_params=params)
+        dist_obj = _fk_v1_distribution(fk)
+        if expected_type is not None:
+            assert isinstance(dist_obj, expected_type)
+        if check:
+            assert check(dist_obj)
+
+    def test_unknown_distribution_defaults_to_zipf(self):
+        from src.statschema.v1_bridge import _fk_v1_distribution
+        fk = self._orders_with_fk(fk_distribution="invented_dist")
+        assert isinstance(_fk_v1_distribution(fk), Zipf)
+
+    # ── fk_constraints wired in to_v1_plan ────────────────────────────────
+
+    def test_fk_constraints_wired(self):
+        """Structured fk_constraints produce a ForeignKeyRef."""
+        table = self._orders_table(self._orders_with_fk())
+        plan = to_v1_plan(table)
+        cs = _find_col(plan, "orders", "customer_id")
+        assert cs.foreign_key is not None
+        assert cs.foreign_key.ref == "customers.customer_id"
+
+    def test_fk_constraints_uniform_distribution(self):
+        table = self._orders_table(self._orders_with_fk(fk_distribution="uniform"))
+        plan = to_v1_plan(table)
+        cs = _find_col(plan, "orders", "customer_id")
+        assert not isinstance(cs.foreign_key.distribution, Zipf)
+
+    def test_fk_constraints_zipf_exponent(self):
+        fk = self._orders_with_fk(
+            fk_distribution="zipf",
+            fk_distribution_params={"exponent": 2.0},
+        )
+        table = self._orders_table(fk)
+        plan = to_v1_plan(table)
+        cs = _find_col(plan, "orders", "customer_id")
+        assert isinstance(cs.foreign_key.distribution, Zipf)
+        assert cs.foreign_key.distribution.exponent == 2.0
+
+    def test_fk_constraints_preferred_over_legacy(self):
+        """When both fk_constraints and legacy foreign_keys are present, structured wins."""
+        from src.statschema import parse_ddl
+        table = parse_ddl(self.ORDERS_DDL, dialect="mysql")[0]
+        table.fk_constraints = [
+            self._orders_with_fk(fk_distribution="uniform")
+        ]
+        table.foreign_keys = [
+            {"from_col": "customer_id", "to_table": "customers", "to_col": "customer_id"}
+        ]
+        plan = to_v1_plan(table)
+        cs = _find_col(plan, "orders", "customer_id")
+        assert not isinstance(cs.foreign_key.distribution, Zipf)  # structured wins
+
+    def test_legacy_fk_dict_defaults_to_zipf(self):
+        """Backward compat: legacy foreign_keys dict still gets Zipf(1.2)."""
+        from src.statschema import parse_ddl
+        table = parse_ddl(self.ORDERS_DDL, dialect="mysql")[0]
+        table.foreign_keys = [
+            {"from_col": "customer_id", "to_table": "customers", "to_col": "customer_id"}
+        ]
+        plan = to_v1_plan(table)
+        cs = _find_col(plan, "orders", "customer_id")
+        assert isinstance(cs.foreign_key.distribution, Zipf)
+
+    def test_composite_fk_column_alignment(self):
+        """Composite FK aligns child columns to parent columns by position."""
+        from src.statschema import parse_ddl
+        ddl = """
+        CREATE TABLE order_lines (
+            order_id  BIGINT NOT NULL,
+            line_no   INT NOT NULL,
+            qty       INT NOT NULL,
+            PRIMARY KEY (order_id, line_no)
+        );
+        """
+        table = parse_ddl(ddl, dialect="mysql")[0]
+        table.fk_constraints = [
+            CanonicalForeignKey(
+                columns=["order_id", "line_no"],
+                parent_table="orders",
+                parent_columns=["order_id", "line_no"],
+            )
+        ]
+        plan = to_v1_plan(table)
+        oid = _find_col(plan, "order_lines", "order_id")
+        lno = _find_col(plan, "order_lines", "line_no")
+        assert oid.foreign_key.ref == "orders.order_id"
+        assert lno.foreign_key.ref == "orders.line_no"

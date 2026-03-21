@@ -44,6 +44,9 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     pass
 
+from .model import CanonicalForeignKey
+from .semantic_hints import infer_format_pattern
+
 # ---------------------------------------------------------------------------
 # Format-pattern → Faker provider mapping
 # ---------------------------------------------------------------------------
@@ -73,7 +76,33 @@ _FORMAT_TO_FAKER: dict[str, str] = {
 _UUID_PATTERNS = {"uuid", "guid"}
 
 
-def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, str]):
+def _fk_v1_distribution(fk: CanonicalForeignKey):
+    """
+    Convert CanonicalForeignKey distribution settings to a dbldatagen.v1 distribution.
+
+    fk_distribution  →  v1 object          notes
+    ───────────────────────────────────────────────────────────────────────────
+    "zipf"           →  Zipf(exponent)      default; hot-parent power law
+    "uniform"        →  Uniform()           every parent equally likely
+    "normal"         →  Normal(mean,std)    bell-curve around median parent
+    "exponential"    →  Exponential(rate)   one-end-heavy decay
+    """
+    from dbldatagen.v1.schema import Exponential, Normal, Uniform, Zipf
+
+    d = (fk.fk_distribution or "zipf").lower()
+    p = fk.fk_distribution_params or {}
+    if d == "zipf":
+        return Zipf(exponent=float(p.get("exponent", 1.2)))
+    if d == "uniform":
+        return Uniform()
+    if d == "normal":
+        return Normal(mean=float(p.get("mean", 0.0)), stddev=float(p.get("stddev", 1.0)))
+    if d == "exponential":
+        return Exponential(rate=float(p.get("rate", 1.0)))
+    return Zipf(exponent=1.2)  # unknown → default
+
+
+def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalForeignKey]):
     """Convert one CanonicalColumn to a dbldatagen.v1 ColumnSpec.
 
     Parameters
@@ -131,12 +160,20 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, str]):
     # FK columns — placeholder gen replaced at plan-resolve time
     # -----------------------------------------------------------------------
     if col.name in fk_map:
+        fk = fk_map[col.name]
+        # For composite FKs, align child column index to parent column.
+        try:
+            idx = fk.columns.index(col.name)
+        except ValueError:
+            idx = 0
+        parent_col = fk.parent_columns[idx] if idx < len(fk.parent_columns) else fk.parent_columns[0]
+        ref = f"{fk.parent_table}.{parent_col}"
         return ColumnSpec(
             name=col.name,
             gen=ConstantColumn(value=None),
             foreign_key=ForeignKeyRef(
-                ref=fk_map[col.name],
-                distribution=Zipf(exponent=1.2),
+                ref=ref,
+                distribution=_fk_v1_distribution(fk),
                 nullable=nullable,
                 null_fraction=0.0,
             ),
@@ -215,7 +252,9 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, str]):
     # String columns — Faker, UUID, pattern, or name-based fallback
     # -----------------------------------------------------------------------
     if col.type in ("string", "time", "timetz", "binary"):
-        fp = gen.format_pattern if gen else None
+        # Explicit GenerationRule.format_pattern takes priority; fall back to
+        # built-in column-name inference (Option A, semantic_hints.py).
+        fp = (gen.format_pattern if gen else None) or infer_format_pattern(col.name)
 
         # UUID
         if fp in _UUID_PATTERNS:
@@ -321,17 +360,28 @@ def to_v1_plan(
         # --- Primary key column names ---
         pk_cols = {c.name for c in table.columns if c.primary_key}
 
-        # --- FK map: child_col → "parent_table.parent_col" ---
-        fk_map: dict[str, str] = {}
-        if table.foreign_keys:
-            for fk in table.foreign_keys:
+        # --- FK map: child_col → CanonicalForeignKey ---
+        # Prefer structured fk_constraints (carry distribution metadata);
+        # fall back to the legacy foreign_keys dict-list (default distribution).
+        fk_map: dict[str, CanonicalForeignKey] = {}
+        if table.fk_constraints:
+            for fk in table.fk_constraints:
+                for col_name in fk.columns:
+                    fk_map[col_name] = fk
+        elif table.foreign_keys:
+            for fk_dict in table.foreign_keys:
                 # legacy dict format: {from_col, to_table, to_col}
-                if isinstance(fk, dict):
-                    from_col  = fk.get("from_col") or fk.get("column")
-                    to_table  = fk.get("to_table") or fk.get("references_table")
-                    to_col    = fk.get("to_col") or fk.get("references_column")
+                if isinstance(fk_dict, dict):
+                    from_col = fk_dict.get("from_col") or fk_dict.get("column")
+                    to_table = fk_dict.get("to_table") or fk_dict.get("references_table")
+                    to_col   = fk_dict.get("to_col") or fk_dict.get("references_column")
                     if from_col and to_table and to_col:
-                        fk_map[from_col] = f"{to_table}.{to_col}"
+                        fk_map[from_col] = CanonicalForeignKey(
+                            columns=[from_col],
+                            parent_table=to_table,
+                            parent_columns=[to_col],
+                            # Default distribution preserved for backward compatibility
+                        )
 
         col_specs = [_col_to_v1_spec(c, pk_cols, fk_map) for c in table.columns]
 

@@ -33,6 +33,13 @@ tables:
         parent_table: customers
         parent_columns: [id]
         name: fk_orders_customer
+        # fk_distribution controls how parent rows are sampled during generation:
+        #   zipf (default)  — hot parents get many children (power law)
+        #   uniform         — every parent equally likely (lookup tables)
+        #   normal          — bell-curve around median parent
+        # fk_distribution_params: {exponent: 1.5}   # for zipf
+        # fk_children_min: 1     # soft lower bound on children per parent
+        # fk_children_max: 90    # soft upper bound on children per parent
     columns:
       - name: id
         type: long
