@@ -10,6 +10,7 @@ import pytest
 
 from src.statschema.model import (
     CanonicalColumn,
+    CanonicalForeignKey,
     CanonicalTableSchema,
     GenerationRule,
 )
@@ -1608,3 +1609,86 @@ class TestSyntheticShortcomingsCoverageMatrix:
         )
         assert g.distribution == "zipf"
         assert g.distribution_params["a"] == 1.5
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# CanonicalForeignKey distribution fields
+# ───────────────────────────────────────────────────────────────────────────
+
+class TestCanonicalForeignKeyDistribution:
+    """
+    CanonicalForeignKey.fk_distribution / fk_distribution_params /
+    fk_children_min / fk_children_max — model-layer round-trip.
+
+    No dbldatagen.v1 required; tests run in any environment.
+    """
+
+    def _fk(self, **kwargs) -> CanonicalForeignKey:
+        return CanonicalForeignKey(
+            columns=["customer_id"],
+            parent_table="customers",
+            parent_columns=["id"],
+            **kwargs,
+        )
+
+    def test_default_values(self):
+        fk = self._fk()
+        assert fk.fk_distribution == "zipf"
+        assert fk.fk_distribution_params == {}
+        assert fk.fk_children_min is None
+        assert fk.fk_children_max is None
+
+    def test_full_round_trip(self):
+        fk = self._fk(
+            fk_distribution="zipf",
+            fk_distribution_params={"exponent": 1.8},
+            fk_children_min=1,
+            fk_children_max=90,
+        )
+        fk2 = CanonicalForeignKey.from_dict(fk.to_dict())
+        assert fk2.fk_distribution == "zipf"
+        assert fk2.fk_distribution_params == {"exponent": 1.8}
+        assert fk2.fk_children_min == 1
+        assert fk2.fk_children_max == 90
+
+    def test_uniform_round_trip(self):
+        fk = self._fk(fk_distribution="uniform")
+        assert CanonicalForeignKey.from_dict(fk.to_dict()).fk_distribution == "uniform"
+
+    def test_default_not_serialised(self):
+        """zipf default is omitted from to_dict to keep YAML compact."""
+        assert "fk_distribution" not in self._fk().to_dict()
+
+    def test_non_default_distribution_serialised(self):
+        assert self._fk(fk_distribution="uniform").to_dict()["fk_distribution"] == "uniform"
+
+    def test_empty_params_not_serialised(self):
+        assert "fk_distribution_params" not in self._fk().to_dict()
+
+    def test_non_empty_params_serialised(self):
+        d = self._fk(fk_distribution_params={"exponent": 2.0}).to_dict()
+        assert d["fk_distribution_params"] == {"exponent": 2.0}
+
+    def test_children_bounds_serialised(self):
+        d = self._fk(fk_children_min=1, fk_children_max=3).to_dict()
+        assert d["fk_children_min"] == 1
+        assert d["fk_children_max"] == 3
+
+    def test_children_bounds_omitted_when_none(self):
+        d = self._fk().to_dict()
+        assert "fk_children_min" not in d
+        assert "fk_children_max" not in d
+
+    @pytest.mark.parametrize("pattern,dist,min_,max_", [
+        ("1:1",       "uniform", 1,    1),
+        ("1:10",      "uniform", 10,   10),
+        ("1:1-3",     "uniform", 1,    3),
+        ("1:1-90",    "zipf",    1,    90),
+    ])
+    def test_cardinality_pattern_expressed_as_fk_fields(self, pattern, dist, min_, max_):
+        """Named cardinality patterns translate to the expected field values."""
+        fk = self._fk(fk_distribution=dist, fk_children_min=min_, fk_children_max=max_)
+        fk2 = CanonicalForeignKey.from_dict(fk.to_dict())
+        assert fk2.fk_distribution == dist
+        assert fk2.fk_children_min == min_
+        assert fk2.fk_children_max == max_

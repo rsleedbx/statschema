@@ -1044,3 +1044,4 @@ connection, Spark session, or Java installation.
 | [`docs/synthetic_data_shortcomings.md`](docs/synthetic_data_shortcomings.md) | Known limitations of synthetic data generation and mitigations |
 | [`docs/PLAN.md`](docs/PLAN.md) | Architecture and implementation notes |
 | [`.env.example`](.env.example) | Credential template — copy to `.env` and fill in values |
+|| [`docs/git-submodules.md`](docs/git-submodules.md) | Git submodule workflow (commit and push `.cursor` + parent repo) |

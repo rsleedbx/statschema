@@ -29,6 +29,7 @@ inject_rare_events  → NOT natively supported; append tail rows (not yet implem
 from typing import Any, Callable, Optional
 
 from .model import CanonicalColumn, CanonicalTableSchema, GenerationRule
+from .semantic_hints import infer_format_pattern
 
 # ---------------------------------------------------------------------------
 # format_pattern → dbldatagen template string
@@ -305,10 +306,13 @@ def _spark_type_and_options(
 
     # ── 5. format_pattern → template ─────────────────────────────────────
     # Shortcoming #5 (realistic string patterns) and #15 (UUID)
-    if g and g.format_pattern and canonical_type == "string":
-        tmpl = _template_for_format_pattern(g.format_pattern)
-        opts["template"] = tmpl
-        opts.pop("prefix", None)
+    # Explicit GenerationRule.format_pattern takes priority; fall back to
+    # built-in column-name inference (Option A, semantic_hints.py).
+    if canonical_type == "string":
+        fp = (g.format_pattern if g else None) or infer_format_pattern(col.name)
+        if fp:
+            opts["template"] = _template_for_format_pattern(fp)
+            opts.pop("prefix", None)
 
     # ── 6. Distribution control ───────────────────────────────────────────
     # Shortcoming #1 (distribution fidelity) and #11 (shape)

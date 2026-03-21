@@ -290,11 +290,79 @@ class CanonicalForeignKey:
     Replaces the older ``CanonicalTableSchema.foreign_keys`` list-of-dicts and
     ``CanonicalColumn.references`` tuple; both are kept for backward compatibility.
 
+    Structural fields (DDL)
+    -----------------------
+    columns         FK column(s) in this (child) table.
+    parent_table    Referenced table name.
+    parent_columns  Referenced column(s) — positionally aligned with ``columns``.
+    name            Constraint name (e.g. fk_orders_customer).
+    parent_schema   Schema of the parent table (cross-schema FKs).
+
+    Data-generation fields (synthetic data)
+    ----------------------------------------
+    fk_distribution
+        Distribution used to pick parent rows when generating FK values.
+        Controls the fan-out shape observed in the child table.
+
+          "zipf"         Power-law — a few parents accumulate most children.
+                         Typical for orders→customers, posts→users.
+                         params: {"exponent": 1.2}  (higher = more concentrated)
+
+          "uniform"      Every parent equally likely.
+                         Use for lookup / reference tables (e.g. status codes,
+                         product categories) where FK usage should be balanced.
+
+          "normal"       Bell-curve around the median parent.
+                         params: {"mean": 0.5, "stddev": 0.2}
+
+          "exponential"  Exponential decay — one end of the parent range
+                         dominates.  params: {"rate": 1.0}
+
+    fk_distribution_params
+        Free-form dict of distribution-specific parameters (see above).
+
+    fk_children_min / fk_children_max
+        Soft cardinality bounds — each parent should have between min and max
+        children.  None = unconstrained.
+
+        Typical patterns expressed as schema.yaml:
+
+          1:1 (one-to-one):
+            fk_distribution: uniform
+            fk_children_min: 1
+            fk_children_max: 1
+
+          1:10 (fixed fan-out):
+            fk_distribution: uniform
+            fk_children_min: 10
+            fk_children_max: 10
+
+          1:1–3 uniform (small variable fan-out):
+            fk_distribution: uniform
+            fk_children_min: 1
+            fk_children_max: 3
+
+          1:1–90 Zipfian (heavy-tail, hot parents):
+            fk_distribution: zipf
+            fk_distribution_params: {exponent: 1.5}
+            fk_children_min: 1
+            fk_children_max: 90
+
+        Note: fk_children_min/max are stored for future post-generation
+        cardinality enforcement.  dbldatagen.v1's ForeignKeyRef does not yet
+        expose per-parent child-count bounds natively; enforcement requires a
+        post-processing step (re-sample or reject rows that violate the bounds).
+
     Examples
     --------
-    Single-column FK:
+    Single-column FK, zipf (default):
         CanonicalForeignKey(columns=["customer_id"],
                             parent_table="customers", parent_columns=["id"])
+
+    Uniform FK (lookup table):
+        CanonicalForeignKey(columns=["status_id"],
+                            parent_table="order_statuses", parent_columns=["id"],
+                            fk_distribution="uniform")
 
     Composite FK:
         CanonicalForeignKey(columns=["order_id", "line_no"],
@@ -308,14 +376,24 @@ class CanonicalForeignKey:
     name: Optional[str] = None      # constraint name (e.g. fk_orders_customer)
     parent_schema: Optional[str] = None   # schema of the parent table (cross-schema FKs)
 
+    # ── data-generation cardinality / distribution ────────────────────────
+    fk_distribution: str = "zipf"
+    fk_distribution_params: dict[str, Any] = field(default_factory=dict)
+    fk_children_min: Optional[int] = None
+    fk_children_max: Optional[int] = None
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "columns":        self.columns,
             "parent_table":   self.parent_table,
             "parent_columns": self.parent_columns,
         }
-        if self.name:          d["name"]          = self.name
-        if self.parent_schema: d["parent_schema"] = self.parent_schema
+        if self.name:                         d["name"]                    = self.name
+        if self.parent_schema:                d["parent_schema"]           = self.parent_schema
+        if self.fk_distribution != "zipf":    d["fk_distribution"]         = self.fk_distribution
+        if self.fk_distribution_params:       d["fk_distribution_params"]  = self.fk_distribution_params
+        if self.fk_children_min is not None:  d["fk_children_min"]         = self.fk_children_min
+        if self.fk_children_max is not None:  d["fk_children_max"]         = self.fk_children_max
         return d
 
     @classmethod
@@ -326,6 +404,10 @@ class CanonicalForeignKey:
             parent_columns=list(d["parent_columns"]),
             name=d.get("name"),
             parent_schema=d.get("parent_schema"),
+            fk_distribution=str(d.get("fk_distribution", "zipf")),
+            fk_distribution_params=dict(d.get("fk_distribution_params") or {}),
+            fk_children_min=d.get("fk_children_min"),
+            fk_children_max=d.get("fk_children_max"),
         )
 
 
