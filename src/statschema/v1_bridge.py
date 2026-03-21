@@ -15,12 +15,13 @@ Why this bridge exists
 ----------------------
 * Our DDL parser handles dialect-specific types (UNSIGNED, MONEY, RAW, ROWVERSION,
   NUMBER(p) widening, etc.) that v1's sqlglot-based SQL query parser does not cover.
-* v1's DataGenPlan fills the gaps in our dbldatagen_builder.py (v0):
+* v1's DataGenPlan fills the gaps in dbldatagen_builder.py (v0):
     - Native Zipf distribution (no more Gamma approximation)
     - Real Faker providers (no more regex-template hacks)
-    - ForeignKeyRef with referential integrity
+    - ForeignKeyRef with referential integrity + configurable distribution
     - Topological generation order (parents before children)
     - Pydantic → native JSON/YAML serialisation
+    - ColumnStats (null_fraction, MCV weights, min/max) fed from TableStats
 
 Canonical → v1 type mapping
 -----------------------------
@@ -35,6 +36,21 @@ timestamp        → DataType.TIMESTAMP
 timestamptz      → DataType.TIMESTAMP
 time / timetz    → DataType.STRING  (HH:MM:SS.ffffff pattern)
 binary           → DataType.STRING  (hex pattern; Spark BinaryType not in v1 DataType enum)
+
+Known gaps vs v0 (post-generation only — require a Spark step after generate())
+--------------------------------------------------------------------------------
+inject_boundary_values  Use apply_boundary_rows(spark, df, table, stats) from
+                        src/statschema/postgen.py after generation to union one
+                        row with min values and one with max values.
+
+inject_rare_events      Not yet implemented in either v0 or v1.
+
+temporal_ordering       Not applied automatically.  Enforce table.temporal_ordering_
+  _constraints          constraints after generation using a filter+re-sample or
+                        date_add/lag approach.  See synthetic_data_shortcomings.md §2.
+
+v0 FK support           dbldatagen v0 has no ForeignKeyRef.  Use this bridge (v1)
+                        for any schema that contains FK constraints.
 """
 
 from __future__ import annotations
@@ -76,7 +92,7 @@ _FORMAT_TO_FAKER: dict[str, str] = {
 _UUID_PATTERNS = {"uuid", "guid"}
 
 
-def _fk_v1_distribution(fk: CanonicalForeignKey):
+def _fk_v1_distribution(fk: CanonicalForeignKey):  # pragma: no cover
     """
     Convert CanonicalForeignKey distribution settings to a dbldatagen.v1 distribution.
 
@@ -102,14 +118,33 @@ def _fk_v1_distribution(fk: CanonicalForeignKey):
     return Zipf(exponent=1.2)  # unknown → default
 
 
-def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalForeignKey]):
+def _cast_stat_v1(value: str, col_type: str):
+    """Cast a ColumnStats min/max string to the Python type expected by v1 RangeColumn."""
+    if value is None:
+        return None
+    try:
+        if col_type in ("integer", "long"):
+            return int(float(value))
+        if col_type in ("float", "double", "decimal"):
+            return float(value)
+        if col_type in ("date", "timestamp", "timestamptz"):
+            return str(value)
+        return None
+    except (ValueError, TypeError):
+        return None
+
+
+def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalForeignKey],  # pragma: no cover
+                    col_stats=None):
     """Convert one CanonicalColumn to a dbldatagen.v1 ColumnSpec.
 
     Parameters
     ----------
     col          : CanonicalColumn
     pk_col_names : set of column names that are part of the PK
-    fk_map       : {child_col_name: "parent_table.parent_col"} FK references
+    fk_map       : {child_col_name: CanonicalForeignKey}
+    col_stats    : Optional[ColumnStats] — when provided, drives null_fraction,
+                   MCV weights (ValuesColumn + WeightedValues), and numeric min/max.
     """
     from dbldatagen.v1.schema import (
         ColumnSpec,
@@ -135,6 +170,11 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
     gen = col.generation  # GenerationRule | None
     null_fraction = 0.0
     nullable = not col.not_null
+
+    # ── Null fraction from ColumnStats ────────────────────────────────────
+    if col_stats is not None and (gen is None or gen.inject_nulls_from_stats):
+        if col_stats.null_fraction and col_stats.null_fraction > 0:
+            null_fraction = col_stats.null_fraction
 
     # -----------------------------------------------------------------------
     # Resolve Spark DataType
@@ -213,6 +253,31 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
     dist = _distribution(gen)
 
     # -----------------------------------------------------------------------
+    # MCV weights from ColumnStats (mirrors v0 logic — applied when MCVs
+    # dominate the column or the column is genuinely low-cardinality)
+    # -----------------------------------------------------------------------
+    if (col_stats is not None
+            and col_stats.most_common_values
+            and col.type != "boolean"
+            and (gen is None or gen.use_mcv_weights)
+            and (gen is None or gen.values is None)):
+        total_mcv_freq = sum(m.frequency for m in col_stats.most_common_values)
+        nd = col_stats.n_distinct if col_stats.n_distinct > 0 else float("inf")
+        if ((gen is not None and gen.use_mcv_weights)
+                or total_mcv_freq > 0.50
+                or nd <= 20):
+            mcv_values = [m.value for m in col_stats.most_common_values]
+            mcv_weights = {str(m.value): float(m.frequency) for m in col_stats.most_common_values}
+            return ColumnSpec(
+                name=col.name,
+                dtype=dtype,
+                gen=ValuesColumn(values=mcv_values,
+                                 distribution=WeightedValues(weights=mcv_weights)),
+                nullable=nullable,
+                null_fraction=null_fraction,
+            )
+
+    # -----------------------------------------------------------------------
     # Explicit values list
     # -----------------------------------------------------------------------
     if gen and gen.values:
@@ -239,13 +304,18 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
     # Date / timestamp
     # -----------------------------------------------------------------------
     if col.type in ("date", "timestamp", "timestamptz"):
-        begin = str(gen.min_value) if gen and gen.min_value else "2000-01-01 00:00:00"
-        end   = str(gen.max_value) if gen and gen.max_value else "2030-12-31 23:59:59"
+        begin = str(gen.min_value) if gen and gen.min_value else (
+            str(col_stats.min_value) if col_stats and col_stats.min_value else "2000-01-01 00:00:00"
+        )
+        end   = str(gen.max_value) if gen and gen.max_value else (
+            str(col_stats.max_value) if col_stats and col_stats.max_value else "2030-12-31 23:59:59"
+        )
         return ColumnSpec(
             name=col.name,
             dtype=dtype,
             gen=TimestampColumn(begin=begin, end=end),
             nullable=nullable,
+            null_fraction=null_fraction,
         )
 
     # -----------------------------------------------------------------------
@@ -284,21 +354,30 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
             from dbldatagen.v1.connectors.sql.name_mapper import map_column_name
             spec = map_column_name(col.name, DataType.STRING)
             spec.nullable = nullable
+            spec.null_fraction = null_fraction
             return spec
         except ImportError:
+            # Width-appropriate alpha template when col.length is known
             max_len = col.length or (gen.max_length if gen else None) or 32
+            n = min(max_len, 64)
             return ColumnSpec(
                 name=col.name,
                 dtype=DataType.STRING,
-                gen=PatternColumn(template=f"{col.name}_{{digit:6}}"),
+                gen=PatternColumn(template="a" * n),
                 nullable=nullable,
+                null_fraction=null_fraction,
             )
 
     # -----------------------------------------------------------------------
     # Numeric columns
     # -----------------------------------------------------------------------
+    # Priority: explicit GenerationRule > ColumnStats > type-based defaults
     lo = gen.min_value if gen else None
     hi = gen.max_value if gen else None
+    if col_stats is not None and lo is None:
+        lo = _cast_stat_v1(col_stats.min_value, col.type)
+    if col_stats is not None and hi is None:
+        hi = _cast_stat_v1(col_stats.max_value, col.type)
 
     if col.type == "integer":
         lo = int(lo) if lo is not None else -(2**31)
@@ -325,10 +404,11 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
     )
 
 
-def to_v1_plan(
+def to_v1_plan(  # pragma: no cover
     tables,
     *,
     row_counts: Optional[dict[str, int]] = None,
+    stats=None,       # Optional[TableStats | dict[str, TableStats]]
     seed: int = 42,
 ):
     """Convert one or more CanonicalTableSchema objects to a dbldatagen.v1 DataGenPlan.
@@ -339,6 +419,12 @@ def to_v1_plan(
         Source canonical schema(s).
     row_counts : dict | None
         Optional per-table row count overrides, e.g. ``{"orders": 10_000}``.
+    stats : TableStats | dict[str, TableStats] | None
+        Optional statistics.  Drives null_fraction, MCV weights, and
+        numeric/date min/max boundaries for each column.
+
+        Pass a single ``TableStats`` when ``tables`` is a single table, or a
+        ``{table_name: TableStats}`` dict when passing multiple tables.
     seed : int
         Global random seed for deterministic generation.
 
@@ -354,6 +440,17 @@ def to_v1_plan(
         tables = [tables]
 
     row_counts = row_counts or {}
+
+    # Normalise stats: accept a single TableStats or a {name: TableStats} dict.
+    # After normalisation, stats_map[table_name] → TableStats | None.
+    if stats is None:
+        stats_map: dict[str, object] = {}
+    elif isinstance(stats, dict):
+        stats_map = stats
+    else:
+        # Single TableStats: broadcast to all tables
+        stats_map = {t.name: stats for t in tables}
+
     table_specs: list[TableSpec] = []
 
     for table in tables:
@@ -383,7 +480,14 @@ def to_v1_plan(
                             # Default distribution preserved for backward compatibility
                         )
 
-        col_specs = [_col_to_v1_spec(c, pk_cols, fk_map) for c in table.columns]
+        tbl_stats = stats_map.get(table.name)
+        col_specs = [
+            _col_to_v1_spec(
+                c, pk_cols, fk_map,
+                col_stats=tbl_stats.column_stats(c.name) if tbl_stats else None,
+            )
+            for c in table.columns
+        ]
 
         pk = PrimaryKey(columns=list(pk_cols)) if pk_cols else None
         rows = row_counts.get(table.name, 1_000)

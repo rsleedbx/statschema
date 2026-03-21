@@ -16,6 +16,10 @@ shortcomings that afflict most synthetic tabular-data generators.  The table bel
 
 ## 2. Shortcoming × Solution Matrix
 
+The "dbldatagen native?" column reflects **v0** (stable PyPI release).  Several gaps listed below are
+resolved in **v1** (declarative API, in development).  See [dbldatagen.md](dbldatagen.md) for the
+v0 vs v1 comparison and the open questions we are seeking to validate with dbldatagen developers.
+
 > **Legend:**  ✅ = dbldatagen handles it natively   ⚡ = our builder layer bridges the gap   ⚠️ = partial / approximation   ❌ = gap, workaround required
 
 | # | Shortcoming | Root cause | Our canonical model | dbldatagen native? | Our builder bridges? |

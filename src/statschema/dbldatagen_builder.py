@@ -94,7 +94,7 @@ def _dbldatagen_distribution(
 
     try:
         import dbldatagen.distributions as _dist
-    except ImportError:
+    except ImportError:  # pragma: no cover
         # No dbldatagen installed — return string hint only for normal
         return "normal" if dist_lower == "normal" else None
 
@@ -110,7 +110,8 @@ def _dbldatagen_distribution(
         return _dist.Gamma(shape=shape, scale=2.0)
     if dist_lower == "exponential":
         scale = params.get("scale", 1.0)
-        return _dist.Exponential(scale=scale)
+        # dbldatagen Exponential is parameterised by rate (= 1/scale)
+        return _dist.Exponential(rate=1.0 / scale if scale else 1.0)
     if dist_lower == "beta":
         alpha = params.get("alpha", 2.0)
         beta  = params.get("beta", 5.0)
@@ -139,7 +140,7 @@ try:
         StringType,
         TimestampType,
     )
-except ImportError as _pyspark_import_error:
+except ImportError as _pyspark_import_error:  # pragma: no cover
     raise ImportError(
         "pyspark is required for data generation (to_dbldatagen_specs / build_dataframe_from_canonical). "
         "Install it via: pip install pyspark>=3.5  "
@@ -295,11 +296,13 @@ def _spark_type_and_options(
     # min_value / max_value from the stats collector are strings; cast them to the
     # appropriate Python type so dbldatagen doesn't attempt str - str arithmetic.
     if col_stats is not None and g is None and "values" not in opts:
-        if col_stats.min_value is not None and "minValue" not in opts:
+        # All numeric _SPARK_TYPES include minValue/maxValue defaults, so this branch
+        # only fires for types with no default bounds (currently none in practice).
+        if col_stats.min_value is not None and "minValue" not in opts:  # pragma: no cover
             casted = _cast_stat_value(col_stats.min_value, canonical_type)
             if casted is not None:
                 opts["minValue"] = casted
-        if col_stats.max_value is not None and "maxValue" not in opts:
+        if col_stats.max_value is not None and "maxValue" not in opts:  # pragma: no cover
             casted = _cast_stat_value(col_stats.max_value, canonical_type)
             if casted is not None:
                 opts["maxValue"] = casted

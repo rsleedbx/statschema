@@ -922,3 +922,191 @@ class TestFKDistribution:
         lno = _find_col(plan, "order_lines", "line_no")
         assert oid.foreign_key.ref == "orders.order_id"
         assert lno.foreign_key.ref == "orders.line_no"
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# K. ColumnStats wiring — null_fraction, MCV weights, numeric min/max
+# ───────────────────────────────────────────────────────────────────────────
+
+class TestStatsWiring:
+    """
+    Verify that to_v1_plan(stats=...) correctly drives:
+      - null_fraction  →  ColumnSpec.null_fraction
+      - MCV weights    →  ValuesColumn + WeightedValues
+      - numeric min/max →  RangeColumn.min / RangeColumn.max
+      - date begin/end  →  TimestampColumn.begin / .end
+    """
+
+    from dbldatagen.v1.schema import WeightedValues
+    from src.statschema.stats_model import ColumnStats, MostCommonValue, TableStats
+
+    DDL = """
+    CREATE TABLE products (
+        id       BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        price    DECIMAL(10,2) NOT NULL,
+        region   VARCHAR(20) NOT NULL,
+        created  DATE NOT NULL
+    );
+    """
+
+    def _tbl(self):
+        from src.statschema import parse_ddl
+        return parse_ddl(self.DDL, dialect="mysql")[0]
+
+    def _col_stats(self, name, **kwargs):
+        from src.statschema.stats_model import ColumnStats
+        return ColumnStats(name=name, **kwargs)
+
+    def _mcv(self, value, frequency):
+        from src.statschema.stats_model import MostCommonValue
+        return MostCommonValue(value=value, frequency=frequency)
+
+    def _make_table_stats(self, col_stats_list):
+        from src.statschema.stats_model import TableStats
+        return TableStats(name="products", row_count=10_000, columns=list(col_stats_list))
+
+    # ── null_fraction ─────────────────────────────────────────────────────
+
+    def test_null_fraction_applied(self):
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("region", null_fraction=0.05),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "region")
+        assert cs.null_fraction == pytest.approx(0.05)
+
+    def test_null_fraction_zero_not_applied(self):
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("region", null_fraction=0.0),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "region")
+        assert cs.null_fraction == 0.0
+
+    # ── MCV weights ───────────────────────────────────────────────────────
+
+    def test_dominant_mcv_becomes_values_column(self):
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("region", n_distinct=3.0, most_common_values=[
+                self._mcv("US", 0.60),
+                self._mcv("EU", 0.30),
+                self._mcv("APAC", 0.10),
+            ]),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "region")
+        assert isinstance(cs.gen, ValuesColumn)
+
+    def test_mcv_weights_are_weighted_values(self):
+        from dbldatagen.v1.schema import WeightedValues
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("region", n_distinct=3.0, most_common_values=[
+                self._mcv("US", 0.60),
+                self._mcv("EU", 0.40),
+            ]),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "region")
+        assert isinstance(cs.gen.distribution, WeightedValues)
+
+    def test_sparse_mcv_not_applied(self):
+        """Low-frequency MCVs on high-cardinality columns should NOT override generation."""
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("price", n_distinct=9000.0, most_common_values=[
+                self._mcv("9.99", 0.02),
+                self._mcv("19.99", 0.01),
+            ]),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "price")
+        # High-cardinality, low-coverage MCVs → should remain RangeColumn
+        assert isinstance(cs.gen, RangeColumn)
+
+    def test_low_cardinality_mcv_applied(self):
+        """n_distinct ≤ 20 triggers MCV regardless of frequency."""
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("region", n_distinct=5.0, most_common_values=[
+                self._mcv("US", 0.10),
+                self._mcv("EU", 0.10),
+            ]),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "region")
+        assert isinstance(cs.gen, ValuesColumn)
+
+    # ── numeric min/max from stats ────────────────────────────────────────
+
+    def test_numeric_range_from_stats(self):
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("price", min_value="0.01", max_value="999.99"),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "price")
+        assert isinstance(cs.gen, RangeColumn)
+        assert cs.gen.min == pytest.approx(0.01)
+        assert cs.gen.max == pytest.approx(999.99)
+
+    def test_explicit_gen_overrides_stats_min_max(self):
+        """GenerationRule.min_value takes priority over ColumnStats."""
+        from src.statschema import parse_ddl
+        from src.statschema.model import GenerationRule
+        tbl = parse_ddl(self.DDL, dialect="mysql")[0]
+        for col in tbl.columns:
+            if col.name == "price":
+                col.generation = GenerationRule(min_value=5.0, max_value=50.0)
+        ts = self._make_table_stats([
+            self._col_stats("price", min_value="0.01", max_value="999.99"),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "price")
+        assert cs.gen.min == pytest.approx(5.0)
+        assert cs.gen.max == pytest.approx(50.0)
+
+    # ── date begin/end from stats ─────────────────────────────────────────
+
+    def test_date_range_from_stats(self):
+        tbl = self._tbl()
+        ts = self._make_table_stats([
+            self._col_stats("created", min_value="2021-03-01", max_value="2024-12-31"),
+        ])
+        plan = to_v1_plan(tbl, stats=ts)
+        cs = _find_col(plan, "products", "created")
+        assert isinstance(cs.gen, TimestampColumn)
+        assert cs.gen.begin == "2021-03-01"
+        assert cs.gen.end == "2024-12-31"
+
+    # ── stats dict for multi-table plans ─────────────────────────────────
+
+    def test_stats_dict_for_multi_table(self):
+        """stats={table_name: TableStats} distributes stats per table."""
+        from src.statschema import parse_ddl
+        ddl2 = """
+        CREATE TABLE categories (
+            cat_id   INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            label    VARCHAR(50) NOT NULL
+        );
+        """
+        tbl1 = self._tbl()
+        tbl2 = parse_ddl(ddl2, dialect="mysql")[0]
+        ts1 = self._make_table_stats([
+            self._col_stats("price", min_value="1.0", max_value="500.0"),
+        ])
+        plan = to_v1_plan(
+            [tbl1, tbl2],
+            stats={"products": ts1},
+        )
+        price = _find_col(plan, "products", "price")
+        assert price.gen.max == pytest.approx(500.0)
+
+    def test_no_stats_produces_valid_plan(self):
+        """stats=None path still works (backward compat)."""
+        tbl = self._tbl()
+        plan = to_v1_plan(tbl)
+        assert len(plan.tables[0].columns) > 0

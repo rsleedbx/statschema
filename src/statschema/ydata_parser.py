@@ -93,7 +93,7 @@ def parse_ydata_yaml(data: dict[str, Any], table_name: str | None = None) -> Can
 
     columns: list[CanonicalColumn] = []
     for key, value in fields.items():
-        if key in reserved:
+        if key in reserved:  # pragma: no cover  — reserved keys already excluded by comprehension above
             continue
         if isinstance(value, dict) and ("type" in value or "description" in value or "constraints" in value):
             columns.append(_parse_ydata_field(key, value))

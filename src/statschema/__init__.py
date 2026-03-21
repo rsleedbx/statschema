@@ -101,6 +101,7 @@ from .sdv_parser import parse_sdv_metadata, parse_sdv_file
 from .ddl_parser import parse_ddl, parse_ddl_file
 from .ddl_emitter import emit_ddl, emit_ddl_all, SUPPORTED_DIALECTS
 from .dbldatagen_builder import to_dbldatagen_specs, build_dataframe_from_canonical
+from .postgen import apply_boundary_rows
 from .loader import (
     load_schema,
     detect_format,
