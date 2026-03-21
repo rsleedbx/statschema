@@ -43,13 +43,14 @@ Goals
 
    canonical → ``emit_ddl(dialect)`` → executable DDL for the target system
 
-   Supported target dialects: mysql, postgres (incl. Neon), sqlserver, oracle, databricks.
+   Supported target dialects: mysql (incl. MariaDB), postgres (incl. Neon / CockroachDB),
+   sqlserver, oracle, databricks, db2.
 
 Full pipeline (DDL → canonical YAML → many targets + data)
 -----------------------------------------------------------
 ::
 
-    Source DDL (MySQL / PG / SQL Server / Oracle / Databricks)
+    Source DDL (MySQL / MariaDB / PG / CockroachDB / SQL Server / Oracle / Db2 / Databricks)
           │                    │
           ▼  parse_ddl()       │  OR  load_canonical("schema.yaml")
     CanonicalTableSchema       ◄──────────────────────────────────
@@ -57,10 +58,11 @@ Full pipeline (DDL → canonical YAML → many targets + data)
           ├──→ dump_schema("schema.yaml")          ← portable interchange format
           │
           ├──→ emit_ddl("databricks")  →  CREATE TABLE on Databricks / Unity Catalog
-          ├──→ emit_ddl("postgres")    →  CREATE TABLE on PostgreSQL or Neon
-          ├──→ emit_ddl("mysql")       →  CREATE TABLE on MySQL (test DB)
+          ├──→ emit_ddl("postgres")    →  CREATE TABLE on PostgreSQL / Neon / CockroachDB
+          ├──→ emit_ddl("mysql")       →  CREATE TABLE on MySQL / MariaDB
           ├──→ emit_ddl("sqlserver")   →  CREATE TABLE on SQL Server
           ├──→ emit_ddl("oracle")      →  CREATE TABLE on Oracle
+          ├──→ emit_ddl("db2")         →  CREATE TABLE on IBM Db2 LUW
           │
           ├──→ make_default_stats()           (when no real stats available)
           │     OR  load_stats("stats.yaml")  (from real database measurements)
