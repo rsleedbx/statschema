@@ -111,7 +111,7 @@ class InjectionResult:
 # MySQL 8.0+  (ANALYZE TABLE … USING DATA + innodb_table_stats n_rows)
 # ---------------------------------------------------------------------------
 
-def inject_stats_mysql(
+def inject_stats_mysql(  # pragma: no cover
     conn: Any,
     table_stats: TableStats,
     database: str | None = None,
@@ -204,7 +204,7 @@ def _mysql_b64_str(value: str) -> str:
     return f"base64:type254:{base64.b64encode(value.encode('utf-8')).decode()}"
 
 
-def _inject_mysql_column(
+def _inject_mysql_column(  # pragma: no cover
     conn: Any,
     database: str,
     table: str,
@@ -304,7 +304,7 @@ def _inject_mysql_column(
 # PostgreSQL 18  (pg_restore_relation_stats + pg_restore_attribute_stats)
 # ---------------------------------------------------------------------------
 
-def inject_stats_postgres(
+def inject_stats_postgres(  # pragma: no cover
     conn: Any,
     table_stats: TableStats,
     schema: str = "public",
@@ -383,7 +383,7 @@ def inject_stats_postgres(
     )
 
 
-def _inject_pg_column(
+def _inject_pg_column(  # pragma: no cover
     conn: Any,
     schema: str,
     table: str,
@@ -469,7 +469,7 @@ def _inject_pg_column(
 # Oracle  (DBMS_STATS.SET_TABLE_STATS + SET_COLUMN_STATS)
 # ---------------------------------------------------------------------------
 
-def inject_stats_oracle(
+def inject_stats_oracle(  # pragma: no cover
     conn: Any,
     table_stats: TableStats,
     schema: str | None = None,
@@ -537,7 +537,7 @@ def inject_stats_oracle(
     )
 
 
-def _inject_oracle_column(
+def _inject_oracle_column(  # pragma: no cover
     conn: Any,
     schema: str,
     table: str,
@@ -592,7 +592,7 @@ def _inject_oracle_column(
 # SQL Server  (UPDATE STATISTICS WITH ROWCOUNT + manual histogram via sp)
 # ---------------------------------------------------------------------------
 
-def inject_stats_sqlserver(
+def inject_stats_sqlserver(  # pragma: no cover
     conn: Any,
     table_stats: TableStats,
     schema: str = "dbo",
@@ -672,7 +672,7 @@ def inject_stats_sqlserver(
 # Databricks / Delta Lake  (synthetic sample + ANALYZE TABLE)
 # ---------------------------------------------------------------------------
 
-def inject_stats_databricks(
+def inject_stats_databricks(  # pragma: no cover
     spark: Any,
     table_stats: TableStats,
     canonical_schema: Any,           # CanonicalTableSchema

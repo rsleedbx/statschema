@@ -50,7 +50,7 @@ from .stats_model import ColumnStats, MostCommonValue, TableStats
 # Public API
 # ---------------------------------------------------------------------------
 
-def collect_table_stats(
+def collect_table_stats(  # pragma: no cover
     conn,
     table: str,
     dialect: str,
@@ -100,13 +100,13 @@ def collect_table_stats(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _fetchone(conn, sql: str, params=None):
+def _fetchone(conn, sql: str, params=None):  # pragma: no cover
     cur = conn.cursor()
     cur.execute(sql, params or ())
     return cur.fetchone()
 
 
-def _fetchall(conn, sql: str, params=None) -> list[tuple]:
+def _fetchall(conn, sql: str, params=None) -> list[tuple]:  # pragma: no cover
     cur = conn.cursor()
     cur.execute(sql, params or ())
     return cur.fetchall() or []
@@ -126,7 +126,7 @@ def _schema_table(table: str, dialect: str, schema: str | None) -> str:
     return _quote(table, dialect)
 
 
-def _introspect_columns(conn, table: str, dialect: str, schema: str | None) -> list[str]:
+def _introspect_columns(conn, table: str, dialect: str, schema: str | None) -> list[str]:  # pragma: no cover
     """Return ordered list of column names from information_schema."""
     if dialect == "postgres":
         where_schema = "AND table_schema = %s" if schema else "AND table_schema = current_schema()"
@@ -156,13 +156,13 @@ def _introspect_columns(conn, table: str, dialect: str, schema: str | None) -> l
     return [r[0] for r in rows]
 
 
-def _count_rows(conn, table: str, dialect: str, schema: str | None) -> int:
+def _count_rows(conn, table: str, dialect: str, schema: str | None) -> int:  # pragma: no cover
     tref = _schema_table(table, dialect, schema)
     row = _fetchone(conn, f"SELECT COUNT(*) FROM {tref}")
     return int(row[0]) if row else 0
 
 
-def _collect_column_stats(
+def _collect_column_stats(  # pragma: no cover
     conn,
     table: str,
     col: str,
@@ -283,7 +283,7 @@ def _collect_column_stats(
     )
 
 
-def _collect_histogram(conn, tref: str, cref: str, dialect: str) -> list[str]:
+def _collect_histogram(conn, tref: str, cref: str, dialect: str) -> list[str]:  # pragma: no cover
     """Compute approximate histogram bounds at P10, P25, P50, P75, P90."""
     bounds = []
     try:

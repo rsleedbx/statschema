@@ -66,6 +66,9 @@ Load with `load_schema(path)` or `parse_ddl(sql, dialect=...)`.
 
 See `src/statschema/dbldatagen_builder.py` for the full mapping and edge cases.
 
+For the v0 vs v1 API comparison, assumptions, and open questions for dbldatagen developers,
+see [dbldatagen.md](dbldatagen.md).
+
 ---
 
 ## Synthetic data and Databricks Connect

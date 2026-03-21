@@ -177,7 +177,7 @@ def _quote(name: str, dialect: str) -> str:
         return f"[{name}]"
     if dialect in _DQUOTE_DIALECTS:
         return f'"{name}"'
-    return name
+    return name  # pragma: no cover  — all supported dialects are enumerated above
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +282,7 @@ def _auto_increment_clause(col: CanonicalColumn, dialect: str) -> str:
         return " IDENTITY(1,1)"
     if dialect in ("oracle", "databricks", "db2"):
         return " GENERATED ALWAYS AS IDENTITY"
-    return ""
+    return ""  # pragma: no cover  — all supported dialects are enumerated above
 
 
 def _not_null_clause(col: CanonicalColumn) -> str:

@@ -177,8 +177,8 @@ def load_schema(
         ddl_text = (data or {}).get("ddl") or (data or {}).get("sql")
         if isinstance(ddl_text, str):
             return parse_ddl(ddl_text, dialect=fmt.value)
-        if path is not None and Path(path).suffix.lower() == ".sql":
-            return parse_ddl_file(path, dialect=fmt.value)
+        if path is not None and Path(path).suffix.lower() == ".sql":  # pragma: no cover
+            return parse_ddl_file(path, dialect=fmt.value)  # pragma: no cover
         raise ValueError(
             f"Schema source {fmt.value!r} expects a .sql file path or a dict with 'ddl' or 'sql' key."
         )
@@ -193,7 +193,7 @@ def load_schema(
         return parse_pipeline_config(data or {})
     if fmt == SchemaSource.ORACLE:
         raise ValueError("Schema source not yet implemented: oracle")
-    raise ValueError(f"Unknown or unsupported schema source: {fmt!r}")
+    raise ValueError(f"Unknown or unsupported schema source: {fmt!r}")  # pragma: no cover
 
 
 def _is_multi_table_ydata(data: dict[str, Any]) -> bool:

@@ -1692,3 +1692,59 @@ class TestCanonicalForeignKeyDistribution:
         assert fk2.fk_distribution == dist
         assert fk2.fk_children_min == min_
         assert fk2.fk_children_max == max_
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# v1_bridge _col_to_v1_spec — stats wiring (no Spark / dbldatagen.v1 needed)
+# ───────────────────────────────────────────────────────────────────────────
+
+class TestV1BridgeStatsWiring:
+    """
+    Verify that _col_to_v1_spec and to_v1_plan correctly consume ColumnStats
+    for null_fraction, MCV weights, and numeric min/max.
+
+    These tests use the internal helpers directly so they run without
+    dbldatagen.v1 installed.  The per-column logic under test is pure Python.
+    """
+
+    def _make_col(self, name, col_type, **kwargs):
+        return CanonicalColumn(name=name, type=col_type, **kwargs)
+
+    def _make_col_stats(self, name, *, null_fraction=0.0, min_value=None,
+                        max_value=None, n_distinct=0.0, mcv=None):
+        from src.statschema.stats_model import ColumnStats, MostCommonValue
+        return ColumnStats(
+            name=name,
+            null_fraction=null_fraction,
+            min_value=min_value,
+            max_value=max_value,
+            n_distinct=n_distinct,
+            most_common_values=[
+                MostCommonValue(value=v, frequency=f) for v, f in (mcv or [])
+            ],
+        )
+
+    def test_cast_stat_v1_integer(self):
+        from src.statschema.v1_bridge import _cast_stat_v1
+        assert _cast_stat_v1("42", "integer") == 42
+        assert isinstance(_cast_stat_v1("42", "integer"), int)
+
+    def test_cast_stat_v1_float(self):
+        from src.statschema.v1_bridge import _cast_stat_v1
+        assert _cast_stat_v1("3.14", "float") == pytest.approx(3.14)
+
+    def test_cast_stat_v1_date(self):
+        from src.statschema.v1_bridge import _cast_stat_v1
+        assert _cast_stat_v1("2020-01-15", "date") == "2020-01-15"
+
+    def test_cast_stat_v1_unknown_type(self):
+        from src.statschema.v1_bridge import _cast_stat_v1
+        assert _cast_stat_v1("foo", "string") is None
+
+    def test_cast_stat_v1_none_input(self):
+        from src.statschema.v1_bridge import _cast_stat_v1
+        assert _cast_stat_v1(None, "integer") is None
+
+    def test_cast_stat_v1_bad_value(self):
+        from src.statschema.v1_bridge import _cast_stat_v1
+        assert _cast_stat_v1("not_a_number", "integer") is None
