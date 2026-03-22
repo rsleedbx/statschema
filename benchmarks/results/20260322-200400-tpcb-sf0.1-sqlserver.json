@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260322-200400-tpcb-sf0.1-sqlserver",
+  "timestamp": "2026-03-22T20:04:00.365485+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcb",
+  "scale_factor": 0.1,
+  "append": false,
+  "dialect": "sqlserver",
+  "driver": "pymssql",
+  "strategy": "multi_row",
+  "ddl_s": 0.0857,
+  "tables": {
+    "pgbench_branches": {
+      "rows": 1,
+      "load_s": 0.0338,
+      "row_offset": 0
+    },
+    "pgbench_tellers": {
+      "rows": 1,
+      "load_s": 0.025,
+      "row_offset": 0
+    },
+    "pgbench_accounts": {
+      "rows": 10000,
+      "load_s": 6.9886,
+      "row_offset": 0
+    },
+    "pgbench_history": {
+      "rows": 10000,
+      "load_s": 11.0879,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 20002,
+    "load_s": 18.1352,
+    "rows_per_s": 1103.0
+  }
+}

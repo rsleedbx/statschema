@@ -91,6 +91,8 @@ Use ``load_canonical(path, expand=True)`` or call
 
 from __future__ import annotations
 
+import math
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Optional, Union
 
@@ -205,3 +207,110 @@ def load_canonical(
 
     tables = [CanonicalTableSchema.from_dict(t) for t in data.get("tables", [])]
     return expand_table_instances(tables) if expand else tables
+
+
+def resolve_load_order(tables: list[CanonicalTableSchema]) -> list[CanonicalTableSchema]:
+    """Return tables in topological load order so every parent is loaded before its children.
+
+    Dependency edges are collected from three sources (in priority order):
+    1. ``CanonicalTableSchema.fk_constraints`` — the preferred structured form.
+    2. ``CanonicalTableSchema.load_after``     — explicit overrides for logical FKs
+       that have no DDL enforcement.
+    3. ``CanonicalColumn.references``          — column-level FK tuple (legacy).
+
+    Tables with no dependencies are returned in their original relative order.
+    If a circular dependency is detected the original order is returned unchanged
+    rather than raising an error, to avoid breaking callers in partial schemas.
+
+    Parameters
+    ----------
+    tables
+        Flat list of canonical tables (call ``expand_table_instances`` first
+        if the list contains multi-instance table definitions).
+
+    Returns
+    -------
+    Reordered list — same objects, new sequence.
+    """
+    name_to_table: dict[str, CanonicalTableSchema] = {t.name: t for t in tables}
+
+    # table_name → set of table names it depends on
+    deps: dict[str, set[str]] = {t.name: set() for t in tables}
+
+    for table in tables:
+        if table.fk_constraints:
+            for fk in table.fk_constraints:
+                if fk.parent_table in name_to_table and fk.parent_table != table.name:
+                    deps[table.name].add(fk.parent_table)
+        for dep in table.load_after:
+            if dep in name_to_table and dep != table.name:
+                deps[table.name].add(dep)
+        for col in table.columns:
+            if col.references:
+                parent_table, _ = col.references
+                if parent_table in name_to_table and parent_table != table.name:
+                    deps[table.name].add(parent_table)
+
+    # Kahn's algorithm for topological sort
+    in_degree: dict[str, int] = {t.name: len(deps[t.name]) for t in tables}
+    dependents: dict[str, list[str]] = defaultdict(list)
+    for child, parents in deps.items():
+        for parent in parents:
+            dependents[parent].append(child)
+
+    # Seed queue with tables that have no dependencies, preserving original order.
+    queue: deque[CanonicalTableSchema] = deque(
+        t for t in tables if in_degree[t.name] == 0
+    )
+    result: list[CanonicalTableSchema] = []
+    while queue:
+        table = queue.popleft()
+        result.append(table)
+        for child_name in dependents[table.name]:
+            in_degree[child_name] -= 1
+            if in_degree[child_name] == 0:
+                queue.append(name_to_table[child_name])
+
+    if len(result) != len(tables):
+        # Circular dependency — return original order to avoid silent data loss.
+        return tables
+    return result
+
+
+def resolve_row_counts(
+    tables: list[CanonicalTableSchema],
+    scale_factor: float = 1.0,
+    default_rows: int = 1000,
+) -> dict[str, int]:
+    """Return a ``{table_name: row_count}`` mapping for data generation.
+
+    Resolution order per table:
+
+    1. ``table.row_count`` — fixed override; ignores scale factor entirely.
+    2. ``table.row_count_per_sf * scale_factor`` — scale-aware formula.
+    3. ``default_rows`` — fallback when neither field is set.
+
+    Parameters
+    ----------
+    tables
+        Canonical table list.
+    scale_factor
+        TPC-style scale factor (e.g. ``1.0`` = ~1 GB, ``10.0`` = ~10 GB).
+        Only affects tables that set ``row_count_per_sf``.
+    default_rows
+        Row count for tables that specify neither ``row_count`` nor
+        ``row_count_per_sf``.  Defaults to 1 000.
+
+    Returns
+    -------
+    Dict mapping table name → row count (always >= 1).
+    """
+    counts: dict[str, int] = {}
+    for t in tables:
+        if t.row_count is not None:
+            counts[t.name] = max(1, t.row_count)
+        elif t.row_count_per_sf is not None:
+            counts[t.name] = max(1, math.floor(t.row_count_per_sf * scale_factor))
+        else:
+            counts[t.name] = default_rows
+    return counts

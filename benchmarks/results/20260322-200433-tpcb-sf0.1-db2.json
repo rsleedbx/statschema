@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260322-200433-tpcb-sf0.1-db2",
+  "timestamp": "2026-03-22T20:04:33.372829+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcb",
+  "scale_factor": 0.1,
+  "append": false,
+  "dialect": "db2",
+  "driver": "ibm_db_dbi",
+  "strategy": "multi_row",
+  "ddl_s": 0.2628,
+  "tables": {
+    "pgbench_branches": {
+      "rows": 1,
+      "load_s": 0.0382,
+      "row_offset": 0
+    },
+    "pgbench_tellers": {
+      "rows": 1,
+      "load_s": 0.0213,
+      "row_offset": 0
+    },
+    "pgbench_accounts": {
+      "rows": 10000,
+      "load_s": 1.6908,
+      "row_offset": 0
+    },
+    "pgbench_history": {
+      "rows": 10000,
+      "load_s": 2.2454,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 20002,
+    "load_s": 3.9957,
+    "rows_per_s": 5006.0
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "benchmark_id": "20260322-172511-tpcc-sf1.0-mariadb",
+  "timestamp": "2026-03-22T17:25:11.428093+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcc",
+  "scale_factor": 1.0,
+  "dialect": "mariadb",
+  "driver": "pymysql",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0402,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 1.2817
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.0022
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.0022
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 4.3576
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 1.0218
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 0.349
+    },
+    "orders": {
+      "rows": 30000,
+      "load_s": 0.2604
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 0.0358
+    },
+    "order_line": {
+      "rows": 300000,
+      "load_s": 3.8245
+    }
+  },
+  "totals": {
+    "rows": 599011,
+    "load_s": 11.1353,
+    "rows_per_s": 53794.0
+  }
+}

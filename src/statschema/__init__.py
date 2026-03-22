@@ -94,13 +94,14 @@ from .model import (
     GenerationRule,
     expand_table_instances,
 )
-from .schema_io import dump_schema, load_canonical
+from .schema_io import dump_schema, load_canonical, resolve_load_order, resolve_row_counts
 from .ydata_parser import parse_ydata_yaml, parse_ydata_yaml_file, parse_ydata_multi_yaml
 from .pipeline_parser import parse_pipeline_tables, parse_pipeline_config
 from .sdv_parser import parse_sdv_metadata, parse_sdv_file
 from .ddl_parser import parse_ddl, parse_ddl_file
 from .ddl_emitter import emit_ddl, emit_ddl_all, emit_column_comments, SUPPORTED_DIALECTS
 from .dbldatagen_builder import to_dbldatagen_specs, build_dataframe_from_canonical
+from .row_generator import generate_rows
 from .postgen import apply_boundary_rows
 from .loader import (
     load_schema,
@@ -136,6 +137,16 @@ from .stats_io import (
     load_stats,
     make_default_stats,
 )
+from .data_loader import (
+    BatchConfig,
+    LoadStrategy,
+    discover_max_batch_size,
+    load_dataframe,
+    bulk_load_postgres,
+    bulk_load_mysql,
+    bulk_load_sqlserver,
+    bulk_load_db2,
+)
 
 __all__ = [
     # Dialect registry (aliases, sqlglot mapping, loader hints)
@@ -157,6 +168,8 @@ __all__ = [
     # Canonical schema YAML I/O  ← the interchange / persistence layer
     "dump_schema",
     "load_canonical",
+    "resolve_load_order",
+    "resolve_row_counts",
     # Parsers (source → canonical)
     "parse_ydata_yaml",
     "parse_ydata_yaml_file",
@@ -177,9 +190,10 @@ __all__ = [
     "emit_ddl_all",
     "emit_column_comments",
     "SUPPORTED_DIALECTS",
-    # Data generation (canonical → dbldatagen)
+    # Data generation (canonical → dbldatagen or pure-Python)
     "to_dbldatagen_specs",
     "build_dataframe_from_canonical",
+    "generate_rows",
     # Statistics model
     "ColumnStats",
     "CompositeColumnStats",
@@ -207,5 +221,14 @@ __all__ = [
     "dump_stats",
     "make_default_stats",
     "apply_overrides",
+    # Data loader (insert generated rows into a live database)
+    "BatchConfig",
+    "LoadStrategy",
+    "discover_max_batch_size",
+    "load_dataframe",
+    "bulk_load_postgres",
+    "bulk_load_mysql",
+    "bulk_load_sqlserver",
+    "bulk_load_db2",
     "apply_overrides_all",
 ]

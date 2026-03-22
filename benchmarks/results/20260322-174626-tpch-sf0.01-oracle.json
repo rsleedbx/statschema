@@ -1,0 +1,53 @@
+{
+  "benchmark_id": "20260322-174626-tpch-sf0.01-oracle",
+  "timestamp": "2026-03-22T17:46:26.270940+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpch",
+  "scale_factor": 0.01,
+  "dialect": "oracle",
+  "driver": "oracledb",
+  "strategy": "multi_row",
+  "ddl_s": 1.6267,
+  "tables": {
+    "region": {
+      "rows": 5,
+      "load_s": 0.0272
+    },
+    "part": {
+      "rows": 2000,
+      "load_s": 13.0485
+    },
+    "nation": {
+      "rows": 25,
+      "load_s": 0.0466
+    },
+    "supplier": {
+      "rows": 100,
+      "load_s": 0.2342
+    },
+    "customer": {
+      "rows": 1500,
+      "load_s": 7.7422
+    },
+    "partsupp": {
+      "rows": 8000,
+      "load_s": 4.9979
+    },
+    "orders": {
+      "rows": 15000,
+      "load_s": 73.1994
+    },
+    "lineitem": {
+      "rows": 60000,
+      "load_s": 53.9959
+    }
+  },
+  "totals": {
+    "rows": 86630,
+    "load_s": 153.2919,
+    "rows_per_s": 565.0
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260322-195641-tpcb-sf1.0-postgres",
+  "timestamp": "2026-03-22T19:56:41.198847+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcb",
+  "scale_factor": 1.0,
+  "append": false,
+  "dialect": "postgres",
+  "driver": "psycopg2",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0155,
+  "tables": {
+    "branch": {
+      "rows": 1,
+      "load_s": 0.0018,
+      "row_offset": 0
+    },
+    "teller": {
+      "rows": 10,
+      "load_s": 0.0015,
+      "row_offset": 0
+    },
+    "account": {
+      "rows": 100000,
+      "load_s": 0.9615,
+      "row_offset": 0
+    },
+    "history": {
+      "rows": 100000,
+      "load_s": 1.0653,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 200011,
+    "load_s": 2.0301,
+    "rows_per_s": 98523.0
+  }
+}

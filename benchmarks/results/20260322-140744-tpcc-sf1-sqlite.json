@@ -1,0 +1,57 @@
+{
+  "benchmark_id": "20260322-140744-tpcc-sf1-sqlite",
+  "timestamp": "2026-03-22T14:07:44.160398+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcc",
+  "scale_factor": 1,
+  "dialect": "sqlite",
+  "driver": "sqlite3",
+  "strategy": "multi_row",
+  "ddl_s": 0.0202,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 0.4781
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.0008
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.0017
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 0.9406
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 0.1457
+    },
+    "orders": {
+      "rows": 30000,
+      "load_s": 0.1292
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 0.0088
+    },
+    "order_line": {
+      "rows": 300153,
+      "load_s": 1.6687
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 2.2848
+    }
+  },
+  "totals": {
+    "rows": 599164,
+    "load_s": 5.6583,
+    "rows_per_s": 105890.0
+  }
+}

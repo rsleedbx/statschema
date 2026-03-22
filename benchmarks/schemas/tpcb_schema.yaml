@@ -1,0 +1,178 @@
+# TPC-B Canonical Schema — statschema interchange format
+#
+# Table names follow the pgbench convention so that after loading,
+# pgbench can run its standard TPC-B-like transaction mix without
+# any additional setup.  Column names, types, and lengths are taken
+# directly from the pgbench source (src/bin/pgbench/pgbench.c).
+#
+# Scale factor (SF) determines the number of branches:
+#   pgbench_branches —      1 row / SF
+#   pgbench_tellers  —     10 rows / SF
+#   pgbench_accounts — 100,000 rows / SF
+#   pgbench_history  — 100,000 rows / SF  (initial population)
+#
+# After loading, add primary keys so pgbench uses index seeks:
+#   ALTER TABLE pgbench_accounts ADD PRIMARY KEY (aid);
+#   ALTER TABLE pgbench_branches ADD PRIMARY KEY (bid);
+#   ALTER TABLE pgbench_tellers  ADD PRIMARY KEY (tid);
+#
+# TPC-B spec: https://tpc.org/tpcb/
+# pgbench reference: https://www.postgresql.org/docs/current/pgbench.html
+
+version: "1.0"
+tables:
+
+  # ── pgbench_branches ──────────────────────────────────────────────────────
+  # 1 row per SF; pgbench checks COUNT(*) here to detect scale factor.
+  - name: pgbench_branches
+    description: "TPC-B branch — 1 row per SF unit (pgbench-compatible)"
+    row_count_per_sf: 1
+    columns:
+      - name: bid
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Branch identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: bbalance
+        type: integer
+        not_null: true
+        description: "Branch balance (updated by transactions)"
+        generation:
+          distribution: constant
+          min_value: 0
+      - name: filler
+        type: string
+        length: 88
+        description: "Padding to 100-byte row (pgbench spec)"
+        generation:
+          distribution: uniform
+
+  # ── pgbench_tellers ───────────────────────────────────────────────────────
+  # 10 rows per SF; each teller belongs to a branch.
+  - name: pgbench_tellers
+    description: "TPC-B teller — 10 rows per SF unit (pgbench-compatible)"
+    row_count_per_sf: 10
+    load_after: [pgbench_branches]
+    columns:
+      - name: tid
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Teller identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: bid
+        type: integer
+        not_null: true
+        description: "Branch this teller belongs to"
+        references: [pgbench_branches, bid]
+        generation:
+          distribution: uniform
+      - name: tbalance
+        type: integer
+        not_null: true
+        description: "Teller balance (updated by transactions)"
+        generation:
+          distribution: constant
+          min_value: 0
+      - name: filler
+        type: string
+        length: 84
+        description: "Padding to 100-byte row (pgbench spec)"
+        generation:
+          distribution: uniform
+
+  # ── pgbench_accounts ──────────────────────────────────────────────────────
+  # 100,000 rows per SF; the hot table in TPC-B (every transaction touches it).
+  - name: pgbench_accounts
+    description: "TPC-B account — 100 000 rows per SF unit (pgbench-compatible)"
+    row_count_per_sf: 100000
+    load_after: [pgbench_branches]
+    columns:
+      - name: aid
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Account identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: bid
+        type: integer
+        not_null: true
+        description: "Home branch for this account"
+        references: [pgbench_branches, bid]
+        generation:
+          distribution: uniform
+      - name: abalance
+        type: integer
+        not_null: true
+        description: "Account balance (updated by transactions)"
+        generation:
+          distribution: constant
+          min_value: 0
+      - name: filler
+        type: string
+        length: 84
+        description: "Padding to 100-byte row (pgbench spec)"
+        generation:
+          distribution: uniform
+
+  # ── pgbench_history ───────────────────────────────────────────────────────
+  # No surrogate PK — append-only audit log, matches TPC-B spec.
+  # pgbench INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) each txn.
+  - name: pgbench_history
+    description: "TPC-B history — 100 000 rows per SF unit (pgbench-compatible)"
+    row_count_per_sf: 100000
+    load_after: [pgbench_accounts, pgbench_tellers, pgbench_branches]
+    columns:
+      - name: tid
+        type: integer
+        not_null: true
+        description: "Teller involved in this transaction"
+        references: [pgbench_tellers, tid]
+        generation:
+          distribution: uniform
+      - name: bid
+        type: integer
+        not_null: true
+        description: "Branch involved in this transaction"
+        references: [pgbench_branches, bid]
+        generation:
+          distribution: uniform
+      - name: aid
+        type: integer
+        not_null: true
+        description: "Account affected by this transaction"
+        references: [pgbench_accounts, aid]
+        generation:
+          distribution: uniform
+      - name: delta
+        type: integer
+        not_null: true
+        description: "Balance change applied this transaction"
+        generation:
+          distribution: uniform
+          min_value: -999999
+          max_value: 999999
+      - name: mtime
+        type: timestamp
+        not_null: true
+        description: "Transaction wall-clock time"
+        generation:
+          distribution: uniform
+          min_value: "2020-01-01"
+          max_value: "2025-12-31"
+      - name: filler
+        type: string
+        length: 22
+        description: "Padding to 50-byte row (pgbench spec)"
+        generation:
+          distribution: uniform

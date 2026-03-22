@@ -1,0 +1,57 @@
+{
+  "benchmark_id": "20260322-172227-tpcc-sf1.0-postgres",
+  "timestamp": "2026-03-22T17:22:27.667168+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcc",
+  "scale_factor": 1.0,
+  "dialect": "postgres",
+  "driver": "psycopg2",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0185,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 1.231
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.0015
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.0014
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 4.897
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 1.032
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 0.3421
+    },
+    "orders": {
+      "rows": 30000,
+      "load_s": 0.2482
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 0.0241
+    },
+    "order_line": {
+      "rows": 300000,
+      "load_s": 4.3974
+    }
+  },
+  "totals": {
+    "rows": 599011,
+    "load_s": 12.1747,
+    "rows_per_s": 49201.0
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "benchmark_id": "20260322-172317-tpch-sf0.1-postgres",
+  "timestamp": "2026-03-22T17:23:17.322780+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpch",
+  "scale_factor": 0.1,
+  "dialect": "postgres",
+  "driver": "psycopg2",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0096,
+  "tables": {
+    "region": {
+      "rows": 5,
+      "load_s": 0.0016
+    },
+    "part": {
+      "rows": 20000,
+      "load_s": 0.4099
+    },
+    "nation": {
+      "rows": 25,
+      "load_s": 0.0017
+    },
+    "supplier": {
+      "rows": 1000,
+      "load_s": 0.0207
+    },
+    "customer": {
+      "rows": 15000,
+      "load_s": 0.317
+    },
+    "partsupp": {
+      "rows": 80000,
+      "load_s": 0.8996
+    },
+    "orders": {
+      "rows": 150000,
+      "load_s": 2.6345
+    },
+    "lineitem": {
+      "rows": 600000,
+      "load_s": 13.9321
+    }
+  },
+  "totals": {
+    "rows": 866030,
+    "load_s": 18.2171,
+    "rows_per_s": 47540.0
+  }
+}

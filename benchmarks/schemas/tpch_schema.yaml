@@ -1,0 +1,573 @@
+# TPC-H Canonical Schema — statschema interchange format
+#
+# Scale factor (SF) ≈ target database size in GB.
+#   row_count       — fixed size, independent of SF (region, nation)
+#   row_count_per_sf — multiplied by SF at generation time
+#
+# FK generation: child FK columns are constrained to [1, parent_rows].
+# load_after / fk_constraints encode the correct load order so that
+# resolve_load_order() produces the right sequence automatically.
+#
+# Temporal ordering constraints on lineitem dates are expressed as
+# temporal_ordering_constraints and enforced by a post-generation fix-up step.
+#
+# TPC-H spec reference: https://tpc.org/tpch/
+
+version: "1.0"
+tables:
+
+  # ── region ────────────────────────────────────────────────────────────────
+  # Exactly 5 rows — fixed, independent of SF.
+  - name: region
+    description: "TPC-H region — 5 rows, fixed"
+    row_count: 5
+    columns:
+      - name: r_regionkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Region identifier (0–4)"
+        generation:
+          distribution: sequential
+          min_value: 0
+          max_value: 4
+          unique: true
+      - name: r_name
+        type: string
+        length: 25
+        not_null: true
+        description: "Region name (AFRICA, AMERICA, ASIA, EUROPE, MIDDLE EAST)"
+        generation:
+          values: ["AFRICA", "AMERICA", "ASIA", "EUROPE", "MIDDLE EAST"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+      - name: r_comment
+        type: string
+        length: 152
+        not_null: true
+        description: "Region comment"
+
+  # ── nation ────────────────────────────────────────────────────────────────
+  # Exactly 25 rows — fixed, independent of SF.
+  - name: nation
+    description: "TPC-H nation — 25 rows, fixed (n_regionkey → region)"
+    row_count: 25
+    load_after: [region]
+    fk_constraints:
+      - columns: [n_regionkey]
+        parent_table: region
+        parent_columns: [r_regionkey]
+        name: fk_nation_region
+        fk_distribution: uniform
+    columns:
+      - name: n_nationkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Nation identifier (0–24)"
+        generation:
+          distribution: sequential
+          min_value: 0
+          max_value: 24
+          unique: true
+      - name: n_regionkey
+        type: integer
+        not_null: true
+        description: "Region identifier (FK → region.r_regionkey)"
+      - name: n_name
+        type: string
+        length: 25
+        not_null: true
+        description: "Nation name"
+      - name: n_comment
+        type: string
+        length: 152
+        not_null: true
+        description: "Nation comment"
+
+  # ── supplier ──────────────────────────────────────────────────────────────
+  # 10,000 per SF.
+  - name: supplier
+    description: "TPC-H supplier — 10 000 per SF (s_nationkey → nation)"
+    row_count_per_sf: 10000
+    load_after: [nation]
+    fk_constraints:
+      - columns: [s_nationkey]
+        parent_table: nation
+        parent_columns: [n_nationkey]
+        name: fk_supplier_nation
+        fk_distribution: uniform
+    columns:
+      - name: s_suppkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Supplier identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: s_name
+        type: string
+        length: 25
+        not_null: true
+        description: "Supplier name (Supplier#NNNNNNNNN)"
+      - name: s_address
+        type: string
+        length: 40
+        not_null: true
+        description: "Supplier address"
+        generation:
+          format_pattern: "address"
+      - name: s_nationkey
+        type: integer
+        not_null: true
+        description: "Nation identifier (FK → nation.n_nationkey)"
+      - name: s_phone
+        type: string
+        length: 15
+        not_null: true
+        description: "Phone number (CC-NNN-NNN-NNNN)"
+        generation:
+          format_pattern: "phone_intl"
+      - name: s_acctbal
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Account balance (-999.99–9999.99)"
+        generation:
+          min_value: -999.99
+          max_value: 9999.99
+          distribution: uniform
+      - name: s_comment
+        type: string
+        length: 101
+        not_null: true
+        description: "Miscellaneous comment"
+
+  # ── customer ──────────────────────────────────────────────────────────────
+  # 150,000 per SF.
+  - name: customer
+    description: "TPC-H customer — 150 000 per SF (c_nationkey → nation)"
+    row_count_per_sf: 150000
+    load_after: [nation]
+    fk_constraints:
+      - columns: [c_nationkey]
+        parent_table: nation
+        parent_columns: [n_nationkey]
+        name: fk_customer_nation
+        fk_distribution: uniform
+    columns:
+      - name: c_custkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Customer identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: c_name
+        type: string
+        length: 25
+        not_null: true
+        description: "Customer name (Customer#NNNNNNNNN)"
+      - name: c_address
+        type: string
+        length: 40
+        not_null: true
+        description: "Customer address"
+        generation:
+          format_pattern: "address"
+      - name: c_nationkey
+        type: integer
+        not_null: true
+        description: "Nation identifier (FK → nation.n_nationkey)"
+      - name: c_phone
+        type: string
+        length: 15
+        not_null: true
+        description: "Phone number"
+        generation:
+          format_pattern: "phone_intl"
+      - name: c_acctbal
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Account balance (-999.99–9999.99)"
+        generation:
+          min_value: -999.99
+          max_value: 9999.99
+          distribution: uniform
+      - name: c_mktsegment
+        type: string
+        length: 10
+        not_null: true
+        description: "Market segment"
+        generation:
+          values: ["AUTOMOBILE", "BUILDING", "FURNITURE", "HOUSEHOLD", "MACHINERY"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+      - name: c_comment
+        type: string
+        length: 117
+        not_null: true
+        description: "Miscellaneous comment"
+
+  # ── part ──────────────────────────────────────────────────────────────────
+  # 200,000 per SF.
+  - name: part
+    description: "TPC-H part — 200 000 per SF"
+    row_count_per_sf: 200000
+    columns:
+      - name: p_partkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Part identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: p_name
+        type: string
+        length: 55
+        not_null: true
+        description: "Part name (random words from the colour dictionary)"
+      - name: p_mfgr
+        type: string
+        length: 25
+        not_null: true
+        description: "Manufacturer (Manufacturer#N, N=1–5)"
+        generation:
+          values: ["Manufacturer#1", "Manufacturer#2", "Manufacturer#3",
+                   "Manufacturer#4", "Manufacturer#5"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+      - name: p_brand
+        type: string
+        length: 10
+        not_null: true
+        description: "Brand (Brand#MN, M=mfgr digit, N=1–5)"
+      - name: p_type
+        type: string
+        length: 25
+        not_null: true
+        description: "Part type (syllable-encoded, e.g. 'STANDARD ANODIZED TIN')"
+      - name: p_size
+        type: integer
+        not_null: true
+        description: "Part size (1–50)"
+        generation:
+          min_value: 1
+          max_value: 50
+          distribution: uniform
+      - name: p_container
+        type: string
+        length: 10
+        not_null: true
+        description: "Container type"
+        generation:
+          values: ["SM CASE", "SM BOX", "SM PKG", "SM PACK",
+                   "MED BAG", "MED BOX", "MED PKG", "MED PACK",
+                   "LG CASE", "LG BOX", "LG PKG", "LG PACK",
+                   "JUMBO BAG", "JUMBO BOX", "JUMBO PKG", "JUMBO PACK",
+                   "WRAP CASE", "WRAP BOX", "WRAP PKG", "WRAP PACK"]
+      - name: p_retailprice
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Retail price (derived from p_partkey)"
+        generation:
+          min_value: 900.00
+          max_value: 2100.00
+          distribution: uniform
+      - name: p_comment
+        type: string
+        length: 23
+        not_null: true
+        description: "Miscellaneous comment"
+
+  # ── partsupp ──────────────────────────────────────────────────────────────
+  # 4 suppliers per part → 800,000 per SF.
+  - name: partsupp
+    description: "TPC-H part-supplier — 4 suppliers per part (ps_partkey → part, ps_suppkey → supplier)"
+    row_count_per_sf: 800000
+    load_after: [part, supplier]
+    fk_constraints:
+      - columns: [ps_partkey]
+        parent_table: part
+        parent_columns: [p_partkey]
+        name: fk_partsupp_part
+        fk_distribution: uniform
+        fk_children_min: 4
+        fk_children_max: 4
+      - columns: [ps_suppkey]
+        parent_table: supplier
+        parent_columns: [s_suppkey]
+        name: fk_partsupp_supplier
+        fk_distribution: uniform
+    columns:
+      - name: ps_partkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Part identifier (FK → part.p_partkey)"
+      - name: ps_suppkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Supplier identifier (FK → supplier.s_suppkey)"
+      - name: ps_availqty
+        type: integer
+        not_null: true
+        description: "Available quantity (1–9 999)"
+        generation:
+          min_value: 1
+          max_value: 9999
+          distribution: uniform
+      - name: ps_supplycost
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Supply cost (1.00–1 000.00)"
+        generation:
+          min_value: 1.00
+          max_value: 1000.00
+          distribution: uniform
+      - name: ps_comment
+        type: string
+        length: 199
+        not_null: true
+        description: "Miscellaneous comment"
+
+  # ── orders ────────────────────────────────────────────────────────────────
+  # 1,500,000 per SF.
+  - name: orders
+    description: "TPC-H orders — 1 500 000 per SF (o_custkey → customer)"
+    row_count_per_sf: 1500000
+    load_after: [customer]
+    fk_constraints:
+      - columns: [o_custkey]
+        parent_table: customer
+        parent_columns: [c_custkey]
+        name: fk_orders_customer
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+        fk_children_min: 1
+        fk_children_max: 30
+    columns:
+      - name: o_orderkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Order identifier — sparse (only ~1/8 of key space used per spec)"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: o_custkey
+        type: integer
+        not_null: true
+        description: "Customer identifier (FK → customer.c_custkey)"
+      - name: o_orderstatus
+        type: string
+        length: 1
+        not_null: true
+        description: "Order status: F=fulfilled, O=open, P=pending"
+        generation:
+          values: ["F", "O", "P"]
+          weights: [0.49, 0.49, 0.02]
+      - name: o_totalprice
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Total order price"
+        generation:
+          min_value: 857.71
+          max_value: 555285.16
+          distribution: normal
+          distribution_params: {mean: 150000.0, std: 80000.0}
+      - name: o_orderdate
+        type: date
+        not_null: true
+        description: "Date order was placed (1992-01-01 – 1998-12-31)"
+        generation:
+          min_value: "1992-01-01"
+          max_value: "1998-12-31"
+          distribution: uniform
+      - name: o_orderpriority
+        type: string
+        length: 15
+        not_null: true
+        description: "Order priority"
+        generation:
+          values: ["1-URGENT", "2-HIGH", "3-MEDIUM", "4-NOT SPECIFIED", "5-LOW"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+      - name: o_clerk
+        type: string
+        length: 15
+        not_null: true
+        description: "Clerk responsible for order (Clerk#NNNNNNNNN)"
+      - name: o_shippriority
+        type: integer
+        not_null: true
+        description: "Shipping priority (always 0)"
+        generation:
+          min_value: 0
+          max_value: 0
+          distribution: constant
+      - name: o_comment
+        type: string
+        length: 79
+        not_null: true
+        description: "Miscellaneous comment"
+
+  # ── lineitem ──────────────────────────────────────────────────────────────
+  # Average 4 line items per order → 6,000,000 per SF.
+  # Temporal constraint: l_shipdate <= l_receiptdate (enforced post-generation).
+  - name: lineitem
+    description: "TPC-H line items — avg 4 per order, 6 000 000 per SF"
+    row_count_per_sf: 6000000
+    load_after: [orders, part, supplier, partsupp]
+    temporal_ordering_constraints:
+      - "l_shipdate <= l_receiptdate"
+    fk_constraints:
+      - columns: [l_orderkey]
+        parent_table: orders
+        parent_columns: [o_orderkey]
+        name: fk_lineitem_orders
+        fk_distribution: uniform
+        fk_children_min: 1
+        fk_children_max: 7
+      - columns: [l_partkey, l_suppkey]
+        parent_table: partsupp
+        parent_columns: [ps_partkey, ps_suppkey]
+        name: fk_lineitem_partsupp
+        fk_distribution: uniform
+    columns:
+      - name: l_orderkey
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Order identifier (FK → orders.o_orderkey)"
+      - name: l_partkey
+        type: integer
+        not_null: true
+        description: "Part identifier (FK → partsupp.ps_partkey)"
+      - name: l_suppkey
+        type: integer
+        not_null: true
+        description: "Supplier identifier (FK → partsupp.ps_suppkey)"
+      - name: l_linenumber
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Line number within order (1–7)"
+        generation:
+          min_value: 1
+          max_value: 7
+          distribution: uniform
+      - name: l_quantity
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Ordered quantity (1–50)"
+        generation:
+          min_value: 1.00
+          max_value: 50.00
+          distribution: uniform
+      - name: l_extendedprice
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Extended price = l_quantity * p_retailprice"
+        generation:
+          min_value: 900.00
+          max_value: 104949.50
+          distribution: uniform
+      - name: l_discount
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Line item discount (0.00–0.10)"
+        generation:
+          min_value: 0.00
+          max_value: 0.10
+          distribution: uniform
+      - name: l_tax
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        description: "Tax rate (0.00–0.08)"
+        generation:
+          min_value: 0.00
+          max_value: 0.08
+          distribution: uniform
+      - name: l_returnflag
+        type: string
+        length: 1
+        not_null: true
+        description: "Return flag: A=accepted, N=not returned, R=returned"
+        generation:
+          values: ["A", "N", "R"]
+          weights: [0.49, 0.02, 0.49]
+      - name: l_linestatus
+        type: string
+        length: 1
+        not_null: true
+        description: "Line status: F=fulfilled, O=open"
+        generation:
+          values: ["F", "O"]
+          weights: [0.5, 0.5]
+      - name: l_shipdate
+        type: date
+        not_null: true
+        description: "Ship date (1992-01-02 – 1998-12-01)"
+        generation:
+          min_value: "1992-01-02"
+          max_value: "1998-12-01"
+          distribution: uniform
+      - name: l_commitdate
+        type: date
+        not_null: true
+        description: "Committed ship date"
+        generation:
+          min_value: "1992-01-31"
+          max_value: "1998-10-31"
+          distribution: uniform
+      - name: l_receiptdate
+        type: date
+        not_null: true
+        description: "Receipt date — always >= l_shipdate (enforced post-generation)"
+        generation:
+          min_value: "1992-01-04"
+          max_value: "1999-01-01"
+          distribution: uniform
+      - name: l_shipinstruct
+        type: string
+        length: 25
+        not_null: true
+        description: "Shipping instructions"
+        generation:
+          values: ["DELIVER IN PERSON", "COLLECT COD", "NONE", "TAKE BACK RETURN"]
+          weights: [0.25, 0.25, 0.25, 0.25]
+      - name: l_shipmode
+        type: string
+        length: 10
+        not_null: true
+        description: "Ship mode"
+        generation:
+          values: ["AIR", "AIR REG", "SHIP", "TRUCK", "RAIL", "MAIL", "FOB"]
+          weights: [0.143, 0.143, 0.143, 0.143, 0.143, 0.143, 0.142]
+      - name: l_comment
+        type: string
+        length: 44
+        not_null: true
+        description: "Miscellaneous comment"

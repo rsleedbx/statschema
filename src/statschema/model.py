@@ -509,6 +509,22 @@ class CanonicalTableSchema:
     # ── generation constraints ────────────────────────────────────────────
     temporal_ordering_constraints: list[str] = field(default_factory=list)
 
+    # ── row count for data generation ────────────────────────────────────
+    # row_count        Fixed number of rows to generate.  Takes precedence over
+    #                  row_count_per_sf when both are set.
+    # row_count_per_sf Rows per scale-factor unit: rows = floor(row_count_per_sf * sf).
+    #                  Allows a single schema.yaml to express TPC-C/TPC-H row counts
+    #                  at any scale factor without editing the file.
+    row_count: Optional[int] = None
+    row_count_per_sf: Optional[float] = None
+
+    # ── load ordering ─────────────────────────────────────────────────────
+    # Explicit list of table names that must be loaded before this one.
+    # resolve_load_order() computes the topological sort from fk_constraints
+    # and load_after together; load_after is only needed when the FK constraint
+    # is intentionally absent from the schema (e.g. logical FK with no DDL enforcement).
+    load_after: list[str] = field(default_factory=list)
+
     # ── multi-instance / dedup ────────────────────────────────────────────
     aliases: list[str] = field(default_factory=list)
     instance_count: int = 1
@@ -527,6 +543,12 @@ class CanonicalTableSchema:
             d["foreign_keys"] = self.foreign_keys
         if self.temporal_ordering_constraints:
             d["temporal_ordering_constraints"] = self.temporal_ordering_constraints
+        if self.row_count is not None:
+            d["row_count"] = self.row_count
+        if self.row_count_per_sf is not None:
+            d["row_count_per_sf"] = self.row_count_per_sf
+        if self.load_after:
+            d["load_after"] = list(self.load_after)
         if self.aliases:
             d["aliases"] = list(self.aliases)
         if self.instance_count != 1:
@@ -545,6 +567,9 @@ class CanonicalTableSchema:
             fk_constraints=fks if fks else None,
             foreign_keys=d.get("foreign_keys"),
             temporal_ordering_constraints=list(d.get("temporal_ordering_constraints", [])),
+            row_count=d.get("row_count"),
+            row_count_per_sf=d.get("row_count_per_sf"),
+            load_after=list(d.get("load_after") or []),
             aliases=list(d.get("aliases") or []),
             instance_count=int(d.get("instance_count", 1)),
             instance_suffix_format=str(d.get("instance_suffix_format", "_{:04d}")),

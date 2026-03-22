@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""
+statschema CLI wrapper — run from the repo root without pip install.
+
+Usage:
+    ./statschema ddl      schema.yaml --dialect postgres
+    ./statschema generate schema.yaml --sf 1 --out-dir ./data
+    ./statschema load     schema.yaml --dialect postgres --dsn "host=..."
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from statschema.cli import main  # noqa: E402
+
+main()

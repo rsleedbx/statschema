@@ -4,6 +4,37 @@ Items are ordered from easiest to hardest to implement. Each item identifies the
 
 ---
 
+## YAML-Driven CLI
+
+### 0. DBA-facing command-line interface ✅
+- **Implemented**: `python -m statschema` with three sub-commands — `ddl`, `generate`, `load`.
+  A DBA writes one YAML file and runs commands; no Python code required.
+  - `ddl schema.yaml --dialect <dialect>` — emits CREATE TABLE SQL to stdout in FK dependency order.
+  - `generate schema.yaml --sf <n> [--out-dir DIR] [--format csv|jsonl]` — streams synthetic rows without a database connection.
+  - `load schema.yaml --dialect <dialect> --dsn <dsn> [--sf <n>]` — creates tables and loads data using the fastest available strategy per dialect.
+  - Entry point: `src/statschema/__main__.py` and `src/statschema/cli.py`.
+  - DBA reference: [`docs/dba-yaml-guide.md`](dba-yaml-guide.md).
+
+---
+
+## Data Loading
+
+### 1. Multi-row INSERT loader ✅
+- **Implemented**: `load_dataframe(df, conn, table, dialect, *, strategy, config)` in `src/statschema/data_loader.py`. Supports singleton, multi-row, and bulk-copy strategies. Oracle uses `INSERT ALL … SELECT 1 FROM DUAL`. Batch size is controlled by `BatchConfig(max_rows, max_params)` with per-dialect defaults.
+
+### 2. Dialect-native bulk copy loader ✅
+- **Implemented**: `bulk_load_postgres`, `bulk_load_mysql`, `bulk_load_sqlserver`, `bulk_load_db2` in `src/statschema/data_loader.py`. Each uses the database's fastest native path:
+  - PostgreSQL / CockroachDB / Neon: `COPY … FROM STDIN WITH CSV` via `cursor.copy_expert` (no temp file)
+  - MySQL / MariaDB: `LOAD DATA LOCAL INFILE` from a temp CSV
+  - SQL Server: `BULK INSERT` from a staging CSV
+  - IBM Db2: `LOAD FROM … OF DEL FORMAT` via `SYSPROC.ADMIN_CMD`
+  - Databricks / Oracle / SQLite: falls back to `MULTI_ROW`
+
+### 3. Batch size auto-discovery ✅
+- **Implemented**: `discover_max_batch_size(conn, table, col_names, dialect, *, start_max)` in `src/statschema/data_loader.py`. Binary-searches the actual server limit using `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` so no rows are committed. Enabled via `BatchConfig(auto_discover=True)`.
+
+---
+
 ## Semantic Hints
 
 ### 1. Expand locale pattern files

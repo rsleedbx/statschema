@@ -206,6 +206,7 @@ def _spark_type_and_options(
     rows: int | None = None,
     random_type_choice: Callable[[], str] | None = None,
     col_stats=None,   # Optional[ColumnStats] from stats_model
+    fk_max: int | None = None,  # parent table row count — sets valid FK range [1, fk_max]
 ) -> tuple[Any, dict[str, Any]]:
     """
     Return (SparkType, kwargs) for dbldatagen .withColumn(name, colType, **kwargs).
@@ -254,6 +255,20 @@ def _spark_type_and_options(
             opts["uniqueValues"] = rows
             opts.pop("minValue", None)
             opts.pop("maxValue", None)
+
+    # ── 1b. FK range injection ────────────────────────────────────────────
+    # Lower priority than explicit GenerationRule min/max/values/unique.
+    # Sets minValue=1, maxValue=fk_max so FK integers stay within the parent
+    # table's key space (avoids FK violations when loading with constraints on).
+    if fk_max is not None:
+        g_explicit = g is not None and (
+            g.min_value is not None or g.max_value is not None
+            or g.values is not None or g.unique
+        )
+        if not g_explicit and "values" not in opts and "uniqueValues" not in opts:
+            opts["minValue"] = 1
+            opts["maxValue"] = fk_max
+            opts.setdefault("random", True)
 
     # ── 2. MCV weights from ColumnStats ──────────────────────────────────
     # Shortcoming #2 (hot-spot) and #6 (enum domain)
@@ -352,6 +367,7 @@ def to_dbldatagen_specs(
     rows: int | None = None,
     random_type_choice: Callable[[], str] | None = None,
     stats=None,   # Optional[TableStats] from stats_model
+    parent_row_counts: dict[str, int] | None = None,
 ) -> list[tuple[str, Any, dict[str, Any]]]:
     """
     Convert a canonical table schema to a list of (column_name, SparkType, withColumn_kwargs)
@@ -365,6 +381,11 @@ def to_dbldatagen_specs(
                         for columns whose type is not in the Spark type map.
     stats               Optional TableStats; when provided, null_fraction, MCVs,
                         min/max, and skewness are incorporated automatically.
+    parent_row_counts   Map of {table_name: row_count} for all tables in the schema.
+                        When provided, FK columns are constrained to [1, parent_rows]
+                        so generated child keys always reference valid parent rows.
+                        Derived from ``CanonicalForeignKey`` entries (preferred) and
+                        ``CanonicalColumn.references`` tuples (fallback).
 
     Example usage
     -------------
@@ -374,6 +395,23 @@ def to_dbldatagen_specs(
             gen = gen.withColumn(name, col_type, **kwargs)
         df = gen.build()
     """
+    # Build FK column → parent row count mapping for valid-key generation.
+    fk_ranges: dict[str, int] = {}
+    if parent_row_counts:
+        if table.fk_constraints:
+            for fk in table.fk_constraints:
+                parent_count = parent_row_counts.get(fk.parent_table)
+                if parent_count:
+                    for col_name in fk.columns:
+                        fk_ranges[col_name] = parent_count
+        # Column-level references are the fallback when fk_constraints is absent.
+        for col in table.columns:
+            if col.references and col.name not in fk_ranges:
+                parent_table, _ = col.references
+                parent_count = parent_row_counts.get(parent_table)
+                if parent_count:
+                    fk_ranges[col.name] = parent_count
+
     result: list[tuple[str, Any, dict[str, Any]]] = []
     for col in table.columns:
         col_stats = stats.column_stats(col.name) if stats else None
@@ -382,6 +420,7 @@ def to_dbldatagen_specs(
             rows=rows,
             random_type_choice=random_type_choice,
             col_stats=col_stats,
+            fk_max=fk_ranges.get(col.name),
         )
         result.append((col.name, spark_type, opts))
     return result
@@ -395,6 +434,7 @@ def build_dataframe_from_canonical(
     seed: int | None = None,
     random_type_choice: Callable[[], str] | None = None,
     stats=None,   # Optional[TableStats]
+    parent_row_counts: dict[str, int] | None = None,
 ):
     """
     Build a Spark DataFrame from a canonical table schema using dbldatagen.
@@ -425,7 +465,8 @@ def build_dataframe_from_canonical(
     import dbldatagen as dg
 
     specs = to_dbldatagen_specs(
-        table, rows=rows, random_type_choice=random_type_choice, stats=stats
+        table, rows=rows, random_type_choice=random_type_choice, stats=stats,
+        parent_row_counts=parent_row_counts,
     )
     gen = (
         dg.DataGenerator(

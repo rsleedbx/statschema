@@ -1,0 +1,53 @@
+{
+  "benchmark_id": "20260322-175516-tpch-sf0.01-db2",
+  "timestamp": "2026-03-22T17:55:16.940700+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpch",
+  "scale_factor": 0.01,
+  "dialect": "db2",
+  "driver": "ibm_db_dbi",
+  "strategy": "multi_row",
+  "ddl_s": 0.5004,
+  "tables": {
+    "region": {
+      "rows": 5,
+      "load_s": 0.0219
+    },
+    "part": {
+      "rows": 2000,
+      "load_s": 1.2214
+    },
+    "nation": {
+      "rows": 25,
+      "load_s": 0.0308
+    },
+    "supplier": {
+      "rows": 100,
+      "load_s": 0.0747
+    },
+    "customer": {
+      "rows": 1500,
+      "load_s": 1.0907
+    },
+    "partsupp": {
+      "rows": 8000,
+      "load_s": 1.3962
+    },
+    "orders": {
+      "rows": 15000,
+      "load_s": 5.9434
+    },
+    "lineitem": {
+      "rows": 60000,
+      "load_s": 58.3402
+    }
+  },
+  "totals": {
+    "rows": 86630,
+    "load_s": 68.1192,
+    "rows_per_s": 1272.0
+  }
+}

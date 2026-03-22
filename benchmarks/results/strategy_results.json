@@ -1,0 +1,298 @@
+{
+  "PostgreSQL 14": {
+    "dialect": "postgres",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 2.958127750083804,
+        "rows_s": 2937.668935952415,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 0.36978983297012746,
+        "rows_s": 23499.834839163897,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 0.21093916695099324,
+        "rows_s": 41196.71147662642,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 2.0822903329972178,
+        "rows_s": 48264.643218767844,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 1.2732254590373486,
+        "rows_s": 78934.17405899666,
+        "error": ""
+      }
+    }
+  },
+  "PostgreSQL 16": {
+    "dialect": "postgres",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 2.659992416971363,
+        "rows_s": 3266.926606465418,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 0.3481239579850808,
+        "rows_s": 24962.372743022814,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 0.21275958407204598,
+        "rows_s": 40844.22348305277,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 2.011040208977647,
+        "rows_s": 49974.63479414552,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 1.291508166003041,
+        "rows_s": 77816.77471775534,
+        "error": ""
+      }
+    }
+  },
+  "MySQL 5.7": {
+    "dialect": "mysql",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 5.322335166973062,
+        "rows_s": 1632.7419689621331,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 0.8611621659947559,
+        "rows_s": 10091.01461158817,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 0.5579336669761688,
+        "rows_s": 15575.328241253417,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 4.957861208007671,
+        "rows_s": 20271.039422740632,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 4.234208040987141,
+        "rows_s": 23735.48938246542,
+        "error": ""
+      }
+    }
+  },
+  "MariaDB 10.11": {
+    "dialect": "mariadb",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 2.3534884999971837,
+        "rows_s": 3692.391103678815,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 0.3298732090042904,
+        "rows_s": 26343.45488750187,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 0.21836591593455523,
+        "rows_s": 39795.58789112681,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 2.0071304170414805,
+        "rows_s": 50071.98293977276,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 1.2952892500907183,
+        "rows_s": 77589.61945601046,
+        "error": ""
+      }
+    }
+  },
+  "MariaDB 11.4": {
+    "dialect": "mariadb",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 2.5126326659228653,
+        "rows_s": 3458.5238494494574,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 0.3335584589513019,
+        "rows_s": 26052.404808803556,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 0.21011637500487268,
+        "rows_s": 41358.03313662953,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 1.970748333958909,
+        "rows_s": 50996.36430903891,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 1.2433774590026587,
+        "rows_s": 80829.03487780302,
+        "error": ""
+      }
+    }
+  },
+  "SQL Server 2022": {
+    "dialect": "sqlserver",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 31.01389816601295,
+        "rows_s": 280.1969605202054,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 19.42276183294598,
+        "rows_s": 447.41319873775797,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 0,
+        "load_s": 0.0,
+        "rows_s": 0.0,
+        "error": "(4860, b'Cannot bulk load. The file \"/var/folders/zh/1y0c3b0567z5d2lps4d6xxy00000gp/T/statschema_region.csv\" does not ex"
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 89.29559466592036,
+        "rows_s": 1125.4866533562174,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 0,
+        "load_s": 0.0,
+        "rows_s": 0.0,
+        "error": "(4860, b'Cannot bulk load. The file \"/var/folders/zh/1y0c3b0567z5d2lps4d6xxy00000gp/T/statschema_item.csv\" does not exis"
+      }
+    }
+  },
+  "Oracle XE 21c": {
+    "dialect": "oracle",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 10.349098999984562,
+        "rows_s": 839.6866239286109,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 59.87732866697479,
+        "rows_s": 145.13005495505598,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 50.466862833010964,
+        "rows_s": 172.1921972593028,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 27.701056000078097,
+        "rows_s": 3628.05663436501,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 23.990102584008127,
+        "rows_s": 4189.269289202384,
+        "error": ""
+      }
+    }
+  },
+  "IBM Db2 CE 11.5": {
+    "dialect": "db2",
+    "tpch": {
+      "singleton": {
+        "rows": 8690,
+        "load_s": 30.192298249923624,
+        "rows_s": 287.82174606472637,
+        "error": ""
+      },
+      "multi_row": {
+        "rows": 8690,
+        "load_s": 9.392531750025228,
+        "rows_s": 925.2031540885299,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 8690,
+        "load_s": 14.463546624989249,
+        "rows_s": 600.8208239178307,
+        "error": ""
+      }
+    },
+    "tpcc": {
+      "multi_row": {
+        "rows": 100501,
+        "load_s": 15.877662666956894,
+        "rows_s": 6329.709989944129,
+        "error": ""
+      },
+      "bulk_copy": {
+        "rows": 100501,
+        "load_s": 13.996829292038456,
+        "rows_s": 7180.269038300412,
+        "error": ""
+      }
+    }
+  }
+}

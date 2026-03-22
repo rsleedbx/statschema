@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260322-200425-tpcb-sf0.1-oracle",
+  "timestamp": "2026-03-22T20:04:25.273668+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcb",
+  "scale_factor": 0.1,
+  "append": false,
+  "dialect": "oracle",
+  "driver": "oracledb",
+  "strategy": "multi_row",
+  "ddl_s": 0.3719,
+  "tables": {
+    "pgbench_branches": {
+      "rows": 1,
+      "load_s": 0.0332,
+      "row_offset": 0
+    },
+    "pgbench_tellers": {
+      "rows": 1,
+      "load_s": 0.0265,
+      "row_offset": 0
+    },
+    "pgbench_accounts": {
+      "rows": 10000,
+      "load_s": 3.1306,
+      "row_offset": 0
+    },
+    "pgbench_history": {
+      "rows": 10000,
+      "load_s": 3.6089,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 20002,
+    "load_s": 6.7991,
+    "rows_per_s": 2942.0
+  }
+}

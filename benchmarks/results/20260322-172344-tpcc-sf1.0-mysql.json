@@ -1,0 +1,57 @@
+{
+  "benchmark_id": "20260322-172344-tpcc-sf1.0-mysql",
+  "timestamp": "2026-03-22T17:23:44.492084+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcc",
+  "scale_factor": 1.0,
+  "dialect": "mysql",
+  "driver": "pymysql",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.176,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 3.4883
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.0046
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.0037
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 8.9358
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 2.2447
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 0.9868
+    },
+    "orders": {
+      "rows": 30000,
+      "load_s": 0.8381
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 0.1565
+    },
+    "order_line": {
+      "rows": 300000,
+      "load_s": 10.204
+    }
+  },
+  "totals": {
+    "rows": 599011,
+    "load_s": 26.8626,
+    "rows_per_s": 22299.0
+  }
+}

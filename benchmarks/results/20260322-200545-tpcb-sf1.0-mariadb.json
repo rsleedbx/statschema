@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260322-200545-tpcb-sf1.0-mariadb",
+  "timestamp": "2026-03-22T20:05:45.989485+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcb",
+  "scale_factor": 1.0,
+  "append": false,
+  "dialect": "mariadb",
+  "driver": "pymysql",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0256,
+  "tables": {
+    "pgbench_branches": {
+      "rows": 1,
+      "load_s": 0.0019,
+      "row_offset": 0
+    },
+    "pgbench_tellers": {
+      "rows": 10,
+      "load_s": 0.0019,
+      "row_offset": 0
+    },
+    "pgbench_accounts": {
+      "rows": 100000,
+      "load_s": 0.9599,
+      "row_offset": 0
+    },
+    "pgbench_history": {
+      "rows": 100000,
+      "load_s": 1.0274,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 200011,
+    "load_s": 1.9911,
+    "rows_per_s": 100453.0
+  }
+}

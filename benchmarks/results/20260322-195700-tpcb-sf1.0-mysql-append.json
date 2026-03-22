@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260322-195700-tpcb-sf1.0-mysql-append",
+  "timestamp": "2026-03-22T19:57:00.614444+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "89c3521",
+  "schema": "tpcb",
+  "scale_factor": 1.0,
+  "append": true,
+  "dialect": "mysql",
+  "driver": "pymysql",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0,
+  "tables": {
+    "branch": {
+      "rows": 1,
+      "load_s": 0.0056,
+      "row_offset": 1
+    },
+    "teller": {
+      "rows": 10,
+      "load_s": 0.0034,
+      "row_offset": 10
+    },
+    "account": {
+      "rows": 100000,
+      "load_s": 2.79,
+      "row_offset": 100000
+    },
+    "history": {
+      "rows": 100000,
+      "load_s": 3.557,
+      "row_offset": 100000
+    }
+  },
+  "totals": {
+    "rows": 200011,
+    "load_s": 6.356,
+    "rows_per_s": 31468.0
+  }
+}

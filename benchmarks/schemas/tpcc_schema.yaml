@@ -1,0 +1,722 @@
+# TPC-C Canonical Schema — statschema interchange format
+#
+# Scale factor (SF) = number of warehouses.
+#   row_count       — fixed size, independent of SF (item)
+#   row_count_per_sf — multiplied by SF at generation time
+#
+# FK generation: child FK columns are constrained to [1, parent_rows] so that
+# every generated key references a valid parent row.  fk_distribution controls
+# the fan-out shape (uniform = lookup table; zipf = hot-parent pattern).
+#
+# Temporal ordering constraints are applied as a post-generation fix-up step;
+# they cannot be enforced natively by dbldatagen column specs.
+#
+# TPC-C spec reference: https://tpc.org/tpcc/
+
+version: "1.0"
+tables:
+
+  # ── item ──────────────────────────────────────────────────────────────────
+  # Fixed size: 100,000 items across all scale factors (per TPC-C §4.3.3.1).
+  - name: item
+    description: "TPC-C item catalogue — 100,000 items independent of warehouse count"
+    row_count: 100000
+    columns:
+      - name: i_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Item identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          max_value: 100000
+          unique: true
+      - name: i_im_id
+        type: integer
+        not_null: true
+        description: "Image identifier (1–10 000)"
+        generation:
+          min_value: 1
+          max_value: 10000
+          distribution: uniform
+      - name: i_name
+        type: string
+        length: 24
+        not_null: true
+        description: "Item name"
+      - name: i_price
+        type: decimal
+        precision: 5
+        scale: 2
+        not_null: true
+        description: "Item price (1.00–99.99)"
+        generation:
+          min_value: 1.00
+          max_value: 99.99
+          distribution: uniform
+      - name: i_data
+        type: string
+        length: 50
+        not_null: true
+        description: "Brand information — may contain the literal string 'ORIGINAL'"
+
+  # ── warehouse ─────────────────────────────────────────────────────────────
+  # Exactly SF warehouses (1 per scale factor unit).
+  - name: warehouse
+    description: "TPC-C warehouse — one per scale factor unit (SF = number of warehouses)"
+    row_count_per_sf: 1
+    columns:
+      - name: w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: w_name
+        type: string
+        length: 10
+        not_null: true
+        description: "Warehouse name"
+      - name: w_street_1
+        type: string
+        length: 20
+        not_null: true
+        description: "Street address line 1"
+      - name: w_street_2
+        type: string
+        length: 20
+        not_null: true
+        description: "Street address line 2"
+      - name: w_city
+        type: string
+        length: 20
+        not_null: true
+        description: "City"
+      - name: w_state
+        type: string
+        length: 2
+        not_null: true
+        description: "State (2-char abbreviation)"
+      - name: w_zip
+        type: string
+        length: 9
+        not_null: true
+        description: "ZIP code (NNNNNNNNN)"
+        generation:
+          format_pattern: "postal_us"
+      - name: w_tax
+        type: decimal
+        precision: 4
+        scale: 4
+        not_null: true
+        description: "Sales tax rate (0.0000–0.2000)"
+        generation:
+          min_value: 0.0
+          max_value: 0.2
+          distribution: uniform
+      - name: w_ytd
+        type: decimal
+        precision: 12
+        scale: 2
+        not_null: true
+        description: "Year-to-date balance"
+        generation:
+          min_value: 300000.00
+          max_value: 300000.00
+          distribution: constant
+
+  # ── district ──────────────────────────────────────────────────────────────
+  # 10 districts per warehouse.
+  - name: district
+    description: "TPC-C district — 10 per warehouse (d_w_id → warehouse.w_id)"
+    row_count_per_sf: 10
+    load_after: [warehouse]
+    fk_constraints:
+      - columns: [d_w_id]
+        parent_table: warehouse
+        parent_columns: [w_id]
+        name: fk_district_warehouse
+        fk_distribution: uniform
+    columns:
+      - name: d_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "District identifier within warehouse (1–10)"
+        generation:
+          min_value: 1
+          max_value: 10
+          distribution: uniform
+      - name: d_w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier (FK → warehouse.w_id)"
+      - name: d_name
+        type: string
+        length: 10
+        not_null: true
+        description: "District name"
+      - name: d_street_1
+        type: string
+        length: 20
+        not_null: true
+        description: "Street address line 1"
+      - name: d_street_2
+        type: string
+        length: 20
+        not_null: true
+        description: "Street address line 2"
+      - name: d_city
+        type: string
+        length: 20
+        not_null: true
+        description: "City"
+      - name: d_state
+        type: string
+        length: 2
+        not_null: true
+        description: "State (2-char abbreviation)"
+      - name: d_zip
+        type: string
+        length: 9
+        not_null: true
+        description: "ZIP code"
+        generation:
+          format_pattern: "postal_us"
+      - name: d_tax
+        type: decimal
+        precision: 4
+        scale: 4
+        not_null: true
+        description: "Sales tax rate (0.0000–0.2000)"
+        generation:
+          min_value: 0.0
+          max_value: 0.2
+          distribution: uniform
+      - name: d_ytd
+        type: decimal
+        precision: 12
+        scale: 2
+        not_null: true
+        description: "Year-to-date balance"
+        generation:
+          min_value: 30000.00
+          max_value: 30000.00
+          distribution: constant
+      - name: d_next_o_id
+        type: integer
+        not_null: true
+        description: "Next available order id"
+        generation:
+          min_value: 3001
+          max_value: 3001
+          distribution: constant
+
+  # ── customer ──────────────────────────────────────────────────────────────
+  # 3,000 customers per district → 30,000 per warehouse → 30,000 * SF total.
+  - name: customer
+    description: "TPC-C customer — 3 000 per district (c_w_id,c_d_id → district)"
+    row_count_per_sf: 30000
+    load_after: [district]
+    fk_constraints:
+      - columns: [c_w_id, c_d_id]
+        parent_table: district
+        parent_columns: [d_w_id, d_id]
+        name: fk_customer_district
+        fk_distribution: uniform
+        fk_children_min: 3000
+        fk_children_max: 3000
+    columns:
+      - name: c_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Customer identifier within district (1–3 000)"
+        generation:
+          min_value: 1
+          max_value: 3000
+          distribution: uniform
+      - name: c_d_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "District identifier (FK → district.d_id)"
+      - name: c_w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier (FK → district.d_w_id)"
+      - name: c_first
+        type: string
+        length: 16
+        not_null: true
+        description: "Customer first name"
+        generation:
+          format_pattern: "name_first"
+      - name: c_middle
+        type: string
+        length: 2
+        not_null: true
+        description: "Customer middle name (always 'OE')"
+        generation:
+          values: ["OE"]
+          distribution: constant
+      - name: c_last
+        type: string
+        length: 16
+        not_null: true
+        description: "Customer last name (TPC-C syllable encoding)"
+        generation:
+          format_pattern: "name_last"
+      - name: c_street_1
+        type: string
+        length: 20
+        not_null: true
+        description: "Street address line 1"
+      - name: c_street_2
+        type: string
+        length: 20
+        not_null: true
+        description: "Street address line 2"
+      - name: c_city
+        type: string
+        length: 20
+        not_null: true
+        description: "City"
+      - name: c_state
+        type: string
+        length: 2
+        not_null: true
+        description: "State (2-char abbreviation)"
+      - name: c_zip
+        type: string
+        length: 9
+        not_null: true
+        description: "ZIP code"
+        generation:
+          format_pattern: "postal_us"
+      - name: c_phone
+        type: string
+        length: 16
+        not_null: true
+        description: "Phone number (16-digit string)"
+        generation:
+          format_pattern: "phone_us"
+      - name: c_since
+        type: timestamp
+        not_null: true
+        description: "Date and time customer was entered into the system"
+      - name: c_credit
+        type: string
+        length: 2
+        not_null: true
+        description: "Credit status: 'GC' (good) 90% or 'BC' (bad) 10%"
+        generation:
+          values: ["GC", "BC"]
+          weights: [0.9, 0.1]
+      - name: c_credit_lim
+        type: decimal
+        precision: 12
+        scale: 2
+        not_null: true
+        description: "Credit limit (always 50 000.00)"
+        generation:
+          min_value: 50000.00
+          max_value: 50000.00
+          distribution: constant
+      - name: c_discount
+        type: decimal
+        precision: 4
+        scale: 4
+        not_null: true
+        description: "Discount on purchases (0.0000–0.5000)"
+        generation:
+          min_value: 0.0
+          max_value: 0.5
+          distribution: uniform
+      - name: c_balance
+        type: decimal
+        precision: 12
+        scale: 2
+        not_null: true
+        description: "Balance owed to warehouse (initially -10.00)"
+        generation:
+          min_value: -10.00
+          max_value: -10.00
+          distribution: constant
+      - name: c_ytd_payment
+        type: decimal
+        precision: 12
+        scale: 2
+        not_null: true
+        description: "Year-to-date payment (initially 10.00)"
+        generation:
+          min_value: 10.00
+          max_value: 10.00
+          distribution: constant
+      - name: c_payment_cnt
+        type: integer
+        not_null: true
+        description: "Number of payments (initially 1)"
+        generation:
+          min_value: 1
+          max_value: 1
+          distribution: constant
+      - name: c_delivery_cnt
+        type: integer
+        not_null: true
+        description: "Number of deliveries (initially 0)"
+        generation:
+          min_value: 0
+          max_value: 0
+          distribution: constant
+      - name: c_data
+        type: string
+        length: 500
+        not_null: true
+        description: "Miscellaneous information"
+
+  # ── history ───────────────────────────────────────────────────────────────
+  # One history row per customer initially — 30,000 * SF total.
+  - name: history
+    description: "TPC-C payment history — one row per customer initially"
+    row_count_per_sf: 30000
+    load_after: [customer]
+    columns:
+      - name: h_c_id
+        type: integer
+        not_null: true
+        description: "Customer identifier"
+        references: [customer, c_id]
+      - name: h_c_d_id
+        type: integer
+        not_null: true
+        description: "Customer's district identifier"
+      - name: h_c_w_id
+        type: integer
+        not_null: true
+        description: "Customer's warehouse identifier"
+      - name: h_d_id
+        type: integer
+        not_null: true
+        description: "District identifier (1–10)"
+        generation:
+          min_value: 1
+          max_value: 10
+          distribution: uniform
+      - name: h_w_id
+        type: integer
+        not_null: true
+        description: "Warehouse identifier"
+        references: [warehouse, w_id]
+      - name: h_date
+        type: timestamp
+        not_null: true
+        description: "Date and time of transaction"
+      - name: h_amount
+        type: decimal
+        precision: 6
+        scale: 2
+        not_null: true
+        description: "Payment amount (initially 10.00)"
+        generation:
+          min_value: 10.00
+          max_value: 10.00
+          distribution: constant
+      - name: h_data
+        type: string
+        length: 24
+        not_null: true
+        description: "Miscellaneous information"
+
+  # ── orders ────────────────────────────────────────────────────────────────
+  # 3,000 orders per district → 30,000 * SF total.
+  - name: orders
+    description: "TPC-C orders — 3 000 per district (o_w_id,o_d_id → district)"
+    row_count_per_sf: 30000
+    load_after: [customer]
+    fk_constraints:
+      - columns: [o_w_id, o_d_id]
+        parent_table: district
+        parent_columns: [d_w_id, d_id]
+        name: fk_orders_district
+        fk_distribution: uniform
+        fk_children_min: 3000
+        fk_children_max: 3000
+    columns:
+      - name: o_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Order identifier within district (1–3 000)"
+        generation:
+          min_value: 1
+          max_value: 3000
+          distribution: uniform
+      - name: o_d_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "District identifier (FK → district)"
+      - name: o_w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier (FK → district)"
+      - name: o_c_id
+        type: integer
+        not_null: true
+        description: "Customer identifier (FK → customer.c_id)"
+        references: [customer, c_id]
+      - name: o_entry_d
+        type: timestamp
+        not_null: true
+        description: "Date and time order was entered"
+      - name: o_carrier_id
+        type: integer
+        description: "Carrier identifier (NULL for new orders)"
+        generation:
+          min_value: 1
+          max_value: 10
+          distribution: uniform
+      - name: o_ol_cnt
+        type: integer
+        not_null: true
+        description: "Number of order lines (5–15)"
+        generation:
+          min_value: 5
+          max_value: 15
+          distribution: uniform
+      - name: o_all_local
+        type: integer
+        not_null: true
+        description: "All supply from home warehouse (1=yes)"
+        generation:
+          values: [1]
+          distribution: constant
+
+  # ── new_order ─────────────────────────────────────────────────────────────
+  # Last 900 orders per district are new orders → 9,000 * SF total.
+  - name: new_order
+    description: "TPC-C new-order queue — last 900 orders per district"
+    row_count_per_sf: 9000
+    load_after: [orders]
+    fk_constraints:
+      - columns: [no_w_id, no_d_id]
+        parent_table: district
+        parent_columns: [d_w_id, d_id]
+        name: fk_new_order_district
+        fk_distribution: uniform
+    columns:
+      - name: no_o_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Order identifier (2 101–3 000 per district)"
+        generation:
+          min_value: 2101
+          max_value: 3000
+          distribution: uniform
+      - name: no_d_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "District identifier (FK → district)"
+      - name: no_w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier (FK → district)"
+
+  # ── order_line ────────────────────────────────────────────────────────────
+  # Average 10 lines per order → 300,000 * SF total.
+  - name: order_line
+    description: "TPC-C order line items — average 10 per order"
+    row_count_per_sf: 300000
+    load_after: [orders, item]
+    fk_constraints:
+      - columns: [ol_w_id, ol_d_id, ol_o_id]
+        parent_table: orders
+        parent_columns: [o_w_id, o_d_id, o_id]
+        name: fk_order_line_orders
+        fk_distribution: uniform
+        fk_children_min: 5
+        fk_children_max: 15
+    columns:
+      - name: ol_o_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Order identifier (FK → orders)"
+      - name: ol_d_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "District identifier (FK → orders)"
+      - name: ol_w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier (FK → orders)"
+      - name: ol_number
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Line number within order (1–15)"
+        generation:
+          min_value: 1
+          max_value: 15
+          distribution: uniform
+      - name: ol_i_id
+        type: integer
+        not_null: true
+        description: "Item identifier (FK → item.i_id)"
+        references: [item, i_id]
+      - name: ol_supply_w_id
+        type: integer
+        not_null: true
+        description: "Supply warehouse identifier"
+        references: [warehouse, w_id]
+      - name: ol_delivery_d
+        type: timestamp
+        description: "Delivery date (NULL for new orders)"
+      - name: ol_quantity
+        type: integer
+        not_null: true
+        description: "Quantity ordered (always 5)"
+        generation:
+          min_value: 5
+          max_value: 5
+          distribution: constant
+      - name: ol_amount
+        type: decimal
+        precision: 6
+        scale: 2
+        not_null: true
+        description: "Amount (0.00 for new orders; item price * quantity for delivered)"
+        generation:
+          min_value: 0.01
+          max_value: 9999.99
+          distribution: uniform
+      - name: ol_dist_info
+        type: string
+        length: 24
+        not_null: true
+        description: "District info copied from stock at delivery"
+
+  # ── stock ─────────────────────────────────────────────────────────────────
+  # 100,000 stock rows per warehouse → 100,000 * SF total.
+  - name: stock
+    description: "TPC-C stock level — 100 000 items per warehouse"
+    row_count_per_sf: 100000
+    load_after: [warehouse, item]
+    fk_constraints:
+      - columns: [s_w_id]
+        parent_table: warehouse
+        parent_columns: [w_id]
+        name: fk_stock_warehouse
+        fk_distribution: uniform
+    columns:
+      - name: s_i_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Item identifier (FK → item.i_id)"
+        references: [item, i_id]
+      - name: s_w_id
+        type: integer
+        not_null: true
+        primary_key: true
+        description: "Warehouse identifier (FK → warehouse.w_id)"
+      - name: s_quantity
+        type: integer
+        not_null: true
+        description: "Stock quantity on hand (10–100)"
+        generation:
+          min_value: 10
+          max_value: 100
+          distribution: uniform
+      - name: s_dist_01
+        type: string
+        length: 24
+        not_null: true
+        description: "District 1 information"
+      - name: s_dist_02
+        type: string
+        length: 24
+        not_null: true
+        description: "District 2 information"
+      - name: s_dist_03
+        type: string
+        length: 24
+        not_null: true
+        description: "District 3 information"
+      - name: s_dist_04
+        type: string
+        length: 24
+        not_null: true
+        description: "District 4 information"
+      - name: s_dist_05
+        type: string
+        length: 24
+        not_null: true
+        description: "District 5 information"
+      - name: s_dist_06
+        type: string
+        length: 24
+        not_null: true
+        description: "District 6 information"
+      - name: s_dist_07
+        type: string
+        length: 24
+        not_null: true
+        description: "District 7 information"
+      - name: s_dist_08
+        type: string
+        length: 24
+        not_null: true
+        description: "District 8 information"
+      - name: s_dist_09
+        type: string
+        length: 24
+        not_null: true
+        description: "District 9 information"
+      - name: s_dist_10
+        type: string
+        length: 24
+        not_null: true
+        description: "District 10 information"
+      - name: s_ytd
+        type: integer
+        not_null: true
+        description: "Year-to-date quantity sold (initially 0)"
+        generation:
+          min_value: 0
+          max_value: 0
+          distribution: constant
+      - name: s_order_cnt
+        type: integer
+        not_null: true
+        description: "Order count (initially 0)"
+        generation:
+          min_value: 0
+          max_value: 0
+          distribution: constant
+      - name: s_remote_cnt
+        type: integer
+        not_null: true
+        description: "Remote order count (initially 0)"
+        generation:
+          min_value: 0
+          max_value: 0
+          distribution: constant
+      - name: s_data
+        type: string
+        length: 50
+        not_null: true
+        description: "Brand information — may contain the literal string 'ORIGINAL'"
