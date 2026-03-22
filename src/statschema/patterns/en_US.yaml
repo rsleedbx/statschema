@@ -1,0 +1,81 @@
+# Built-in column-name inference patterns — locale: en_US
+#
+# Format: same as hints.yaml.
+# Each entry has a 'pattern' (Python regex, case-insensitive) and a 'generation'
+# block containing at minimum a 'format_pattern' name.
+#
+# Pattern matching notes:
+#   - Matched case-insensitively against the full column name.
+#   - Simple substring search (no \b anchors) — Python's regex engine treats '_'
+#     as a word character, making \b unreliable for underscore-delimited names.
+#   - First match wins — list more specific patterns before general ones.
+#
+# To extend or override these patterns for your project, create a hints.yaml
+# and pass it to apply_hints(). To use a different locale, call
+# load_builtin_patterns("de_DE") or load_builtin_patterns("fr_FR").
+
+locale: en_US
+hints:
+  - pattern: "ssn|social_security"
+    generation:
+      format_pattern: ssn
+
+  - pattern: "email"
+    generation:
+      format_pattern: email
+
+  - pattern: "phone|mobile|cell_phone"
+    generation:
+      format_pattern: phone_us
+
+  - pattern: "first_name|firstname|given_name"
+    generation:
+      format_pattern: name_first
+
+  - pattern: "last_name|lastname|surname|family_name"
+    generation:
+      format_pattern: name_last
+
+  - pattern: "credit_card|card_number|cc_number|cc_num"
+    generation:
+      format_pattern: credit_card
+
+  - pattern: "ip_address|ip_addr"
+    generation:
+      format_pattern: ip_v4
+
+  - pattern: "url|website|homepage"
+    generation:
+      format_pattern: url
+
+  - pattern: "uuid|guid"
+    generation:
+      format_pattern: uuid
+
+  - pattern: "iban|bank_account"
+    generation:
+      format_pattern: iban
+
+  - pattern: "currency_code|currency_iso"
+    generation:
+      format_pattern: currency_iso
+
+  - pattern: "zip_code|postal_code|postcode"
+    generation:
+      format_pattern: postal_us
+
+  - pattern: "country"
+    generation:
+      format_pattern: country_iso2
+
+  - pattern: "company|organization|employer"
+    generation:
+      format_pattern: company
+
+  - pattern: "street_address|address"
+    generation:
+      format_pattern: address
+
+  - pattern: "city"
+    generation:
+      format_pattern: city

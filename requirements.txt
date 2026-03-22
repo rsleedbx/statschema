@@ -1,0 +1,17 @@
+# statschema runtime + Databricks Connect (notebooks / remote Spark)
+# Python 3.9+
+
+# Config and schema
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# Databricks Labs Data Generator (synthetic data)
+dbldatagen>=0.4.0
+pyparsing   # missing in dbldatagen requirements.txt 
+jmespath    # missing in dbldatagen requirements.txt
+
+# Databricks Connect (local Spark session to remote workspace)
+databricks-connect>=14.0.0
+
+# Optional: pyspark if running tests or data_generator without Databricks Connect
+# pyspark>=3.5.0

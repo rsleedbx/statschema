@@ -1,2 +1,1281 @@
-# zerobus
-Databricks Zerobus Demos
+# statschema — DDL transpiler · stats transpiler · semantic inference · portable YAML
+
+**Repository:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema) · `git clone https://github.com/rsleedbx/statschema.git`
+
+> **Your query optimizer produces correct plans before you load a single row.**
+> Collect schema, column comments, and statistics from any source database into dialect-free YAML. Emit correct DDL for any target. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — so the optimizer is not blind on day one.
+
+### Quick start
+
+**Transpile DDL — parse MySQL, emit PostgreSQL / Oracle / SQL Server / Databricks:**
+```python
+from statschema import parse_ddl, emit_ddl
+
+tables = parse_ddl("""
+CREATE TABLE orders (
+    order_id    INT           NOT NULL AUTO_INCREMENT,
+    status      VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    total       DECIMAL(10,2)     NULL,
+    is_paid     TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at  DATETIME          NULL,
+    PRIMARY KEY (order_id)
+) ENGINE=InnoDB;
+""", dialect="mysql")
+
+print(emit_ddl(tables[0], "postgres"))    # SERIAL, BOOLEAN, NUMERIC, TIMESTAMP
+print(emit_ddl(tables[0], "oracle"))      # NUMBER, TIMESTAMP, GENERATED AS IDENTITY
+print(emit_ddl(tables[0], "sqlserver"))   # BIT, DATETIME2, IDENTITY(1,1)
+```
+
+**Collect statistics from MySQL, inject into PostgreSQL — optimizer works before any rows are loaded:**
+```python
+from statschema import collect_table_stats, dump_stats, load_stats, inject_stats_postgres
+
+# On the source — read-only, no production data leaves the database
+db_stats = collect_table_stats(mysql_conn, "orders", dialect="mysql")
+dump_stats(db_stats, "orders_stats.yaml")          # kilobytes, no PII, version-controllable
+
+# On the target — optimizer sees production distributions immediately
+db_stats = load_stats("orders_stats.yaml")
+inject_stats_postgres(pg_conn, db_stats.table_stats("orders"))
+# → pg_restore_attribute_stats sets null_frac, n_distinct, MCVs, histogram_bounds
+# → EXPLAIN plans match production shape before a single row is loaded
+```
+
+`pip install statschema` · Python 3.10+ · [Full docs below](#overview)
+
+---
+
+### Who is this for
+
+statschema is built for **DBAs and data engineers doing cross-dialect database migrations**. It addresses the gap that exists in the migration window: the target database has a schema but no data, so the optimizer is blind and test queries produce bad plans.
+
+Other synthetic data tools solve a different problem:
+
+| Tool category | Primary user | Requires production data | Optimizer stats injection | Live multi-dialect test methodology published |
+|---|---|---|---|---|
+| Faker · Mockaroo | App developer — unit test fixtures | No — generates random plausible values | No | No — tests against in-memory data only |
+| SDV · Gretel · Tonic | Data scientist / QA — privacy-safe production clone | Yes — trains on or anonymizes actual rows | No | No — SaaS products; internal test infra not published |
+| AWS SCT · pgloader | DBA — schema and data migration | No — schema or data only, no generation | No | No — closed source |
+| **statschema** | **DBA — cross-dialect migration validation** | **No — works from statistics without the data** | **Yes** | **Yes — per-dialect Podman setup, live integration tests, contributor guide** |
+
+The "no production data required" row is the key difference for DBAs. Moving production data to a test environment has two hard blockers:
+
+- **Volume**: a 10 TB production database cannot be copied just to validate a migration target.
+- **Security and compliance**: PII, PHI, and PCI data cannot leave the production environment without a de-identification pipeline — which is a separate project in itself.
+
+statschema collects only column statistics (null rates, MCVs, histograms) from the source database. Statistics are read-only, contain no customer data, are kilobytes in size, and are already exposed through standard catalog views (`pg_stats`, `INFORMATION_SCHEMA.COLUMN_STATISTICS`, `ALL_TAB_COL_STATISTICS`). A DBA can collect them, check them into version control alongside the schema, and use them to validate DDL correctness and bootstrap the optimizer on the target — without moving a single production row.
+
+### Overview
+
+```mermaid
+flowchart TD
+    A["① Optimizer Bootstrap ⭐\ncollect_table_stats\ndump_stats · load_stats · inject_stats_*"]
+    B[("② Portable YAML\nschema.yaml  —  structure · comment\nstats.yaml   —  null% · MCVs · histogram\nhints.yaml · patterns/  —  semantic rules")]
+    C["③ DDL Transpiler\nparse_ddl · emit_ddl · emit_column_comments"]
+    D["④ Stats-Driven Tabular Data\nbuild_dataframe"]
+    E["⑤ Semantic Hints\ninfer_format_pattern · apply_hints"]
+
+    A <-->|"collect / inject  —  any dialect"| B
+    C <-->|"parse DDL + comments  /  emit DDL ± COMMENT ON"| B
+    B -->|"schema · comment · stats"| D
+    B <-->|"load patterns & hints.yaml\nwrite inferred generation rules"| E
+    E -->|"name → comment → stats inference"| D
+```
+
+---
+
+### What makes synthetic data correct
+
+Correct synthetic data requires four ingredients to be in sync:
+
+| Ingredient | Parsed from | Stored in | Drives |
+|---|---|---|---|
+| **Data types & constraints** | DDL `CREATE TABLE` | `schema.yaml` → `col.type`, `col.not_null`, `col.length`, … | Correct Spark types, NOT NULL, AUTO_INCREMENT, defaults |
+| **Column semantics** | SQL `COMMENT` clause, column name, description | `schema.yaml` → `col.comment`, `col.name`, `col.description` | SSN, email, phone, address, UUID generators |
+| **Distributions & cardinality** | Live DB statistics | `stats.yaml` → `ColumnStats` | Null rates, MCVs, min/max bounds, histogram shape |
+| **FK referential integrity** | DDL constraints + FK statistics | `schema.yaml` → `CanonicalForeignKey`, `stats.yaml` → `ForeignKeyStats` | Valid child rows, realistic fan-out per parent |
+
+statschema parses all four from source databases into dialect-free YAML. Semantic hints infer realistic value generators from column names and `COMMENT` text. Statistics drive null rates, cardinality, and value distributions. FK constraints produce referentially valid rows at the correct fan-out ratio. The portable YAML is the single source of truth — version-controllable, human-editable, and usable to emit DDL for any target database.
+
+---
+
+### Optimizer bootstrap ⭐ — unique to statschema
+
+A migrated database with correct schema but default statistics produces bad query plans: the optimizer has no row counts, no common-value frequencies, and no numeric ranges.
+
+`statschema` collects column statistics from any source database, stores them as dialect-free YAML, and injects them into any target database so the optimizer sees production-scale distributions *before a single row is loaded*. Native `ANALYZE` / `RUNSTATS` / `GATHER_TABLE_STATS` still runs after loading production data — statschema provides the bootstrap so the optimizer is not blind during the cutover window:
+
+```
+Source DB (MySQL)                        Target DB (PostgreSQL)
+─────────────────                        ──────────────────────
+  schema  ──── DDL transpiler ────────►  CREATE TABLE (correct types)
+  stats   ──── stats transpiler ──────►  pg_restore_attribute_stats(…)
+                                             null_frac, n_distinct,
+                                             most_common_vals, histogram_bounds
+                                         → optimizer plans match production
+                                           before a single row is loaded
+```
+
+PostgreSQL 18 independently validated this need by shipping `pg_restore_attribute_stats`
+and `pg_dump --statistics-only` — portable optimizer statistics are now a first-class
+deployment artifact in PostgreSQL itself.
+`statschema` is the only tool that makes those statistics **cross-dialect**.
+
+#### What you get per target engine
+
+Stats injection improves on the baseline (zero statistics = optimizer guesses 1 row
+for every filter) even when it cannot inject everything.  The benefit scales with
+how much the target engine exposes:
+
+| Engine | What injection gives you | Caveats |
+|--------|--------------------------|---------|
+| **PostgreSQL 18** · Neon · CockroachDB | Full: MCVs, null fractions, n_distinct, histogram bounds for all types — uses `inject_stats_postgres` (PostgreSQL wire protocol) | Row count needs a sample loaded first (PG18 scales by physical file size). Extended stats (multi-column) not yet supported. CockroachDB and Neon accept the same `pg_restore_attribute_stats` calls. |
+| **MySQL 8.0.31+** · MariaDB | MCVs for low-cardinality columns, null fractions, n_distinct, integer/date histogram bounds — uses `inject_stats_mysql` | Equi-height histogram string equality predicate bug — string range histograms fall back to `1/row_count`. Requires MySQL 8.0.31+. MariaDB histogram format differs; injection is best-effort. |
+| **Oracle** | Row count, n_distinct, null count per column — enough for correct join ordering | No portable histogram format exists; Oracle uses internal binary encoding that cannot be set externally. |
+| **SQL Server** | Table-level row count — improves join ordering on multi-table queries | Column-level injection API does not exist. `UPDATE STATISTICS WITH ROWCOUNT` is undocumented. |
+| **Databricks** | Bootstrap an empty table before first data load | Delta collects file stats on every write; UC managed tables with Predictive Optimization run ANALYZE automatically — injection rarely needed. |
+| **IBM Db2 LUW** | Full column stats via `inject_stats_db2`: row count (`SYSSTAT.TABLES`), n_distinct / null count / avg length (`SYSSTAT.COLUMNS`), MCVs and histogram quantile bounds (`SYSSTAT.COLDIST TYPE='F'/'Q'`) | Requires SYSADM, SECADM, or CONTROL privilege. |
+
+> **Stats injection is a bootstrap, not a permanent substitute.**  Always run native
+> `ANALYZE` / `UPDATE STATISTICS` / `DBMS_STATS.GATHER_TABLE_STATS` after loading
+> production data to replace the bootstrap with real statistics.
+>
+> Full details, per-engine workarounds, and function reference: [`docs/stats_transpiler.md`](docs/stats_transpiler.md)
+
+---
+
+### Built for AI-assisted development
+
+statschema is designed so that an AI agent can add a new dialect, a new stats field, or a new semantic pattern — and the test suite immediately confirms whether it is correct across all nine supported databases.
+
+**3,209 tests · 22 test files · 9 live dialects**
+
+| Category | Tests | What is covered |
+|---|---|---|
+| DDL round-trip (offline) | 1,830 | Same-dialect identity, cross-dialect emission, Oracle/Postgres/MySQL/SQLServer type mapping, decimal boundaries, string lengths, temporal types, defaults, migration edge cases, canonical YAML pipeline |
+| Semantic hints (offline) | 150 | Name inference, comment inference, locale (`en_US`, `de_DE`), custom hint files, `apply_hints` wiring, stats passthrough |
+| Stats model, schema parser, builder (offline) | 420 | `ColumnStats` / `TableStats` / `DatabaseStats` serialization, stats I/O, v1 bridge, dbldatagen builder, loader edge paths, override application |
+| Live — DDL round-trip | 430+ | Parse DDL on a real database, emit to every other dialect, verify column types survive |
+| Live — stats collection | 200+ | `collect_table_stats` on MySQL, PostgreSQL, SQL Server, Oracle, Db2, CockroachDB, MariaDB |
+| Live — real schemas | 170+ | Chinook music DB, AdventureWorks, Mautic CRM, Oracle HR — multi-table FK schemas |
+
+**2,402 tests run offline** (no database required) — any contributor or AI agent can run the full offline suite in under 60 seconds on a laptop with no setup. The 807 live tests run against real databases spun up locally with Podman using the per-dialect guides in [`docs/databases/`](docs/databases/).
+
+Every test file follows a single pattern — `pytest` classes with descriptive names — so an AI adding a new feature can read an existing test class, understand the contract, and generate a matching test class for the new feature without reading the full codebase.
+
+Full testing methodology: [`docs/testing.md`](docs/testing.md) · Local database setup: [`docs/local-databases.md`](docs/local-databases.md)
+
+---
+
+Four capabilities, each useful alone — more powerful together:
+
+| Pillar | What it does | Key functions |
+|--------|-------------|---------------|
+| **Optimizer bootstrap** ⭐ | Collect column statistics (null rates, cardinality, MCVs, histograms) from any source database; store as dialect-free YAML; inject into any target so the optimizer is not blind during migration cutover. Native `ANALYZE` still runs post-load to replace the bootstrap with real statistics. | `collect_table_stats` / `dump_stats` / `load_stats` / `inject_stats_*` |
+| **DDL transpiler** | Parse `CREATE TABLE` from any dialect; emit correct DDL for any other — types, defaults, constraints, column comments all preserved per-dialect | `parse_ddl` / `emit_ddl` / `emit_column_comments` |
+| **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data | `build_dataframe_from_canonical` |
+| **Semantic hints** | Infer realistic generators (SSN, email, phone, name, …) from column name, SQL COMMENT text, or description; extend or override via `hints.yaml`; locale-aware | `infer_format_pattern` / `load_hints` / `apply_hints` |
+
+**Supported dialects**: MySQL · MariaDB · PostgreSQL · CockroachDB · Neon · SQL Server · Oracle · IBM Db2 · Databricks
+
+**Roadmap**: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+---
+
+### Expanded view
+
+```mermaid
+flowchart TD
+    subgraph SRC["Source DB (any dialect)"]
+        S1["MySQL DDL\n+ COMMENTs"]
+        S2["PostgreSQL DDL\n(COMMENT ON)"]
+        S3["SQL Server DDL\n(no comments)"]
+        S4["Oracle DDL\n(COMMENT ON)"]
+    end
+
+    subgraph YAML["Portable YAML (dialect-free)"]
+        SCH[("schema.yaml\nstructure · col.comment\ncol.description")]
+        STA[("stats.yaml\nnull% · n_distinct\nMCVs · histogram")]
+    end
+
+    subgraph TGT["Target DB (any dialect)"]
+        T1["Databricks\ninline COMMENT"]
+        T2["PostgreSQL\nCOMMENT ON COLUMN"]
+        T3["MySQL\ninline COMMENT"]
+        T4["SQL Server\n(comments dropped)"]
+        T5["IBM Db2\n(comments dropped)"]
+    end
+
+    subgraph GEN["Stats-Driven Tabular Data"]
+        DF["Spark DataFrame"]
+        DB[("Loaded DB")]
+        ST["TableStats\nnull% · cardinality · min/max · MCVs"]
+    end
+
+    subgraph SEM["⑤ Semantic Hints (priority order)"]
+        SH1["1 col.name\nvs patterns/*.yaml"]
+        SH2["2 col.comment\nvs *.comments.yaml"]
+        SH3["3 col stats\n(MCVs · planned)"]
+        SH4["4 LLM\n(planned)"]
+    end
+
+    SRC -- "① collect_table_stats()" --> STA
+    STA -- "① inject_stats_*()" --> TGT
+    SRC -- "③ parse_ddl()\n(structure + comments)" --> SCH
+    SCH -- "③ emit_ddl()\n+ emit_column_comments()" --> TGT
+    SCH -- "④ schema + comments" --> DF
+    STA -- "④ stats" --> DF
+    SEM -- "⑤ format_pattern\ninference" --> DF
+    DF  -- "load rows" --> DB
+    DB  -- "collect_table_stats()" --> ST
+    ST  -. "stats feedback loop" .-> DF
+    STA -. "db_stats= param" .-> SEM
+```
+
+---
+
+### Detail
+
+**① Stats transpiler** ⭐ — collect statistics from any source, inject into any target:
+```
+  collect_table_stats(mysql_conn, "orders", dialect="mysql")
+        │
+        ▼  dump_stats(db_stats, "orders_stats.yaml")   ←  portable, dialect-free
+        │
+        ▼  load_stats("orders_stats.yaml")             →  DatabaseStats object
+        │
+        ├──►  build_dataframe_from_canonical(…, stats)  →  generate matching tabular data
+        │
+        └──►  inject_stats_postgres(conn, stats)   →  pg_restore_attribute_stats(…)  (PG 18)
+              inject_stats_mysql(conn, stats)       →  INFORMATION_SCHEMA / ANALYZE TABLE
+              inject_stats_sqlserver(conn, stats)   →  UPDATE STATISTICS WITH ROWCOUNT
+              inject_stats_oracle(conn, stats)      →  DBMS_STATS.SET_COLUMN_STATS(…)
+              inject_stats_databricks(spark, stats) →  Delta bootstrap
+              inject_stats_db2(conn, stats)         →  UPDATE SYSSTAT.TABLES / SYSSTAT.COLUMNS
+              → query optimizer sees production distributions before data is loaded
+```
+
+**③ DDL transpiler** — parse any dialect, emit any dialect, round-trip column comments:
+```
+MySQL / PostgreSQL / SQL Server / Oracle DDL  (incl. COMMENT clauses)
+        │
+        ▼  parse_ddl(sql, dialect="…")
+  CanonicalTableSchema                        schema.yaml  (portable YAML)
+    col.name / col.type / …  ──────────────►  structure
+    col.comment              ──────────────►  comment  (from SQL COMMENT clause)
+    col.description          ──────────────►  description (human/LLM-added)
+        │
+        ├──►  emit_ddl("mysql")        →  col … COMMENT 'text'  (inline)
+        ├──►  emit_ddl("databricks")   →  col … COMMENT 'text'  (inline)
+        ├──►  emit_ddl("postgres")     →  col …  (no inline comment)
+        │     emit_column_comments()   →  COMMENT ON COLUMN tbl.col IS 'text';
+        ├──►  emit_ddl("oracle")       →  col …  (no inline comment)
+        │     emit_column_comments()   →  COMMENT ON COLUMN tbl.col IS 'text';
+        └──►  emit_ddl("sqlserver")    →  col …  (comments silently dropped)
+             emit_ddl("db2")           →  col …  (comments silently dropped)
+```
+
+**② Portable schema** — one YAML file, any target:
+```
+  dump_schema(tables, "schema.yaml")   ←  version-controllable, dialect-free
+  load_canonical("schema.yaml")        →  list[CanonicalTableSchema]
+  emit_ddl(tables[0], "oracle")        →  ready to run on any database
+```
+
+**④ Stats-driven tabular data** — collect real statistics, generate matching rows:
+```
+  schema.yaml  +  TableStats (optional)
+        │
+        ▼  build_dataframe_from_canonical(spark, rows=N, stats=…)
+  Spark DataFrame  ──►  load into live DB
+                                │
+                                ▼  collect_table_stats(conn, "table")
+                           TableStats
+                     (null%, cardinality, min/max, MCVs)
+                                │
+                                └──►  feed back  ──►  next generation
+                                      (distributions converge each round)
+```
+
+---
+
+## Three copy-paste examples
+
+### 1 — Transpile DDL across databases
+
+```python
+from src.statschema import parse_ddl, emit_ddl
+
+mysql_ddl = """
+CREATE TABLE orders (
+    order_id    INT           NOT NULL AUTO_INCREMENT,
+    customer_id INT           NOT NULL,
+    status      VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    total       DECIMAL(10,2)     NULL,
+    is_paid     TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at  DATETIME          NULL,
+    PRIMARY KEY (order_id)
+) ENGINE=InnoDB;
+"""
+
+tables = parse_ddl(mysql_ddl, dialect="mysql")
+schema = tables[0]
+
+print(emit_ddl(schema, "postgres"))     # PostgreSQL
+print(emit_ddl(schema, "sqlserver"))    # SQL Server
+print(emit_ddl(schema, "databricks"))   # Databricks / Delta
+print(emit_ddl(schema, "oracle"))       # Oracle
+```
+
+Output (PostgreSQL):
+```sql
+CREATE TABLE IF NOT EXISTS "orders" (
+  "order_id"    SERIAL                NOT NULL,
+  "customer_id" INTEGER               NOT NULL,
+  "status"      CHARACTER VARYING(20) NOT NULL DEFAULT 'pending',
+  "total"       NUMERIC(10,2),
+  "is_paid"     BOOLEAN               NOT NULL DEFAULT FALSE,
+  "created_at"  TIMESTAMP,
+  PRIMARY KEY ("order_id")
+);
+```
+
+> `TINYINT(1) DEFAULT 0` → `BOOLEAN DEFAULT FALSE` (PostgreSQL), `BIT DEFAULT 0` (SQL Server).
+> `DATETIME` → `TIMESTAMP` (PostgreSQL), `DATETIME2` (SQL Server), `TIMESTAMP_NTZ` (Databricks).
+> Every semantic correction is applied automatically.
+
+---
+
+### 2 — Save as portable schema (YAML)
+
+```python
+from src.statschema import parse_ddl, dump_schema, load_canonical, emit_ddl
+
+# Parse once — save as portable YAML
+tables = parse_ddl(open("schema.sql").read(), dialect="mysql")
+dump_schema(tables, "schema.yaml")          # version-controllable, dialect-free
+
+# Later: load and target any database
+tables = load_canonical("schema.yaml")
+print(emit_ddl(tables[0], "databricks"))
+```
+
+`schema.yaml` excerpt (see [Canonical YAML formats](#canonical-yaml-formats) for the full structure):
+```yaml
+tables:
+  - name: orders
+    columns:
+      - name: order_id
+        type: integer
+        not_null: true
+        primary_key: true
+        auto_increment: true
+      - name: customer_ssn
+        type: string
+        length: 11
+        comment: "Customer social security number"   # from SQL COMMENT clause → drives SSN generation
+      - name: is_paid
+        type: boolean
+        not_null: true
+        default: "false"
+```
+
+---
+
+### 3 — Generate stats-driven tabular data
+
+```python
+from src.statschema import (
+    parse_ddl, make_default_stats,
+    collect_table_stats, build_dataframe_from_canonical,
+)
+
+# Parse schema
+schema = parse_ddl(open("schema.sql").read(), dialect="mysql")[0]
+
+# Option A: generate from heuristic defaults (no live DB needed)
+stats = make_default_stats([schema], row_count=100_000).tables[0]
+df = build_dataframe_from_canonical(spark, schema, rows=100_000, stats=stats)
+df.show(5)
+
+# Option B: collect REAL stats from a live database first
+#   → null fractions, distinct counts, min/max, most-common values
+import pymysql
+conn = pymysql.connect(host="127.0.0.1", port=3306, user="root", password="…")
+real_stats = collect_table_stats(conn, "orders", dialect="mysql")
+
+# Generate data parameterized by the collected statistics
+df = build_dataframe_from_canonical(spark, schema, rows=1_000_000, stats=real_stats)
+```
+
+The generated DataFrame is parameterized by:
+- **null rates** per column (e.g. `total` is NULL 8.3% of the time, matching the measured `null_fraction`)
+- **cardinality** (only 4 distinct `status` values, weighted by measured MCV frequencies)
+- **numeric ranges** (min/max bounds from the collected statistics)
+- **string patterns** when a `format_pattern` is set on a column — either explicitly or inferred automatically by name
+
+---
+
+## Semantic data generation
+
+Column names like `ssn`, `email`, `first_name`, and `phone` are automatically matched to realistic Faker-based generators — no manual configuration needed.
+
+### Three input sources, stored separately in YAML
+
+The DDL parser and stats collector populate three independent fields that semantic inference draws from, in priority order:
+
+| Priority | Source | Field | Stored in | Pattern file |
+|----------|--------|-------|-----------|--------------|
+| 1 (highest) | Column name / identifier | `col.name` | `schema.yaml` | `patterns/<locale>.yaml` |
+| 2 | SQL COMMENT clause | `col.comment` | `schema.yaml` | `patterns/<locale>.comments.yaml` |
+| 3 | Human / LLM description | `col.description` | `schema.yaml` | `patterns/<locale>.comments.yaml` |
+| 4 *(planned)* | Column statistics | `ColumnStats` | `stats.yaml` | MCV pattern matching |
+| 5 *(planned)* | LLM inference | — | — | Foundation model call |
+
+Resolution order inside `infer_format_pattern()`:
+1. **Name** — `col.name` vs name-pattern file (fastest, zero config)
+2. **Comment** — `col.comment` (from SQL `COMMENT 'text'` clause) vs comment-pattern file
+3. **Description** — `col.description` (human/LLM-written) used as fallback when `col.comment` is absent
+4. **Stats** — `ColumnStats.most_common_values` *(planned)*
+5. **LLM** — foundation model call *(planned)*
+
+**Option A — built-in name inference (zero config)**
+
+`infer_format_pattern()` matches a column name against a shipped YAML pattern file and returns a `format_pattern`.  Called automatically inside `build_dataframe_from_canonical()` and `to_v1_plan()`.
+
+```python
+from src.statschema.semantic_hints import infer_format_pattern, load_builtin_patterns
+
+infer_format_pattern("customer_ssn")                           # → "ssn"
+infer_format_pattern("email_address")                          # → "email"
+infer_format_pattern("vorname", hints=load_builtin_patterns("de_DE"))  # → "name_first"
+```
+
+When the DDL parser extracts a `COMMENT 'text'` clause, the text is stored in `col.comment`.  If the column name gives no match, the comment text is tried automatically:
+
+```python
+# col.comment = "Customer social security number" (from DDL COMMENT clause)
+infer_format_pattern("col_x", col_comment="Customer social security number")  # → "ssn"
+
+# Column name still wins over comment
+infer_format_pattern("email", col_comment="social security number")  # → "email"
+
+# Human description works as a fallback when col.comment is absent
+infer_format_pattern("col_x", col_description="Customer email address")  # → "email"
+
+# Disable comment / description matching
+infer_format_pattern("col_x", col_comment="...", comment_hints=False)  # → None
+```
+
+Shipped locales: `en_US`, `de_DE`.  Each locale has two pattern files:
+
+| File | Matched against |
+|------|----------------|
+| `patterns/<locale>.yaml` | `col.name` (SQL identifier) |
+| `patterns/<locale>.comments.yaml` | `col.comment` / `col.description` (free-form prose) |
+
+Both use the same YAML format and can be edited without touching Python code.  Comment patterns use word-boundary anchors (`\b`) and natural-language phrasing to work accurately against running text.
+
+**Option B — external `hints.yaml` (user-configurable overrides)**
+
+`load_hints()` + `apply_hints()` annotates tables before generation.  Use this to map project-specific column names, add custom `min`/`max` ranges, or override the built-in patterns.  Pass `db_stats` to expose column statistics for future stats-based inference.
+
+```python
+from src.statschema.semantic_hints import load_hints, apply_hints, load_builtin_comment_patterns
+
+hints  = load_hints("hints.yaml")
+tables = apply_hints(tables, hints)                        # comment matching on by default
+tables = apply_hints(tables, hints, comment_hints=False)  # disable comment matching
+tables = apply_hints(tables, hints,
+    comment_hints=load_builtin_comment_patterns("de_DE"),  # German comment patterns
+    db_stats=db_stats)                                     # stats plumbed for future use
+```
+
+`hints.yaml` format (same format works for comment pattern files):
+
+```yaml
+version: "1.0"
+hints:
+  - pattern: "tax_id|tin"
+    generation:
+      format_pattern: ssn
+
+  - pattern: "salary|compensation"
+    generation:
+      min_value: 30000
+      max_value: 500000
+      distribution: normal
+      distribution_params: {mean: 80000, std: 30000}
+```
+
+Each `pattern` is a case-insensitive Python regex.  For comment files, use word-boundary anchors and natural-language phrasing (`"social.?security"` rather than `"social_security"`).  First match wins.  Any `GenerationRule` fields are valid in the `generation` block.
+
+To use a non-default locale:
+
+```python
+from src.statschema.semantic_hints import load_builtin_patterns, load_builtin_comment_patterns
+de_names    = load_builtin_patterns("de_DE")
+de_comments = load_builtin_comment_patterns("de_DE")
+tables = apply_hints(tables, de_names, comment_hints=de_comments)
+```
+
+**Option C — LLM inference (planned)**
+
+A future fallback using a Databricks Foundation Model endpoint to classify column semantics from column name and sample values, modelled on [Databricks LogSentinel](https://www.databricks.com/blog/logsentinel-how-databricks-uses-databricks-for-llm-powered-pii-detection-and-governance).  Activated via `llm_inference: true` in `hints.yaml`.  Not yet implemented — `_infer_format_pattern_llm()` currently raises `NotImplementedError`.
+
+---
+
+### 4 — Stats feedback loop: transpile → load → measure → improve
+
+This is the full production workflow.  Generate an initial dataset using heuristic
+defaults, load it into a real database, measure what the database actually contains,
+then feed those real measurements back as generation parameters.  Each iteration
+narrows the gap between the collected statistics and the target statistics.
+The loop can be repeated; convergence is not guaranteed but null fractions typically
+stabilise within ±15% and cardinality within ±5× after one or two rounds.
+
+```python
+import pymysql
+from sqlalchemy import create_engine
+from src.statschema import (
+    parse_ddl, emit_ddl,
+    make_default_stats, collect_table_stats, dump_stats,
+    build_dataframe_from_canonical,
+)
+
+# ── 1. Parse schema ────────────────────────────────────────────────────────────
+schema = parse_ddl(open("orders.sql").read(), dialect="mysql")[0]
+conn   = pymysql.connect(host="127.0.0.1", port=3306, user="root", password="testpass",
+                         db="mydb", autocommit=True)
+engine = create_engine("mysql+pymysql://root:testpass@127.0.0.1:3306/mydb")
+
+# ── 2. Create the table on the live database ───────────────────────────────────
+conn.cursor().execute(emit_ddl(schema, "mysql", if_not_exists=False))
+
+# ── 3. First generation — heuristic defaults (no prior data needed) ────────────
+default_stats = make_default_stats([schema], row_count=50_000).tables[0]
+df_v1 = build_dataframe_from_canonical(spark, schema, rows=50_000, stats=default_stats, seed=42)
+
+load_cols = [c.name for c in schema.columns if not c.auto_increment]
+df_v1.select(load_cols).toPandas().to_sql("orders", engine, if_exists="append", index=False)
+
+# ── 4. Collect REAL statistics from what was actually loaded ───────────────────
+real_stats = collect_table_stats(conn, "orders", dialect="mysql")
+# real_stats now contains per-column:
+#   .null_fraction     e.g. 0.082  (total is NULL 8.2% of the time)
+#   .n_distinct        e.g. 4.0    (only 4 distinct status values)
+#   .min_value / .max_value        (actual numeric / date ranges)
+#   .most_common_values            (top-10 values with real frequencies)
+#   .histogram_bounds              (P10 / P25 / P50 / P75 / P90)
+
+dump_stats_yaml = dump_stats  # optional: persist for reproducibility
+# dump_stats(DatabaseStats(tables=[real_stats]), "orders_stats.yaml")
+
+# ── 5. Second generation — driven by real measurements ─────────────────────────
+df_v2 = build_dataframe_from_canonical(spark, schema, rows=50_000, stats=real_stats, seed=99)
+
+conn.cursor().execute(
+    "RENAME TABLE orders TO orders_v1; "
+    + emit_ddl(schema, "mysql", if_not_exists=False).replace("`orders`", "`orders`", 1)
+)
+df_v2.select(load_cols).toPandas().to_sql("orders", engine, if_exists="append", index=False)
+
+# ── 6. Verify accuracy: compare stats from both tables ─────────────────────────
+stats_v1 = collect_table_stats(conn, "orders_v1", dialect="mysql")
+stats_v2 = collect_table_stats(conn, "orders",    dialect="mysql")
+
+for col in load_cols:
+    cs1 = stats_v1.column_stats(col)
+    cs2 = stats_v2.column_stats(col)
+    if cs1 and cs2:
+        nf_err   = abs(cs1.null_fraction - cs2.null_fraction)
+        dist_rat = cs2.n_distinct / cs1.n_distinct if cs1.n_distinct else 1.0
+        print(f"{col:20s}  null_frac_Δ={nf_err:.3f}  distinct_ratio={dist_rat:.2f}")
+```
+
+Example output after one iteration:
+```
+customer_id          null_frac_Δ=0.000  distinct_ratio=0.98
+status               null_frac_Δ=0.003  distinct_ratio=1.00   ← only 4 distinct values, exact match
+total                null_frac_Δ=0.007  distinct_ratio=1.12
+discount_pct         null_frac_Δ=0.005  distinct_ratio=0.94
+is_paid              null_frac_Δ=0.002  distinct_ratio=1.00
+created_at           null_frac_Δ=0.008  distinct_ratio=1.03
+```
+
+Each iteration narrows the statistical gap.  After one or two rounds, null
+fractions are typically within ±15% and cardinality within ±5× of the target
+(verified by `make test-live-synth`).
+
+**What the stats capture** (all collected by `collect_table_stats` using standard SQL):
+
+| Statistic | Collected via | Used by dbldatagen |
+|-----------|--------------|-------------------|
+| Row count | `COUNT(*)` | `rows=` parameter |
+| Null fraction | `(COUNT(*) - COUNT(col)) / COUNT(*)` | `percentNulls=` |
+| Distinct count | `COUNT(DISTINCT col)` | `uniqueValues=` (high-card) |
+| Min / Max | `MIN(col)`, `MAX(col)` | `minValue=`, `maxValue=` |
+| Most-common values | `GROUP BY … ORDER BY cnt DESC LIMIT 10` | `values=`, `weights=` |
+| Histogram bounds | P10/P25/P50/P75/P90 percentiles | range shaping |
+| pg_stats (PG only) | `null_frac`, `n_distinct`, `most_common_vals` | richer MCVs |
+
+**When MCVs are applied**: only when the top-10 values cover >50% of the column
+(truly low-cardinality, e.g. `status`) or `n_distinct ≤ 20`.  High-cardinality
+columns (e.g. random integers) use min/max ranges instead, preserving full spread.
+
+---
+
+## Supported dialects for transpilation
+
+### Inputs — parse DDL from
+
+| Format | Function | Notes |
+|--------|----------|-------|
+| MySQL DDL (`mysqldump --no-data`) | `parse_ddl(sql, "mysql")` | |
+| MariaDB DDL | `parse_ddl(sql, "mariadb")` | alias → mysql path |
+| PostgreSQL DDL (`pg_dump -s`) | `parse_ddl(sql, "postgres")` | |
+| CockroachDB DDL | `parse_ddl(sql, "cockroachdb")` | alias → postgres path |
+| SQL Server DDL (SSMS Scripts) | `parse_ddl(sql, "sqlserver")` | |
+| Oracle DDL | `parse_ddl(sql, "oracle")` | |
+| IBM Db2 DDL | `parse_ddl(sql, "db2")` | ANSI SQL parse (no sqlglot Db2 dialect) |
+| Databricks DDL | `parse_ddl(sql, "databricks")` | |
+| Portable schema YAML | `load_canonical("schema.yaml")` | dialect-free round-trip format |
+| YData / Syda YAML | `parse_ydata_yaml(data)` | |
+| SDV metadata JSON | `parse_sdv_metadata(data)` | |
+| Pipeline YAML | `parse_pipeline_tables(data)` | |
+| **Auto-detect** | `load_schema("file")` | infers format from content |
+
+### Outputs — transpile DDL to
+
+| Target dialect | `emit_ddl` argument |
+|----------------|---------------------|
+| Databricks / Delta Lake | `"databricks"` |
+| PostgreSQL / Neon / CockroachDB | `"postgres"` |
+| MySQL / MariaDB | `"mysql"` |
+| SQL Server | `"sqlserver"` |
+| Oracle | `"oracle"` |
+| IBM Db2 LUW | `"db2"` |
+
+Every semantic correction is applied automatically during transpilation —
+e.g. `TINYINT(1)` → `BOOLEAN` (PostgreSQL), `DATETIME` → `DATETIME2` (SQL Server),
+`AUTO_INCREMENT` → `SERIAL` (PostgreSQL) / `GENERATED ALWAYS AS IDENTITY` (Oracle / Db2).
+
+---
+
+## Portable schema — canonical YAML formats
+
+The portable schema YAML is the central intermediate representation.  Both the
+DDL schema and the column statistics are stored as dialect-agnostic YAML files
+that can be committed to version control, shared across teams, and retargeted at
+any database without modification.  A schema collected from MySQL today can drive
+a Databricks Delta table or an Oracle schema tomorrow — no manual conversion needed.
+
+### Schema YAML (`schema.yaml`)
+
+Produced by `dump_schema(tables, "schema.yaml")`, consumed by `load_canonical("schema.yaml")`:
+
+```yaml
+tables:
+  - name: orders
+    columns:
+      - name: order_id
+        type: integer
+        not_null: true
+        primary_key: true
+        auto_increment: true
+      - name: status
+        type: string
+        length: 20
+        not_null: true
+        default: "'pending'"
+      - name: total
+        type: decimal
+        precision: 10
+        scale: 2
+      - name: is_paid
+        type: boolean
+        not_null: true
+        default: "false"
+      - name: created_at
+        type: timestamp
+```
+
+### Statistics YAML (`orders_stats.yaml`)
+
+Produced by `dump_stats(db_stats, "orders_stats.yaml")`, consumed by `load_stats("orders_stats.yaml")`:
+
+```yaml
+version: "1.0"
+source_dialect: mysql
+tables:
+  - name: orders
+    row_count: 50000
+    avg_row_bytes: 44
+    columns:
+      - name: status
+        null_fraction: 0.0
+        n_distinct: 4.0
+        most_common_values:
+          - {value: pending,    frequency: 0.42}
+          - {value: shipped,    frequency: 0.31}
+          - {value: delivered,  frequency: 0.18}
+          - {value: cancelled,  frequency: 0.09}
+      - name: total
+        null_fraction: 0.082
+        n_distinct: 12500.0
+        min_value: "4.99"
+        max_value: "9987.50"
+        histogram_bounds: ["4.99", "120.00", "450.00", "1200.00", "9987.50"]
+      - name: is_paid
+        null_fraction: 0.0
+        n_distinct: 2.0
+    indexes:
+      - name: pk_orders
+        columns: [order_id]
+        unique: true
+        index_type: BTREE
+```
+
+Both formats round-trip exactly: `load_canonical(dump_schema(...))` and
+`load_stats(dump_stats(...))` reproduce the original objects without loss.
+The stats YAML is database-agnostic — stats collected from MySQL can drive
+generation for PostgreSQL or Databricks without conversion.
+
+---
+
+## Exporting DDL and statistics from each database
+
+All examples below read credentials from `.env` at the repo root.
+Copy `.env.example` to `.env` and fill in your values once; every snippet
+below will then work without modification.
+
+```bash
+cp .env.example .env   # fill in passwords, ports, etc.
+```
+
+```python
+# common preamble — paste at the top of any script below
+import os
+from dotenv import load_dotenv
+load_dotenv()   # reads .env from the current directory (or any parent)
+```
+
+---
+
+### MySQL
+
+```bash
+# DDL export — one file per schema, no data
+# Credentials from .env: MYSQL_ROOT_PASS, MYSQL8_PORT (or MYSQL57_PORT)
+source .env
+mysqldump --no-data --routines=0 --triggers=0 \
+  -h 127.0.0.1 -P "$MYSQL8_PORT" -u root -p"$MYSQL_ROOT_PASS" mydb > schema.sql
+```
+
+```python
+import os, pymysql
+from dotenv import load_dotenv
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+
+load_dotenv()
+
+conn = pymysql.connect(
+    host="127.0.0.1",
+    port=int(os.environ["MYSQL8_PORT"]),
+    user="root",
+    password=os.environ["MYSQL_ROOT_PASS"],
+    db="mydb",
+    autocommit=True,
+)
+
+# Run ANALYZE first so MySQL's column statistics are current
+conn.cursor().execute("ANALYZE TABLE orders;")
+
+tables = parse_ddl(open("schema.sql").read(), dialect="mysql")
+dump_schema(tables, "schema.yaml")
+
+stats = [collect_table_stats(conn, t.name, dialect="mysql") for t in tables]
+dump_stats(DatabaseStats(tables=stats), "stats.yaml")
+```
+
+---
+
+### PostgreSQL
+
+```bash
+# DDL export — schema only, no data
+# Credentials from .env: PG_PASSWORD, PG_DB, PG16_PORT (or PG14_PORT)
+source .env
+PGPASSWORD="$PG_PASSWORD" pg_dump --schema-only --no-owner --no-acl \
+  -h localhost -p "$PG16_PORT" -U myuser -d "$PG_DB" > schema.sql
+```
+
+```python
+import os, psycopg2
+from dotenv import load_dotenv
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+
+load_dotenv()
+
+conn = psycopg2.connect(
+    host="localhost",
+    port=int(os.environ["PG16_PORT"]),
+    dbname=os.environ["PG_DB"],
+    user="myuser",
+    password=os.environ["PG_PASSWORD"],
+)
+
+# Run ANALYZE first so pg_stats is populated
+conn.cursor().execute("ANALYZE;")
+conn.commit()
+
+tables = parse_ddl(open("schema.sql").read(), dialect="postgres")
+dump_schema(tables, "schema.yaml")
+
+stats = [collect_table_stats(conn, t.name, dialect="postgres", schema="public")
+         for t in tables]
+dump_stats(DatabaseStats(tables=stats), "stats.yaml")
+```
+
+> `collect_table_stats` reads `pg_stats` (richer MCVs and histogram bounds) in
+> addition to standard SQL aggregates when the dialect is `"postgres"`.
+
+---
+
+### SQL Server
+
+```bash
+# DDL export via mssql-scripter (pip install mssql-scripter)
+# Credentials from .env: SQLSERVER_PASS, SQLSERVER_PORT
+source .env
+mssql-scripter -S "127.0.0.1,$SQLSERVER_PORT" -d mydb -U sa -P "$SQLSERVER_PASS" \
+  --schema-and-data=False --display-progress > schema.sql
+```
+
+```python
+import os, pymssql
+from dotenv import load_dotenv
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+
+load_dotenv()
+
+conn = pymssql.connect(
+    server="127.0.0.1",
+    port=int(os.environ["SQLSERVER_PORT"]),
+    user="sa",
+    password=os.environ["SQLSERVER_PASS"],
+    database="mydb",
+    autocommit=True,
+)
+
+# Update statistics so measurements are current
+conn.cursor().execute("EXEC sp_updatestats;")
+
+tables = parse_ddl(open("schema.sql").read(), dialect="sqlserver")
+dump_schema(tables, "schema.yaml")
+
+stats = [collect_table_stats(conn, t.name, dialect="sqlserver") for t in tables]
+dump_stats(DatabaseStats(tables=stats), "stats.yaml")
+```
+
+---
+
+### Oracle
+
+Add Oracle credentials to `.env`:
+```bash
+# .env additions for Oracle
+ORACLE_USER=myuser
+ORACLE_PASS=mypassword
+ORACLE_DSN=localhost:1521/XEPDB1
+ORACLE_SCHEMA=MYSCHEMA
+```
+
+```bash
+# DDL export via SQL*Plus (dbms_metadata)
+source .env
+sqlplus "$ORACLE_USER/$ORACLE_PASS@//$ORACLE_DSN" <<'EOF'
+SET PAGESIZE 0 LONG 99999 FEEDBACK OFF
+SELECT dbms_metadata.get_ddl('TABLE', table_name, '$ORACLE_SCHEMA')
+FROM all_tables WHERE owner = '$ORACLE_SCHEMA';
+EXIT;
+EOF > schema.sql
+```
+
+```python
+import os, oracledb
+from dotenv import load_dotenv
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+
+load_dotenv()
+
+conn = oracledb.connect(
+    user=os.environ["ORACLE_USER"],
+    password=os.environ["ORACLE_PASS"],
+    dsn=os.environ["ORACLE_DSN"],
+)
+
+# Gather fresh statistics
+conn.cursor().execute(
+    f"BEGIN dbms_stats.gather_schema_stats('{os.environ[\"ORACLE_SCHEMA\"]}'); END;"
+)
+
+tables = parse_ddl(open("schema.sql").read(), dialect="oracle")
+dump_schema(tables, "schema.yaml")
+
+schema = os.environ["ORACLE_SCHEMA"]
+stats = [collect_table_stats(conn, t.name, dialect="oracle", schema=schema)
+         for t in tables]
+dump_stats(DatabaseStats(tables=stats), "stats.yaml")
+```
+
+---
+
+### Databricks
+
+Add Databricks credentials to `.env` (already present in `.env.example`):
+```bash
+# .env — already included in .env.example
+DATABRICKS_WORKSPACE_URL=https://<workspace>.cloud.databricks.com
+CLIENT_ID=<service_principal_application_id>
+CLIENT_SECRET=<service_principal_secret>
+# Unity Catalog coordinates for the table to export
+DATABRICKS_CATALOG=main
+DATABRICKS_SCHEMA=myschema
+DATABRICKS_TABLE=orders
+```
+
+```bash
+# DDL export via Databricks CLI
+# pip install databricks-cli && databricks configure
+source .env
+databricks sql execute \
+  --profile DEFAULT \
+  "SHOW CREATE TABLE ${DATABRICKS_CATALOG}.${DATABRICKS_SCHEMA}.${DATABRICKS_TABLE}" \
+  > schema.sql
+```
+
+```python
+import os
+from dotenv import load_dotenv
+from databricks.connect import DatabricksSession
+from databricks import sql as dbsql
+from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
+
+load_dotenv()
+
+catalog = os.environ["DATABRICKS_CATALOG"]
+schema  = os.environ["DATABRICKS_SCHEMA"]
+table   = os.environ["DATABRICKS_TABLE"]
+host    = os.environ["DATABRICKS_WORKSPACE_URL"].removeprefix("https://")
+
+spark = DatabricksSession.builder.getOrCreate()
+
+# Extract DDL and run ANALYZE for column-level statistics
+full_name = f"{catalog}.{schema}.{table}"
+ddl = spark.sql(f"SHOW CREATE TABLE {full_name}").collect()[0][0]
+spark.sql(f"ANALYZE TABLE {full_name} COMPUTE STATISTICS FOR ALL COLUMNS")
+
+tables = parse_ddl(ddl, dialect="databricks")
+dump_schema(tables, "schema.yaml")
+
+# Collect stats via the Databricks SQL connector
+# pip install databricks-sql-connector
+conn = dbsql.connect(
+    server_hostname=host,
+    http_path=os.environ.get("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/…"),
+    access_token=os.environ.get("CLIENT_SECRET"),
+)
+stats = [collect_table_stats(conn, t.name, dialect="databricks",
+                              schema=schema, catalog=catalog)
+         for t in tables]
+dump_stats(DatabaseStats(tables=stats), "stats.yaml")
+```
+
+---
+
+### Using saved YAML files
+
+Once `schema.yaml` and `stats.yaml` are on disk they can be used without any
+database connection:
+
+```python
+from src.statschema import load_canonical, load_stats, emit_ddl, build_dataframe_from_canonical
+
+tables    = load_canonical("schema.yaml")
+db_stats  = load_stats("stats.yaml")
+
+# Emit DDL for any target
+print(emit_ddl(tables[0], "postgres"))
+print(emit_ddl(tables[0], "databricks"))
+
+# Generate synthetic data
+df = build_dataframe_from_canonical(spark, tables[0], rows=100_000,
+                                    stats=db_stats.tables[0])
+```
+
+---
+
+## Stats transpiler — the database migration use case
+
+When you migrate a database, the query optimizer on the target knows nothing about
+your data.  Its statistics are either empty or based on a tiny test dataset.
+Bad statistics → bad query plans → slow queries → frustrated users on day one.
+
+The conventional fix is to load all production data, then run `ANALYZE` / `UPDATE STATISTICS`.
+That takes hours or days on large databases, and requires production data to be present.
+
+**The stats transpiler approach**: collect statistics from the source database *before*
+migration, store them as portable YAML, then inject them directly into the target
+database's statistics catalog.  The optimizer sees production-scale distributions
+immediately, with no data loaded.
+
+```python
+import pymysql
+from src.statschema import collect_table_stats, dump_stats, load_stats, DatabaseStats
+
+# 1. Collect statistics from the SOURCE database (MySQL)
+src_conn = pymysql.connect(host="prod-mysql", user="reader", password="…", db="orders_db")
+stats = [collect_table_stats(src_conn, t, dialect="mysql") for t in ["orders", "customers"]]
+dump_stats(DatabaseStats(tables=stats), "production_stats.yaml")
+
+# 2. Migrate DDL (transpile schema)
+#    parse_ddl(…, dialect="mysql") → emit_ddl(…, dialect="postgres")  [see Example 1]
+
+# 3. Inject statistics into TARGET database (PostgreSQL)
+#    [TODO: pg_restore_attribute_stats() bridge — see roadmap]
+pg_stats = load_stats("production_stats.yaml")
+# → optimizer knows: orders has 50M rows, status has 4 distinct values (42% 'pending'),
+#   total ranges from $4.99–$9987, created_at histogram spans 5 years
+#   → index vs sequential scan decisions match production from minute one
+```
+
+> **Status**: statistics collection and portable YAML are production-ready.
+> Injecting into target optimizer statistics catalogs (`pg_restore_attribute_stats`,
+> `DBMS_STATS.SET_COLUMN_STATS`, `UPDATE STATISTICS WITH ROWCOUNT`) is on the roadmap —
+> see the TODO item.  PostgreSQL 18 independently validated this need by shipping
+> `pg_dump --statistics-only` for the same reason.
+
+---
+
+## Stats-driven tabular data — three levels of fidelity
+
+Column statistics control how closely the generated tabular data matches the
+source database's distributions.  Three levels are available, from zero-dependency
+heuristics to real measurements collected from a live system:
+
+```python
+from src.statschema import make_default_stats, collect_table_stats, load_stats, dump_stats, DatabaseStats
+
+# Level 1 – heuristic defaults (no DB connection required)
+#   Conservative estimates: null_fraction=0.05 for nullable cols, n_distinct from type.
+db_stats   = make_default_stats(tables, row_count=50_000)
+table_stats = db_stats.tables[0]
+
+# Level 2 – measure a live database (standard SQL, works on MySQL / PG / SQL Server)
+import psycopg2
+conn        = psycopg2.connect("host=localhost dbname=prod user=reader password=…")
+table_stats = collect_table_stats(conn, "orders", dialect="postgres", schema="public")
+#   → per-column: null_fraction, n_distinct, min/max, top-10 MCVs, P10–P90 bounds
+#   → PostgreSQL: also reads pg_stats for richer MCV data after ANALYZE
+
+# Level 3 – save stats YAML for reproducibility / CI
+dump_stats(DatabaseStats(tables=[table_stats]), "orders_stats.yaml")
+db_stats    = load_stats("orders_stats.yaml")   # exact round-trip
+```
+
+See **Example 4** above for the full generate → load → collect → regenerate → compare loop.
+
+---
+
+## Schema overrides — rename, retype, rescale
+
+```python
+from src.statschema import load_canonical, load_stats, apply_overrides, OverrideSpec, TableOverride, ColumnOverride
+
+spec = OverrideSpec(tables=[
+    TableOverride(
+        name="orders",
+        rename="purchase_orders",          # rename table for target system
+        row_count=5_000,                   # generate a 5k-row subset
+        columns=[
+            ColumnOverride(name="status",  type="varchar", length=30),   # widen type
+            ColumnOverride(name="total",   rename="amount"),              # rename column
+        ],
+    )
+])
+
+tables = load_canonical("schema.yaml")
+stats  = load_stats("stats.yaml")
+tables2, stats2 = apply_overrides(tables[0], stats.tables[0], spec)
+```
+
+Common migration patterns (MySQL → Databricks, Oracle → PostgreSQL, etc.) are all
+handled through the same override mechanism.
+
+---
+
+## Full pipeline — transpile · portable schema · tabular data
+
+```
+Source schema (any format)
+        │
+        ▼  load_schema() / parse_ddl()
+CanonicalTableSchema + CanonicalForeignKey
+        │
+        ├──  dump_schema("schema.yaml")        ◄── version-controllable, dialect-free
+        │
+        ├──  apply_overrides(spec)             ◄── rename / retype / rescale
+        │
+        ├──  emit_ddl("databricks")   ──►  CREATE TABLE  (Databricks / Unity Catalog)
+        ├──  emit_ddl("postgres")     ──►  CREATE TABLE  (PostgreSQL)
+        ├──  emit_ddl("mysql")        ──►  CREATE TABLE  (MySQL)
+        ├──  emit_ddl("sqlserver")    ──►  CREATE TABLE  (SQL Server)
+        ├──  emit_ddl("oracle")       ──►  CREATE TABLE  (Oracle)
+        │
+        ├──  make_default_stats()             ◄── heuristic stats when none available
+        │    OR collect_table_stats(conn)     ◄── real stats from live database
+        │    OR load_stats("stats.yaml")      ◄── pre-saved stats (reproducible)
+        │
+        └──  build_dataframe_from_canonical(spark, rows=N, stats=…)
+                    │
+                    ▼  dbldatagen (Databricks Labs Data Generator)
+             Spark DataFrame — synthetic rows parameterized by schema + collected statistics
+                    │
+                    ├──  df.write.saveAsTable("catalog.schema.table")  (Databricks)
+                    ├──  pandas .to_sql(engine)                        (any DB via SQLAlchemy)
+                    └──  write to DB / Delta / warehouse                (your choice)
+```
+
+---
+
+## Quick start
+
+### Install
+
+```bash
+# Runtime
+pip install pyyaml sqlglot python-dotenv
+
+# Data generation (requires Java; see docs/testing.md)
+pip install pyspark dbldatagen pyarrow
+
+# Live database drivers (install only what you need)
+pip install pymysql psycopg2-binary pymssql sqlalchemy
+```
+
+### Credentials
+
+```bash
+cp .env.example .env
+# edit .env — set CLIENT_SECRET, SQLSERVER_PASS, etc.
+```
+
+`conftest.py` loads `.env` automatically before tests.
+
+### Run tests
+
+```bash
+make venv-test            # create .venv_test (Python 3.11 + local Spark)
+make test-fast            # pure-Python tests only (no Spark, no live DB)
+make test                 # full suite including Spark data-generation tests
+make test-live-all        # + live MySQL, PostgreSQL, SQL Server round-trips
+make test-live-synth      # full generate → load → stats → regenerate → compare pipeline
+```
+
+---
+
+## Contributing: adding a new database
+
+**[`docs/adding-a-database.md`](docs/adding-a-database.md)** is the single contributor guide for integrating a new engine as a source or target for DDL transpilation, stats collection, and live testing.  It covers everything from pre-checks (sqlglot support, ARM64 availability, wire protocol) through dialect registration, optional custom DDL emitter, local container/VM setup, live test module, and Makefile wiring.
+
+Local database setup recipes live in **[`docs/local-databases.md`](docs/local-databases.md)** (index) and individual per-database pages under **[`docs/databases/`](docs/databases/)**:
+
+| Page | Method |
+|------|--------|
+| [postgres.md](docs/databases/postgres.md) | Podman, native ARM64 |
+| [neon.md](docs/databases/neon.md) | Podman + Neon Local cloud proxy |
+| [cockroachdb.md](docs/databases/cockroachdb.md) | Podman, native ARM64 (single-node + multi-region) |
+| [mysql.md](docs/databases/mysql.md) | Podman, native ARM64 |
+| [mariadb.md](docs/databases/mariadb.md) | Podman, native ARM64 |
+| [sqlserver.md](docs/databases/sqlserver.md) | Lima VM + QEMU (x86_64) |
+| [oracle.md](docs/databases/oracle.md) | Lima VM + Podman + QEMU (x86_64) |
+| [db2.md](docs/databases/db2.md) | Lima VM + Podman + QEMU (x86_64) |
+
+---
+
+## Verified transpiler coverage
+
+`make test-live-all` executes **~2600 parametrized tests** against real databases,
+verifying the full transpile → YAML → retranspile → execute → introspect → compare cycle
+for every canonical type, constraint, and default.
+
+| Database | Versions tested |
+|----------|----------------|
+| MySQL | 5.7, 8.4 |
+| MariaDB | 10.11 LTS, 11.4 |
+| PostgreSQL | 14, 16 |
+| CockroachDB | latest (single-node + 3-node multi-region) |
+| Neon | Neon Local proxy |
+| SQL Server | 2022 |
+| Oracle | XE 21c |
+| IBM Db2 | CE 11.5 |
+| Databricks | Unity Catalog (via `databricks-connect`) |
+
+Live synthetic data tests (`make test-live-synth`) additionally verify that
+stats collected from a first-generation load drive a second generation whose
+distributions match within ±15% null fraction and ±5× cardinality.
+
+---
+
+## API for AI agents (Cursor, Claude, etc.)
+
+The public API is intentionally narrow and composable:
+
+```python
+# Parse schema
+tables = parse_ddl(sql_string, dialect)              # → list[CanonicalTableSchema]
+tables = load_schema("file.sql")                     # auto-detect format
+
+# Inspect
+schema = tables[0]
+[(c.name, c.type, c.not_null) for c in schema.columns]
+
+# Emit DDL for any target
+ddl = emit_ddl(schema, "postgres")                   # → str  (CREATE TABLE …)
+all_ddl = emit_ddl_all(schema)                       # → dict[dialect, str]
+
+# Statistics
+stats = collect_table_stats(conn, table, dialect)    # → TableStats
+stats = make_default_stats([schema], row_count=N)    # → DatabaseStats (no DB needed)
+
+# Generate synthetic data
+df = build_dataframe_from_canonical(spark, schema, rows=N, stats=table_stats)
+
+# Save / load canonical representations
+dump_schema(tables, "schema.yaml")
+tables = load_canonical("schema.yaml")
+dump_stats(db_stats, "stats.yaml")
+db_stats = load_stats("stats.yaml")
+```
+
+**All functions are pure-Python except `build_dataframe_from_canonical`** (requires
+PySpark + dbldatagen).  You can `parse_ddl` → `emit_ddl` without any database
+connection, Spark session, or Java installation.
+
+---
+
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| [`docs/testing.md`](docs/testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
+| [`docs/adding-a-database.md`](docs/adding-a-database.md) | **Contributor guide**: add a new engine end-to-end (pre-checks, dialect registry, emitter, tests, docs) |
+| [`docs/local-databases.md`](docs/local-databases.md) | Index of all local database setup guides |
+| [`docs/databases/`](docs/databases/) | Per-database setup pages (postgres, mysql, mariadb, cockroachdb, sqlserver, oracle, db2, neon, …) |
+| [`docs/test_plan_ddl_roundtrip.md`](docs/test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
+| [`docs/synthetic_data_shortcomings.md`](docs/synthetic_data_shortcomings.md) | Known limitations of synthetic data generation and mitigations |
+| [`docs/PLAN.md`](docs/PLAN.md) | Architecture and implementation notes |
+| [`.env.example`](.env.example) | Credential template — copy to `.env` and fill in values |
+|| [`docs/git-submodules.md`](docs/git-submodules.md) | Git submodule workflow (commit and push `.cursor` + parent repo) |

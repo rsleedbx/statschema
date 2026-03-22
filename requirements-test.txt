@@ -1,0 +1,52 @@
+# Local / CI test environment – local PySpark, no Databricks Connect
+#
+# Intentionally omits databricks-connect.  When databricks-connect is present it
+# replaces pyspark with a version that only supports remote Databricks clusters,
+# causing SparkSession.builder.master("local[1]") to raise:
+#   "Only remote Spark sessions using Databricks Connect are supported."
+#
+# This file is used by:
+#   make venv-test          → one-time setup
+#   make test               → full suite (see docs/testing.md for file list)
+#   .venv_test/bin/pytest   → direct pytest invocation
+#
+# Java requirement
+#   Local PySpark needs a JVM.  conftest.py (repo root) auto-detects Homebrew
+#   OpenJDK at /opt/homebrew/opt/openjdk@{17,21,11} so JAVA_HOME does not need
+#   to be set manually.  On macOS: brew install openjdk@17
+
+# ── Core runtime ─────────────────────────────────────────────────────────────
+PyYAML>=6.0
+python-dotenv>=1.0
+dbldatagen>=0.4.0
+pyparsing
+jmespath
+# ── DDL parser ───────────────────────────────────────────────────────────────
+sqlglot>=20.0.0
+
+# ── Local Spark (no Databricks Connect) ──────────────────────────────────────
+pyspark>=3.5.0
+# PySpark 4.x requires PyArrow ≥ 15.0 for Arrow-based optimisations
+pyarrow>=15.0.0
+# Delta Lake for local tests of inject_stats_databricks (TestDatabricksStatsInjection)
+# delta-spark version must match pyspark version: delta-spark 4.x → pyspark 4.x
+delta-spark>=3.2.0
+
+# ── dbldatagen transitive deps (not always declared by dbldatagen itself) ────
+numpy>=1.20.0
+pandas>=1.0.0
+
+# ── Live database drivers (tests auto-skip when DB not running) ───────────────
+# SQL Server: used by tests/test_live_sqlserver.py
+pymssql>=2.2.0
+# MySQL 5.7 + 8.x: used by tests/test_live_mysql.py
+pymysql>=1.1.0
+# PostgreSQL 14 + 16: used by tests/test_live_pg.py
+psycopg2-binary>=2.9.0
+# Oracle XE: used by tests/test_live_oracle.py
+oracledb>=2.0.0
+# SQLAlchemy: used by tests/test_live_synth.py for pandas.to_sql bulk loads
+sqlalchemy>=2.0.0
+
+# ── Test runner ───────────────────────────────────────────────────────────────
+pytest>=7.0.0

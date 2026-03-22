@@ -1,0 +1,28 @@
+# YData/Syda-style schema (single table)
+# Source: YData / Syda – https://python.syda.ai/examples/structured_only/yaml_schemas/
+# Tag the source so the loader uses the YData parser.
+schema_source: ydata
+
+__table_description__: Example table for statschema pipeline (YData canonical format)
+
+id:
+  type: number
+  description: Unique row identifier
+  constraints:
+    primary_key: true
+
+col_1:
+  type: integer
+  description: Integer column for Phase 1 tests
+  constraints: {}
+
+company_name:
+  type: text
+  description: Name of the company
+  constraints:
+    max_length: 200
+
+value:
+  type: number
+  description: Numeric value
+  constraints: {}

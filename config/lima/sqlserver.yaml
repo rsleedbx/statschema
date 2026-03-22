@@ -1,0 +1,56 @@
+# Lima VM – Microsoft SQL Server 2019 (x86_64 Ubuntu 20.04)
+#
+# Usage:
+#   limactl start --name=sqlserver ~/github/statschema/config/lima/sqlserver.yaml
+#   limactl stop  sqlserver
+#   limactl start sqlserver
+#   limactl delete sqlserver
+#
+# Connection (from macOS host):
+#   sqlcmd -S 127.0.0.1,1433 -U sa -P 'Supersecure!'
+#
+# IMPORTANT: change MSSQL_SA_PASSWORD below before use.
+# Password must be ≥ 8 chars with uppercase, lowercase, digit, and symbol.
+
+arch: "x86_64"
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/20.04/release/ubuntu-20.04-server-cloudimg-amd64.img"
+
+mounts:
+  - location: "~"
+  - location: "/tmp/lima"
+    writable: true
+
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestPort: 1433
+    hostIP: "0.0.0.0"
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/sh
+      wget -qO- https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+      add-apt-repository "$(wget -qO- https://packages.microsoft.com/config/ubuntu/20.04/mssql-server-2019.list)"
+      apt-get update
+      apt-get install -y mssql-server
+      MSSQL_SA_PASSWORD='Supersecure!'
+      MSSQL_PID=developer /opt/mssql/bin/mssql-conf -n setup accept-eula
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 30s bash -c "until nc -z localhost 1433; do sleep 3; done"; then
+        echo >&2 "sqlserver is not running yet"
+        exit 1
+      fi
+    hint: |
+      SQL Server is not up yet.
+      Run "limactl shell sqlserver sudo tail /var/log/syslog" to check the log.
+    message: |
+      SQL Server is up and listening on port 1433.

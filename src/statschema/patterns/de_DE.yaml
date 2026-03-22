@@ -1,0 +1,105 @@
+# Built-in column-name inference patterns — locale: de_DE
+#
+# Covers German-specific column naming conventions (DACH market / legacy German apps)
+# as well as universal patterns (email, uuid, url, ip) common in all codebases.
+#
+# German applications mix German and English column names. This file covers both:
+#   German terms:  vorname, nachname, strasse, plz, stadt, firma, telefon …
+#   English terms: email, uuid, url, ip_address, iban, credit_card …
+#
+# Faker German providers used via format_pattern:
+#   phone_intl  →  Faker phone_number (locale de_DE: German formatting)
+#   postal_uk   →  Closest available postal pattern (German PLZ is 5 digits)
+#   name_first  →  Faker first_name
+#   name_last   →  Faker last_name
+#
+# To use this locale:
+#   from statschema.semantic_hints import load_builtin_patterns, apply_hints
+#   tables = apply_hints(tables, load_builtin_patterns("de_DE"))
+
+locale: de_DE
+hints:
+  # ── Social security / government IDs ──────────────────────────────────────
+  - pattern: "rentenversicherungsnummer|rentenversicherung|sozialversicherungsnummer|sozialversicherung|svnummer|sv_nummer"
+    generation:
+      format_pattern: ssn
+
+  # ── Email ─────────────────────────────────────────────────────────────────
+  - pattern: "email|emailadresse|e_mail"
+    generation:
+      format_pattern: email
+
+  # ── Phone ─────────────────────────────────────────────────────────────────
+  - pattern: "telefon|telefonnummer|telenr|handy|handynummer|handynr|mobilnummer|mobil|festnetz"
+    generation:
+      format_pattern: phone_intl
+
+  # ── Names ─────────────────────────────────────────────────────────────────
+  - pattern: "vorname|vname|rufname|first_name|firstname|given_name"
+    generation:
+      format_pattern: name_first
+
+  - pattern: "nachname|nname|familienname|familname|zuname|last_name|lastname|surname|family_name"
+    generation:
+      format_pattern: name_last
+
+  # ── Credit card ───────────────────────────────────────────────────────────
+  - pattern: "kreditkarte|kreditkartennummer|kartennummer|karte|credit_card|card_number|cc_number|cc_num"
+    generation:
+      format_pattern: credit_card
+
+  # ── IP ────────────────────────────────────────────────────────────────────
+  - pattern: "ip_adresse|ipadresse|ip_address|ip_addr"
+    generation:
+      format_pattern: ip_v4
+
+  # ── URL / web ─────────────────────────────────────────────────────────────
+  - pattern: "webseite|internetadresse|url|website|homepage"
+    generation:
+      format_pattern: url
+
+  # ── UUID / GUID ───────────────────────────────────────────────────────────
+  - pattern: "uuid|guid"
+    generation:
+      format_pattern: uuid
+
+  # ── IBAN / bank ───────────────────────────────────────────────────────────
+  - pattern: "iban|kontonummer|konto|bankverbindung|bank_account"
+    generation:
+      format_pattern: iban
+
+  # ── Currency ──────────────────────────────────────────────────────────────
+  - pattern: "waehrung|waehrungscode|waehrungskuerzel|currency_code|currency_iso"
+    generation:
+      format_pattern: currency_iso
+
+  # ── Postal code ───────────────────────────────────────────────────────────
+  - pattern: "plz|postleitzahl|zip_code|postal_code|postcode"
+    generation:
+      format_pattern: postal_uk
+
+  # ── Country ───────────────────────────────────────────────────────────────
+  - pattern: "land|laendercode|landeskuerzel|laenderkuerzel|country"
+    generation:
+      format_pattern: country_iso2
+
+  # ── Company ───────────────────────────────────────────────────────────────
+  - pattern: "firma|unternehmen|gesellschaft|betrieb|arbeitgeber|company|organization|employer"
+    generation:
+      format_pattern: company
+
+  # ── Address ───────────────────────────────────────────────────────────────
+  - pattern: "strasse|strassenname|anschrift|adresse|street_address|address"
+    generation:
+      format_pattern: address
+
+  # Note: 'straße' (with German ß) is included as a separate entry because
+  # yaml safe_load preserves the ß character and regex matches it correctly.
+  - pattern: "straße|straßenname"
+    generation:
+      format_pattern: address
+
+  # ── City ──────────────────────────────────────────────────────────────────
+  - pattern: "stadt|ort|ortschaft|gemeinde|city"
+    generation:
+      format_pattern: city

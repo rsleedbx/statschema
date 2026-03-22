@@ -1,0 +1,9 @@
+# Local development – notebooks + pytest in one venv
+# Installs everything from requirements.txt plus pytest.
+#
+#   .venv_3_11/bin/pip install -r requirements-dev.txt
+#   .venv_3_11/bin/python -m pytest tests/ -v   # requires ~/.databrickscfg
+
+-r requirements.txt
+
+pytest>=7.0.0
