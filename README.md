@@ -5,6 +5,67 @@
 > **Your query optimizer produces correct plans before you load a single row.**
 > Collect schema, column comments, and statistics from any source database into dialect-free YAML. Emit correct DDL for any target. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — so the optimizer is not blind on day one.
 
+### Quick start
+
+**Transpile DDL — parse MySQL, emit PostgreSQL / Oracle / SQL Server / Databricks:**
+```python
+from statschema import parse_ddl, emit_ddl
+
+tables = parse_ddl("""
+CREATE TABLE orders (
+    order_id    INT           NOT NULL AUTO_INCREMENT,
+    status      VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    total       DECIMAL(10,2)     NULL,
+    is_paid     TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at  DATETIME          NULL,
+    PRIMARY KEY (order_id)
+) ENGINE=InnoDB;
+""", dialect="mysql")
+
+print(emit_ddl(tables[0], "postgres"))    # SERIAL, BOOLEAN, NUMERIC, TIMESTAMP
+print(emit_ddl(tables[0], "oracle"))      # NUMBER, TIMESTAMP, GENERATED AS IDENTITY
+print(emit_ddl(tables[0], "sqlserver"))   # BIT, DATETIME2, IDENTITY(1,1)
+```
+
+**Collect statistics from MySQL, inject into PostgreSQL — optimizer works before any rows are loaded:**
+```python
+from statschema import collect_table_stats, dump_stats, load_stats, inject_stats_postgres
+
+# On the source — read-only, no production data leaves the database
+db_stats = collect_table_stats(mysql_conn, "orders", dialect="mysql")
+dump_stats(db_stats, "orders_stats.yaml")          # kilobytes, no PII, version-controllable
+
+# On the target — optimizer sees production distributions immediately
+db_stats = load_stats("orders_stats.yaml")
+inject_stats_postgres(pg_conn, db_stats.table_stats("orders"))
+# → pg_restore_attribute_stats sets null_frac, n_distinct, MCVs, histogram_bounds
+# → EXPLAIN plans match production shape before a single row is loaded
+```
+
+`pip install statschema` · Python 3.10+ · [Full docs below](#overview)
+
+---
+
+### Who is this for
+
+statschema is built for **DBAs and data engineers doing cross-dialect database migrations**. It addresses the gap that exists in the migration window: the target database has a schema but no data, so the optimizer is blind and test queries produce bad plans.
+
+Other synthetic data tools solve a different problem:
+
+| Tool category | Primary user | Requires production data | Optimizer stats injection | Live multi-dialect test methodology published |
+|---|---|---|---|---|
+| Faker · Mockaroo | App developer — unit test fixtures | No — generates random plausible values | No | No — tests against in-memory data only |
+| SDV · Gretel · Tonic | Data scientist / QA — privacy-safe production clone | Yes — trains on or anonymizes actual rows | No | No — SaaS products; internal test infra not published |
+| AWS SCT · pgloader | DBA — schema and data migration | No — schema or data only, no generation | No | No — closed source |
+| **statschema** | **DBA — cross-dialect migration validation** | **No — works from statistics without the data** | **Yes** | **Yes — per-dialect Podman setup, live integration tests, contributor guide** |
+
+The "no production data required" row is the key difference for DBAs. Moving production data to a test environment has two hard blockers:
+
+- **Volume**: a 10 TB production database cannot be copied just to validate a migration target.
+- **Security and compliance**: PII, PHI, and PCI data cannot leave the production environment without a de-identification pipeline — which is a separate project in itself.
+
+statschema collects only column statistics (null rates, MCVs, histograms) from the source database. Statistics are read-only, contain no customer data, are kilobytes in size, and are already exposed through standard catalog views (`pg_stats`, `INFORMATION_SCHEMA.COLUMN_STATISTICS`, `ALL_TAB_COL_STATISTICS`). A DBA can collect them, check them into version control alongside the schema, and use them to validate DDL correctness and bootstrap the optimizer on the target — without moving a single production row.
+
 ### Overview
 
 ```mermaid
@@ -81,6 +142,29 @@ how much the target engine exposes:
 > production data to replace the bootstrap with real statistics.
 >
 > Full details, per-engine workarounds, and function reference: [`docs/stats_transpiler.md`](docs/stats_transpiler.md)
+
+---
+
+### Built for AI-assisted development
+
+statschema is designed so that an AI agent can add a new dialect, a new stats field, or a new semantic pattern — and the test suite immediately confirms whether it is correct across all nine supported databases.
+
+**3,209 tests · 22 test files · 9 live dialects**
+
+| Category | Tests | What is covered |
+|---|---|---|
+| DDL round-trip (offline) | 1,830 | Same-dialect identity, cross-dialect emission, Oracle/Postgres/MySQL/SQLServer type mapping, decimal boundaries, string lengths, temporal types, defaults, migration edge cases, canonical YAML pipeline |
+| Semantic hints (offline) | 150 | Name inference, comment inference, locale (`en_US`, `de_DE`), custom hint files, `apply_hints` wiring, stats passthrough |
+| Stats model, schema parser, builder (offline) | 420 | `ColumnStats` / `TableStats` / `DatabaseStats` serialization, stats I/O, v1 bridge, dbldatagen builder, loader edge paths, override application |
+| Live — DDL round-trip | 430+ | Parse DDL on a real database, emit to every other dialect, verify column types survive |
+| Live — stats collection | 200+ | `collect_table_stats` on MySQL, PostgreSQL, SQL Server, Oracle, Db2, CockroachDB, MariaDB |
+| Live — real schemas | 170+ | Chinook music DB, AdventureWorks, Mautic CRM, Oracle HR — multi-table FK schemas |
+
+**2,402 tests run offline** (no database required) — any contributor or AI agent can run the full offline suite in under 60 seconds on a laptop with no setup. The 807 live tests run against real databases spun up locally with Podman using the per-dialect guides in [`docs/databases/`](docs/databases/).
+
+Every test file follows a single pattern — `pytest` classes with descriptive names — so an AI adding a new feature can read an existing test class, understand the contract, and generate a matching test class for the new feature without reading the full codebase.
+
+Full testing methodology: [`docs/testing.md`](docs/testing.md) · Local database setup: [`docs/local-databases.md`](docs/local-databases.md)
 
 ---
 
