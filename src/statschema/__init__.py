@@ -99,7 +99,7 @@ from .ydata_parser import parse_ydata_yaml, parse_ydata_yaml_file, parse_ydata_m
 from .pipeline_parser import parse_pipeline_tables, parse_pipeline_config
 from .sdv_parser import parse_sdv_metadata, parse_sdv_file
 from .ddl_parser import parse_ddl, parse_ddl_file
-from .ddl_emitter import emit_ddl, emit_ddl_all, SUPPORTED_DIALECTS
+from .ddl_emitter import emit_ddl, emit_ddl_all, emit_column_comments, SUPPORTED_DIALECTS
 from .dbldatagen_builder import to_dbldatagen_specs, build_dataframe_from_canonical
 from .postgen import apply_boundary_rows
 from .loader import (
@@ -122,6 +122,7 @@ from .override_model import ColumnOverride, OverrideSpec, TableOverride
 from .db_stats_collector import collect_table_stats
 from .stats_injector import (
     inject_stats_databricks,
+    inject_stats_db2,
     inject_stats_mysql,
     inject_stats_oracle,
     inject_stats_postgres,
@@ -174,6 +175,7 @@ __all__ = [
     # Emitter (canonical → target DDL)
     "emit_ddl",
     "emit_ddl_all",
+    "emit_column_comments",
     "SUPPORTED_DIALECTS",
     # Data generation (canonical → dbldatagen)
     "to_dbldatagen_specs",
@@ -193,6 +195,7 @@ __all__ = [
     "TableOverride",
     # Stats injector (stats transpiler → target DB optimizer)
     "inject_stats_databricks",
+    "inject_stats_db2",
     "inject_stats_mysql",
     "inject_stats_postgres",
     "inject_stats_oracle",

@@ -1,0 +1,86 @@
+# Built-in column-comment inference patterns — locale: de_DE
+#
+# Applied against the column's COMMENT text (natural-language description).
+# Covers German comment prose as well as mixed German/English comments common
+# in DACH-market applications.
+
+locale: de_DE
+hints:
+  # ── Social security / government IDs ──────────────────────────────────────
+  - pattern: "\\brentenversicherung\\b|\\bsozialversicherung\\b|\\bsvnummer\\b|social.?security"
+    generation:
+      format_pattern: ssn
+
+  # ── Email ─────────────────────────────────────────────────────────────────
+  - pattern: "\\bemail\\b|e-mail.?adresse|elektronische.?post"
+    generation:
+      format_pattern: email
+
+  # ── Phone ─────────────────────────────────────────────────────────────────
+  - pattern: "\\btelefon\\b|telefonnummer|\\bhandy\\b|mobilnummer|festnetz|\\bphone\\b"
+    generation:
+      format_pattern: phone_intl
+
+  # ── Names ─────────────────────────────────────────────────────────────────
+  - pattern: "\\bvorname\\b|\\brufname\\b|first name|given name"
+    generation:
+      format_pattern: name_first
+
+  - pattern: "\\bnachname\\b|\\bfamilienname\\b|last name|family name|\\bsurname\\b"
+    generation:
+      format_pattern: name_last
+
+  # ── Credit card ───────────────────────────────────────────────────────────
+  - pattern: "\\bkreditkarte\\b|kartennummer|credit card|card number"
+    generation:
+      format_pattern: credit_card
+
+  # ── IP ────────────────────────────────────────────────────────────────────
+  - pattern: "ip.?adresse|ip address|internet.?protokoll"
+    generation:
+      format_pattern: ip_v4
+
+  # ── URL / web ─────────────────────────────────────────────────────────────
+  - pattern: "\\bwebseite\\b|internetadresse|\\burl\\b|web address"
+    generation:
+      format_pattern: url
+
+  # ── UUID / GUID ───────────────────────────────────────────────────────────
+  - pattern: "\\buuid\\b|\\bguid\\b|eindeutige.?kennung|unique identifier"
+    generation:
+      format_pattern: uuid
+
+  # ── IBAN / bank ───────────────────────────────────────────────────────────
+  - pattern: "\\biban\\b|kontonummer|\\bbankverbindung\\b|bank account"
+    generation:
+      format_pattern: iban
+
+  # ── Currency ──────────────────────────────────────────────────────────────
+  - pattern: "\\bwährung\\b|waehrung|währungscode|currency code|iso.?4217"
+    generation:
+      format_pattern: currency_iso
+
+  # ── Postal code ───────────────────────────────────────────────────────────
+  - pattern: "\\bplz\\b|postleitzahl|zip code|postal code"
+    generation:
+      format_pattern: postal_uk
+
+  # ── Country ───────────────────────────────────────────────────────────────
+  - pattern: "\\bland\\b|ländercode|laendercode|country code|iso.?3166"
+    generation:
+      format_pattern: country_iso2
+
+  # ── Company ───────────────────────────────────────────────────────────────
+  - pattern: "\\bfirma\\b|\\bunternehmen\\b|firmenname|company name|\\borganization\\b"
+    generation:
+      format_pattern: company
+
+  # ── Address ───────────────────────────────────────────────────────────────
+  - pattern: "\\bstraße\\b|\\bstrasse\\b|\\banschrift\\b|street address|mailing address"
+    generation:
+      format_pattern: address
+
+  # ── City ──────────────────────────────────────────────────────────────────
+  - pattern: "\\bstadt\\b|\\bort\\b|stadtname|city name|municipality"
+    generation:
+      format_pattern: city

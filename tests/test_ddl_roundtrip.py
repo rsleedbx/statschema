@@ -2967,11 +2967,12 @@ class TestPhase10CanonicalYamlPipeline:
     # ── Part A: YAML serialization round-trip ────────────────────────────
 
     def test_canonical_column_roundtrip(self):
-        """CanonicalColumn.to_dict() → from_dict() is lossless."""
+        """CanonicalColumn.to_dict() → from_dict() is lossless for both comment and description."""
         col = CanonicalColumn(
             name="amount", type="decimal",
             precision=10, scale=2, not_null=True,
-            description="Order amount",
+            comment="SQL COMMENT clause text",
+            description="Order amount (human description)",
         )
         col2 = CanonicalColumn.from_dict(col.to_dict())
         assert col2.name == "amount"
@@ -2979,7 +2980,87 @@ class TestPhase10CanonicalYamlPipeline:
         assert col2.precision == 10
         assert col2.scale == 2
         assert col2.not_null is True
-        assert col2.description == "Order amount"
+        assert col2.comment == "SQL COMMENT clause text"
+        assert col2.description == "Order amount (human description)"
+
+    # ── Part B: column comment emission per dialect ───────────────────────────
+
+    def test_emit_column_comments_mysql_inline(self):
+        """MySQL emits COMMENT 'text' inline — emit_column_comments returns nothing."""
+        from src.statschema.ddl_emitter import emit_ddl, emit_column_comments
+        col = CanonicalColumn(name="ssn", type="string", length=11,
+                              comment="Social security number")
+        table = CanonicalTableSchema(name="users", columns=[col])
+        ddl = emit_ddl(table, "mysql")
+        assert "COMMENT 'Social security number'" in ddl
+        assert emit_column_comments(table, "mysql") == []
+
+    def test_emit_column_comments_databricks_inline(self):
+        """Databricks emits COMMENT 'text' inline — emit_column_comments returns nothing."""
+        from src.statschema.ddl_emitter import emit_ddl, emit_column_comments
+        col = CanonicalColumn(name="email_addr", type="string",
+                              comment="Customer email address")
+        table = CanonicalTableSchema(name="users", columns=[col])
+        ddl = emit_ddl(table, "databricks")
+        assert "COMMENT 'Customer email address'" in ddl
+        assert emit_column_comments(table, "databricks") == []
+
+    def test_emit_column_comments_postgres_separate(self):
+        """PostgreSQL: CREATE TABLE has no inline comment; emit_column_comments returns COMMENT ON."""
+        from src.statschema.ddl_emitter import emit_ddl, emit_column_comments
+        col = CanonicalColumn(name="phone", type="string", length=20,
+                              comment="Customer phone number")
+        table = CanonicalTableSchema(name="customers", columns=[col])
+        ddl = emit_ddl(table, "postgres")
+        assert "COMMENT" not in ddl
+        stmts = emit_column_comments(table, "postgres")
+        assert len(stmts) == 1
+        assert "COMMENT ON COLUMN" in stmts[0]
+        assert "customers" in stmts[0]
+        assert "phone" in stmts[0]
+        assert "Customer phone number" in stmts[0]
+
+    def test_emit_column_comments_oracle_separate(self):
+        """Oracle: CREATE TABLE has no inline comment; emit_column_comments returns COMMENT ON."""
+        from src.statschema.ddl_emitter import emit_column_comments
+        col = CanonicalColumn(name="tax_id", type="string", length=15,
+                              comment="Federal tax identifier")
+        table = CanonicalTableSchema(name="corp", columns=[col])
+        stmts = emit_column_comments(table, "oracle")
+        assert len(stmts) == 1
+        assert "COMMENT ON COLUMN" in stmts[0]
+        assert "Federal tax identifier" in stmts[0]
+
+    def test_emit_column_comments_sqlserver_dropped(self):
+        """SQL Server: comments are silently dropped — both functions return no comment output."""
+        from src.statschema.ddl_emitter import emit_ddl, emit_column_comments
+        col = CanonicalColumn(name="notes", type="string", comment="Free-form notes")
+        table = CanonicalTableSchema(name="records", columns=[col])
+        ddl = emit_ddl(table, "sqlserver")
+        assert "COMMENT" not in ddl
+        assert emit_column_comments(table, "sqlserver") == []
+
+    def test_emit_column_comments_no_comment_field(self):
+        """Columns without col.comment produce no output from emit_column_comments."""
+        from src.statschema.ddl_emitter import emit_column_comments
+        col = CanonicalColumn(name="id", type="integer")
+        table = CanonicalTableSchema(name="t", columns=[col])
+        assert emit_column_comments(table, "postgres") == []
+        assert emit_column_comments(table, "mysql") == []
+
+    def test_emit_column_comments_quote_escaping(self):
+        """Single quotes in col.comment are escaped correctly."""
+        from src.statschema.ddl_emitter import emit_ddl, emit_column_comments
+        col = CanonicalColumn(name="notes", type="string",
+                              comment="User's preferred name")
+        table = CanonicalTableSchema(name="t", columns=[col])
+        # MySQL inline — escaped with backslash
+        mysql_ddl = emit_ddl(table, "mysql")
+        assert "User\\'s preferred name" in mysql_ddl
+        # PostgreSQL separate statement — escaped with doubling
+        pg_stmts = emit_column_comments(table, "postgres")
+        assert len(pg_stmts) == 1
+        assert "User''s preferred name" in pg_stmts[0]
 
     def test_generation_rule_roundtrip(self):
         """GenerationRule with all new fields survives to_dict / from_dict."""

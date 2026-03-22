@@ -10,7 +10,8 @@ complete round-trip for testing:
   Source DDL / YAML schema
         ↓  load_schema()
   CanonicalTableSchema
-        ├──→ emit_ddl(dialect)  →  CREATE TABLE on target system
+        ├──→ emit_ddl(dialect)              →  CREATE TABLE on target system
+        ├──→ emit_column_comments(dialect)  →  COMMENT ON COLUMN … (PG / Oracle)
         └──→ build_dataframe_from_canonical()  →  synthetic rows via dbldatagen
 
 Round-trip fidelity
@@ -25,6 +26,19 @@ When those fields are absent (e.g. from a YData/Pipeline YAML schema), sensible
 dialect defaults are used:
   string, no length  → TEXT (MySQL/PostgreSQL)  NVARCHAR(MAX) (SQL Server)  STRING (Databricks)
   decimal, no prec.  → DECIMAL(18,4) (all)
+
+Column COMMENT handling per dialect
+-------------------------------------
+CanonicalColumn.comment (from SQL COMMENT clause) is round-tripped as follows:
+
+  mysql / mariadb   → inline  ``COMMENT 'text'``  in the CREATE TABLE body
+  databricks        → inline  ``COMMENT 'text'``  in the CREATE TABLE body
+  postgres / oracle → separate  ``COMMENT ON COLUMN tbl.col IS 'text';``
+                       returned by  emit_column_comments(table, dialect)
+  sqlserver / db2   → silently dropped (no standard inline column comment DDL)
+
+Always call emit_column_comments() after emit_ddl() when targeting postgres or oracle
+to preserve column comment metadata.
 
 Supported target dialects
 --------------------------
@@ -402,6 +416,20 @@ def _source_type_comment(col: CanonicalColumn, emitted_type: str, emit_dialect: 
     return f"  -- originally {source_type}{dialect_note}"
 
 
+# Dialects that support inline COMMENT 'text' inside the CREATE TABLE column list.
+_INLINE_COMMENT_DIALECTS = frozenset({"mysql", "databricks"})
+
+
+def _col_inline_comment(col: CanonicalColumn, dialect: str) -> str:
+    """Return the inline COMMENT clause for dialects that support it, else ''."""
+    if dialect not in _INLINE_COMMENT_DIALECTS:
+        return ""
+    if not col.comment:
+        return ""
+    escaped = col.comment.replace("'", "\\'")
+    return f" COMMENT '{escaped}'"
+
+
 def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
     name     = _quote(col.name, dialect)
     col_type = _build_col_type(col, dialect)
@@ -412,14 +440,15 @@ def _col_ddl(col: CanonicalColumn, dialect: str) -> str:
         null = ""
     else:
         null = _not_null_clause(col)
-    default  = _default_clause(col, dialect)
-    unique   = _unique_clause(col)
-    comment  = _source_type_comment(col, col_type, dialect)
+    default      = _default_clause(col, dialect)
+    unique       = _unique_clause(col)
+    src_comment  = _source_type_comment(col, col_type, dialect)
+    col_comment  = _col_inline_comment(col, dialect)
     # Oracle requires: type [DEFAULT value] [NOT NULL] — DEFAULT must precede NOT NULL.
     # All other dialects accept either order; keep the standard type+null+default for them.
     if dialect == "oracle":
-        return f"  {name} {col_type}{auto}{default}{null}{unique}{comment}"
-    return f"  {name} {col_type}{auto}{null}{default}{unique}{comment}"
+        return f"  {name} {col_type}{auto}{default}{null}{unique}{col_comment}{src_comment}"
+    return f"  {name} {col_type}{auto}{null}{default}{unique}{col_comment}{src_comment}"
 
 
 def _primary_key_constraint(table: CanonicalTableSchema, dialect: str) -> str | None:
@@ -595,3 +624,69 @@ def emit_ddl_all(
     return separator.join(
         emit_ddl(t, dialect, if_not_exists=if_not_exists) for t in tables
     )
+
+
+# ---------------------------------------------------------------------------
+# Column comment emission (dialects that use separate COMMENT ON statements)
+# ---------------------------------------------------------------------------
+
+# Dialects that use "COMMENT ON COLUMN tbl.col IS 'text';" (separate statement)
+_COMMENT_ON_DIALECTS = frozenset({"postgres", "oracle"})
+
+
+def emit_column_comments(
+    table: CanonicalTableSchema,
+    dialect: str,
+) -> list[str]:
+    """
+    Return a list of ``COMMENT ON COLUMN`` statements for columns that carry a
+    ``col.comment`` value (from the SQL COMMENT clause in the source DDL).
+
+    Column comment handling is dialect-dependent:
+
+    +--------------+-----------------------------------------------------------+
+    | Dialect      | Behavior                                                  |
+    +==============+===========================================================+
+    | mysql        | Inline in CREATE TABLE — no statements returned here      |
+    | databricks   | Inline in CREATE TABLE — no statements returned here      |
+    | postgres     | ``COMMENT ON COLUMN tbl.col IS 'text';``                  |
+    | oracle       | ``COMMENT ON COLUMN tbl.col IS 'text';``                  |
+    | sqlserver    | Silently dropped (no standard inline comment DDL)         |
+    | db2          | Silently dropped                                          |
+    +--------------+-----------------------------------------------------------+
+
+    Call this function *after* ``emit_ddl()`` when targeting PostgreSQL or Oracle to
+    preserve column comment metadata from the source schema.
+
+    Parameters
+    ----------
+    table:
+        Canonical table schema.
+    dialect:
+        Target SQL dialect string (same aliases as ``emit_ddl()``).
+
+    Returns
+    -------
+    List of SQL statement strings (may be empty).  Each string ends with ``;``.
+
+    Examples
+    --------
+    ::
+
+        ddl      = emit_ddl(table, "postgres")
+        comments = emit_column_comments(table, "postgres")
+        # Execute ddl first, then each statement in comments.
+    """
+    normalized = normalize_dialect(dialect)
+    if normalized not in _COMMENT_ON_DIALECTS:
+        return []
+
+    stmts: list[str] = []
+    tname = _quote(table.name.upper() if normalized == "oracle" else table.name, normalized)
+    for col in table.columns:
+        if not col.comment:
+            continue
+        cname = _quote(col.name.upper() if normalized == "oracle" else col.name, normalized)
+        escaped = col.comment.replace("'", "''")
+        stmts.append(f"COMMENT ON COLUMN {tname}.{cname} IS '{escaped}';")
+    return stmts
