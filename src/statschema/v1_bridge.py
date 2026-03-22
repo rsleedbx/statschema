@@ -324,7 +324,9 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
     if col.type in ("string", "time", "timetz", "binary"):
         # Explicit GenerationRule.format_pattern takes priority; fall back to
         # built-in column-name inference (Option A, semantic_hints.py).
-        fp = (gen.format_pattern if gen else None) or infer_format_pattern(col.name)
+        fp = (gen.format_pattern if gen else None) or infer_format_pattern(
+            col.name, col_comment=col.comment, col_description=col.description
+        )
 
         # UUID
         if fp in _UUID_PATTERNS:

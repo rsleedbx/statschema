@@ -1,0 +1,80 @@
+# Built-in column-comment inference patterns — locale: en_US
+#
+# Applied against the column's COMMENT text (natural-language description),
+# not the column name.  Because comments are free-form prose, patterns here
+# use word-boundary anchors (\b) and allow spaces/hyphens where column-name
+# patterns use underscores.
+#
+# Pattern matching notes:
+#   - Matched case-insensitively against the full comment string.
+#   - Simple substring search with \b word boundaries for precision in prose.
+#   - First match wins — list more specific patterns before general ones.
+#
+# To provide custom comment patterns, pass comment_hints=load_hints("my_comments.yaml")
+# to apply_hints() or infer_format_pattern().
+
+locale: en_US
+hints:
+  - pattern: "\\bssn\\b|social.?security"
+    generation:
+      format_pattern: ssn
+
+  - pattern: "\\bemail\\b|e-mail address|electronic mail"
+    generation:
+      format_pattern: email
+
+  - pattern: "\\bphone\\b|mobile number|cell phone|telephone"
+    generation:
+      format_pattern: phone_us
+
+  - pattern: "first name|given name|\\bforename\\b"
+    generation:
+      format_pattern: name_first
+
+  - pattern: "last name|family name|\\bsurname\\b"
+    generation:
+      format_pattern: name_last
+
+  - pattern: "credit card|card number|\\bcc number\\b"
+    generation:
+      format_pattern: credit_card
+
+  - pattern: "ip address|internet protocol address"
+    generation:
+      format_pattern: ip_v4
+
+  - pattern: "\\burl\\b|web address|website|home ?page"
+    generation:
+      format_pattern: url
+
+  - pattern: "\\buuid\\b|\\bguid\\b|unique identifier"
+    generation:
+      format_pattern: uuid
+
+  - pattern: "\\biban\\b|bank account"
+    generation:
+      format_pattern: iban
+
+  - pattern: "currency code|currency iso|iso 4217"
+    generation:
+      format_pattern: currency_iso
+
+  - pattern: "zip code|postal code|post code"
+    generation:
+      format_pattern: postal_us
+
+  - pattern: "\\bcountry\\b|country code|iso.?3166"
+    generation:
+      format_pattern: country_iso2
+
+  - pattern: "company name|\\borganization\\b|\\bemployer\\b"
+    generation:
+      format_pattern: company
+
+  - pattern: "street address|mailing address|\\baddress\\b"
+    generation:
+      format_pattern: address
+
+  - pattern: "\\bcity\\b|city name|municipality"
+    generation:
+      format_pattern: city

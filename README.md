@@ -1,36 +1,49 @@
-# statschema — stats transpiler · DDL transpiler · portable schema (YAML) · stats-driven tabular data
+# statschema — DDL transpiler · stats transpiler · semantic inference · portable YAML
 
 **Repository:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema) · `git clone https://github.com/rsleedbx/statschema.git`
 
-> **The only library that transpiles both column statistics and DDL schema across database dialects.**
-> Collect from MySQL. Migrate to PostgreSQL. The optimizer works correctly from day one.
+> **Your query optimizer produces correct plans before you load a single row.**
+> Collect schema, column comments, and statistics from any source database into dialect-free YAML. Emit correct DDL for any target. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — so the optimizer is not blind on day one.
 
 ### Overview
 
 ```mermaid
-flowchart LR
-    A["① Stats Transpiler ⭐\ncollect_table_stats\ndump_stats · load_stats"]
-    B[("② Portable YAML\nschema.yaml · stats.yaml")]
-    C["③ DDL Transpiler\nparse_ddl · emit_ddl"]
-    D["④ Stats-Driven\nTabular Data\nbuild_dataframe"]
+flowchart TD
+    A["① Optimizer Bootstrap ⭐\ncollect_table_stats\ndump_stats · load_stats · inject_stats_*"]
+    B[("② Portable YAML\nschema.yaml  —  structure · comment\nstats.yaml   —  null% · MCVs · histogram\nhints.yaml · patterns/  —  semantic rules")]
+    C["③ DDL Transpiler\nparse_ddl · emit_ddl · emit_column_comments"]
+    D["④ Stats-Driven Tabular Data\nbuild_dataframe"]
+    E["⑤ Semantic Hints\ninfer_format_pattern · apply_hints"]
 
-    A <-->|"collect / inject\nany dialect"| B
-    C <-->|"parse / emit\nany dialect"| B
-    B -->|"schema + stats"| D
+    A <-->|"collect / inject  —  any dialect"| B
+    C <-->|"parse DDL + comments  /  emit DDL ± COMMENT ON"| B
+    B -->|"schema · comment · stats"| D
+    B <-->|"load patterns & hints.yaml\nwrite inferred generation rules"| E
+    E -->|"name → comment → stats inference"| D
 ```
 
 ---
 
-### Why "stats transpiler" is a new concept
+### What makes synthetic data correct
 
-Every DDL transpiler stops at the schema. But a migrated database with correct schema
-and *default* statistics is still broken — the query optimizer has no idea how many
-rows each table has, which values are common, or what the numeric ranges look like.
-It produces bad query plans from day one.
+Correct synthetic data requires four ingredients to be in sync:
 
-`statschema` introduces the **stats transpiler**: collect column statistics from any
-source database, store them as dialect-free YAML, and inject them into any target database
-so the optimizer sees production-scale distributions *before a single row is loaded*:
+| Ingredient | Parsed from | Stored in | Drives |
+|---|---|---|---|
+| **Data types & constraints** | DDL `CREATE TABLE` | `schema.yaml` → `col.type`, `col.not_null`, `col.length`, … | Correct Spark types, NOT NULL, AUTO_INCREMENT, defaults |
+| **Column semantics** | SQL `COMMENT` clause, column name, description | `schema.yaml` → `col.comment`, `col.name`, `col.description` | SSN, email, phone, address, UUID generators |
+| **Distributions & cardinality** | Live DB statistics | `stats.yaml` → `ColumnStats` | Null rates, MCVs, min/max bounds, histogram shape |
+| **FK referential integrity** | DDL constraints + FK statistics | `schema.yaml` → `CanonicalForeignKey`, `stats.yaml` → `ForeignKeyStats` | Valid child rows, realistic fan-out per parent |
+
+statschema parses all four from source databases into dialect-free YAML. Semantic hints infer realistic value generators from column names and `COMMENT` text. Statistics drive null rates, cardinality, and value distributions. FK constraints produce referentially valid rows at the correct fan-out ratio. The portable YAML is the single source of truth — version-controllable, human-editable, and usable to emit DDL for any target database.
+
+---
+
+### Optimizer bootstrap ⭐ — unique to statschema
+
+A migrated database with correct schema but default statistics produces bad query plans: the optimizer has no row counts, no common-value frequencies, and no numeric ranges.
+
+`statschema` collects column statistics from any source database, stores them as dialect-free YAML, and injects them into any target database so the optimizer sees production-scale distributions *before a single row is loaded*. Native `ANALYZE` / `RUNSTATS` / `GATHER_TABLE_STATS` still runs after loading production data — statschema provides the bootstrap so the optimizer is not blind during the cutover window:
 
 ```
 Source DB (MySQL)                        Target DB (PostgreSQL)
@@ -56,11 +69,12 @@ how much the target engine exposes:
 
 | Engine | What injection gives you | Caveats |
 |--------|--------------------------|---------|
-| **PostgreSQL 18** | Full: MCVs, null fractions, n_distinct, histogram bounds for all types | Row count needs a sample loaded first (PG18 scales by physical file size). Extended stats (multi-column) not yet supported. |
-| **MySQL 8.0.31+** | MCVs for low-cardinality columns, null fractions, n_distinct, integer/date histogram bounds | Equi-height histogram string equality predicate bug — string range histograms fall back to `1/row_count`. Requires 8.0.31+. |
+| **PostgreSQL 18** · Neon · CockroachDB | Full: MCVs, null fractions, n_distinct, histogram bounds for all types — uses `inject_stats_postgres` (PostgreSQL wire protocol) | Row count needs a sample loaded first (PG18 scales by physical file size). Extended stats (multi-column) not yet supported. CockroachDB and Neon accept the same `pg_restore_attribute_stats` calls. |
+| **MySQL 8.0.31+** · MariaDB | MCVs for low-cardinality columns, null fractions, n_distinct, integer/date histogram bounds — uses `inject_stats_mysql` | Equi-height histogram string equality predicate bug — string range histograms fall back to `1/row_count`. Requires MySQL 8.0.31+. MariaDB histogram format differs; injection is best-effort. |
 | **Oracle** | Row count, n_distinct, null count per column — enough for correct join ordering | No portable histogram format exists; Oracle uses internal binary encoding that cannot be set externally. |
 | **SQL Server** | Table-level row count — improves join ordering on multi-table queries | Column-level injection API does not exist. `UPDATE STATISTICS WITH ROWCOUNT` is undocumented. |
 | **Databricks** | Bootstrap an empty table before first data load | Delta collects file stats on every write; UC managed tables with Predictive Optimization run ANALYZE automatically — injection rarely needed. |
+| **IBM Db2 LUW** | Full column stats via `inject_stats_db2`: row count (`SYSSTAT.TABLES`), n_distinct / null count / avg length (`SYSSTAT.COLUMNS`), MCVs and histogram quantile bounds (`SYSSTAT.COLDIST TYPE='F'/'Q'`) | Requires SYSADM, SECADM, or CONTROL privilege. |
 
 > **Stats injection is a bootstrap, not a permanent substitute.**  Always run native
 > `ANALYZE` / `UPDATE STATISTICS` / `DBMS_STATS.GATHER_TABLE_STATS` after loading
@@ -70,39 +84,43 @@ how much the target engine exposes:
 
 ---
 
-Three capabilities, each useful alone — more powerful together:
+Four capabilities, each useful alone — more powerful together:
 
 | Pillar | What it does | Key functions |
 |--------|-------------|---------------|
-| **Stats transpiler** ⭐ | Collect column statistics (null rates, cardinality, MCVs, histograms) from any database; store as dialect-free YAML; inject into any target so the query optimizer sees production-scale distributions immediately | `collect_table_stats` / `dump_stats` / `load_stats` |
-| **DDL transpiler** | Parse `CREATE TABLE` from any dialect; emit correct DDL for any other — types, defaults, constraints, all semantics preserved | `parse_ddl` / `emit_ddl` |
+| **Optimizer bootstrap** ⭐ | Collect column statistics (null rates, cardinality, MCVs, histograms) from any source database; store as dialect-free YAML; inject into any target so the optimizer is not blind during migration cutover. Native `ANALYZE` still runs post-load to replace the bootstrap with real statistics. | `collect_table_stats` / `dump_stats` / `load_stats` / `inject_stats_*` |
+| **DDL transpiler** | Parse `CREATE TABLE` from any dialect; emit correct DDL for any other — types, defaults, constraints, column comments all preserved per-dialect | `parse_ddl` / `emit_ddl` / `emit_column_comments` |
 | **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data | `build_dataframe_from_canonical` |
+| **Semantic hints** | Infer realistic generators (SSN, email, phone, name, …) from column name, SQL COMMENT text, or description; extend or override via `hints.yaml`; locale-aware | `infer_format_pattern` / `load_hints` / `apply_hints` |
 
 **Supported dialects**: MySQL · MariaDB · PostgreSQL · CockroachDB · Neon · SQL Server · Oracle · IBM Db2 · Databricks
+
+**Roadmap**: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ---
 
 ### Expanded view
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph SRC["Source DB (any dialect)"]
-        S1["MySQL DDL"]
-        S2["PostgreSQL DDL"]
-        S3["SQL Server DDL"]
-        S4["Oracle DDL"]
+        S1["MySQL DDL\n+ COMMENTs"]
+        S2["PostgreSQL DDL\n(COMMENT ON)"]
+        S3["SQL Server DDL\n(no comments)"]
+        S4["Oracle DDL\n(COMMENT ON)"]
     end
 
     subgraph YAML["Portable YAML (dialect-free)"]
-        SCH[("schema.yaml")]
-        STA[("stats.yaml")]
+        SCH[("schema.yaml\nstructure · col.comment\ncol.description")]
+        STA[("stats.yaml\nnull% · n_distinct\nMCVs · histogram")]
     end
 
     subgraph TGT["Target DB (any dialect)"]
-        T1["Databricks DDL"]
-        T2["PostgreSQL DDL"]
-        T3["MySQL DDL"]
-        T4["SQL Server DDL"]
+        T1["Databricks\ninline COMMENT"]
+        T2["PostgreSQL\nCOMMENT ON COLUMN"]
+        T3["MySQL\ninline COMMENT"]
+        T4["SQL Server\n(comments dropped)"]
+        T5["IBM Db2\n(comments dropped)"]
     end
 
     subgraph GEN["Stats-Driven Tabular Data"]
@@ -111,15 +129,24 @@ flowchart LR
         ST["TableStats\nnull% · cardinality · min/max · MCVs"]
     end
 
+    subgraph SEM["⑤ Semantic Hints (priority order)"]
+        SH1["1 col.name\nvs patterns/*.yaml"]
+        SH2["2 col.comment\nvs *.comments.yaml"]
+        SH3["3 col stats\n(MCVs · planned)"]
+        SH4["4 LLM\n(planned)"]
+    end
+
     SRC -- "① collect_table_stats()" --> STA
-    STA -- "① inject into target optimizer" --> TGT
-    SRC -- "③ parse_ddl()" --> SCH
-    SCH -- "③ emit_ddl()" --> TGT
-    SCH -- "④ schema" --> DF
+    STA -- "① inject_stats_*()" --> TGT
+    SRC -- "③ parse_ddl()\n(structure + comments)" --> SCH
+    SCH -- "③ emit_ddl()\n+ emit_column_comments()" --> TGT
+    SCH -- "④ schema + comments" --> DF
     STA -- "④ stats" --> DF
+    SEM -- "⑤ format_pattern\ninference" --> DF
     DF  -- "load rows" --> DB
     DB  -- "collect_table_stats()" --> ST
     ST  -. "stats feedback loop" .-> DF
+    STA -. "db_stats= param" .-> SEM
 ```
 
 ---
@@ -136,23 +163,33 @@ flowchart LR
         │
         ├──►  build_dataframe_from_canonical(…, stats)  →  generate matching tabular data
         │
-        └──►  [TODO] inject into PostgreSQL 18:  pg_restore_attribute_stats(…)
-              inject into SQL Server:             UPDATE STATISTICS WITH ROWCOUNT
-              inject into Oracle:                 DBMS_STATS.SET_COLUMN_STATS(…)
+        └──►  inject_stats_postgres(conn, stats)   →  pg_restore_attribute_stats(…)  (PG 18)
+              inject_stats_mysql(conn, stats)       →  INFORMATION_SCHEMA / ANALYZE TABLE
+              inject_stats_sqlserver(conn, stats)   →  UPDATE STATISTICS WITH ROWCOUNT
+              inject_stats_oracle(conn, stats)      →  DBMS_STATS.SET_COLUMN_STATS(…)
+              inject_stats_databricks(spark, stats) →  Delta bootstrap
+              inject_stats_db2(conn, stats)         →  UPDATE SYSSTAT.TABLES / SYSSTAT.COLUMNS
               → query optimizer sees production distributions before data is loaded
 ```
 
-**③ DDL transpiler** — parse any dialect, emit any dialect:
+**③ DDL transpiler** — parse any dialect, emit any dialect, round-trip column comments:
 ```
-MySQL / PostgreSQL / SQL Server / Oracle DDL
+MySQL / PostgreSQL / SQL Server / Oracle DDL  (incl. COMMENT clauses)
         │
         ▼  parse_ddl(sql, dialect="…")
-  CanonicalTableSchema  ──────────────────►  schema.yaml  (portable YAML)
+  CanonicalTableSchema                        schema.yaml  (portable YAML)
+    col.name / col.type / …  ──────────────►  structure
+    col.comment              ──────────────►  comment  (from SQL COMMENT clause)
+    col.description          ──────────────►  description (human/LLM-added)
         │
-        ├──►  emit_ddl("databricks")   →  Databricks / Delta Lake
-        ├──►  emit_ddl("postgres")     →  PostgreSQL
-        ├──►  emit_ddl("mysql")        →  MySQL
-        └──►  emit_ddl("sqlserver")    →  SQL Server
+        ├──►  emit_ddl("mysql")        →  col … COMMENT 'text'  (inline)
+        ├──►  emit_ddl("databricks")   →  col … COMMENT 'text'  (inline)
+        ├──►  emit_ddl("postgres")     →  col …  (no inline comment)
+        │     emit_column_comments()   →  COMMENT ON COLUMN tbl.col IS 'text';
+        ├──►  emit_ddl("oracle")       →  col …  (no inline comment)
+        │     emit_column_comments()   →  COMMENT ON COLUMN tbl.col IS 'text';
+        └──►  emit_ddl("sqlserver")    →  col …  (comments silently dropped)
+             emit_ddl("db2")           →  col …  (comments silently dropped)
 ```
 
 **② Portable schema** — one YAML file, any target:
@@ -162,7 +199,7 @@ MySQL / PostgreSQL / SQL Server / Oracle DDL
   emit_ddl(tables[0], "oracle")        →  ready to run on any database
 ```
 
-**③ Stats-driven tabular data** — collect real statistics, generate matching rows:
+**④ Stats-driven tabular data** — collect real statistics, generate matching rows:
 ```
   schema.yaml  +  TableStats (optional)
         │
@@ -250,6 +287,10 @@ tables:
         not_null: true
         primary_key: true
         auto_increment: true
+      - name: customer_ssn
+        type: string
+        length: 11
+        comment: "Customer social security number"   # from SQL COMMENT clause → drives SSN generation
       - name: is_paid
         type: boolean
         not_null: true
@@ -288,7 +329,116 @@ The generated DataFrame is parameterized by:
 - **null rates** per column (e.g. `total` is NULL 8.3% of the time, matching the measured `null_fraction`)
 - **cardinality** (only 4 distinct `status` values, weighted by measured MCV frequencies)
 - **numeric ranges** (min/max bounds from the collected statistics)
-- **string patterns** when `GenerationRule(format_pattern="email")` is set on a column
+- **string patterns** when a `format_pattern` is set on a column — either explicitly or inferred automatically by name
+
+---
+
+## Semantic data generation
+
+Column names like `ssn`, `email`, `first_name`, and `phone` are automatically matched to realistic Faker-based generators — no manual configuration needed.
+
+### Three input sources, stored separately in YAML
+
+The DDL parser and stats collector populate three independent fields that semantic inference draws from, in priority order:
+
+| Priority | Source | Field | Stored in | Pattern file |
+|----------|--------|-------|-----------|--------------|
+| 1 (highest) | Column name / identifier | `col.name` | `schema.yaml` | `patterns/<locale>.yaml` |
+| 2 | SQL COMMENT clause | `col.comment` | `schema.yaml` | `patterns/<locale>.comments.yaml` |
+| 3 | Human / LLM description | `col.description` | `schema.yaml` | `patterns/<locale>.comments.yaml` |
+| 4 *(planned)* | Column statistics | `ColumnStats` | `stats.yaml` | MCV pattern matching |
+| 5 *(planned)* | LLM inference | — | — | Foundation model call |
+
+Resolution order inside `infer_format_pattern()`:
+1. **Name** — `col.name` vs name-pattern file (fastest, zero config)
+2. **Comment** — `col.comment` (from SQL `COMMENT 'text'` clause) vs comment-pattern file
+3. **Description** — `col.description` (human/LLM-written) used as fallback when `col.comment` is absent
+4. **Stats** — `ColumnStats.most_common_values` *(planned)*
+5. **LLM** — foundation model call *(planned)*
+
+**Option A — built-in name inference (zero config)**
+
+`infer_format_pattern()` matches a column name against a shipped YAML pattern file and returns a `format_pattern`.  Called automatically inside `build_dataframe_from_canonical()` and `to_v1_plan()`.
+
+```python
+from src.statschema.semantic_hints import infer_format_pattern, load_builtin_patterns
+
+infer_format_pattern("customer_ssn")                           # → "ssn"
+infer_format_pattern("email_address")                          # → "email"
+infer_format_pattern("vorname", hints=load_builtin_patterns("de_DE"))  # → "name_first"
+```
+
+When the DDL parser extracts a `COMMENT 'text'` clause, the text is stored in `col.comment`.  If the column name gives no match, the comment text is tried automatically:
+
+```python
+# col.comment = "Customer social security number" (from DDL COMMENT clause)
+infer_format_pattern("col_x", col_comment="Customer social security number")  # → "ssn"
+
+# Column name still wins over comment
+infer_format_pattern("email", col_comment="social security number")  # → "email"
+
+# Human description works as a fallback when col.comment is absent
+infer_format_pattern("col_x", col_description="Customer email address")  # → "email"
+
+# Disable comment / description matching
+infer_format_pattern("col_x", col_comment="...", comment_hints=False)  # → None
+```
+
+Shipped locales: `en_US`, `de_DE`.  Each locale has two pattern files:
+
+| File | Matched against |
+|------|----------------|
+| `patterns/<locale>.yaml` | `col.name` (SQL identifier) |
+| `patterns/<locale>.comments.yaml` | `col.comment` / `col.description` (free-form prose) |
+
+Both use the same YAML format and can be edited without touching Python code.  Comment patterns use word-boundary anchors (`\b`) and natural-language phrasing to work accurately against running text.
+
+**Option B — external `hints.yaml` (user-configurable overrides)**
+
+`load_hints()` + `apply_hints()` annotates tables before generation.  Use this to map project-specific column names, add custom `min`/`max` ranges, or override the built-in patterns.  Pass `db_stats` to expose column statistics for future stats-based inference.
+
+```python
+from src.statschema.semantic_hints import load_hints, apply_hints, load_builtin_comment_patterns
+
+hints  = load_hints("hints.yaml")
+tables = apply_hints(tables, hints)                        # comment matching on by default
+tables = apply_hints(tables, hints, comment_hints=False)  # disable comment matching
+tables = apply_hints(tables, hints,
+    comment_hints=load_builtin_comment_patterns("de_DE"),  # German comment patterns
+    db_stats=db_stats)                                     # stats plumbed for future use
+```
+
+`hints.yaml` format (same format works for comment pattern files):
+
+```yaml
+version: "1.0"
+hints:
+  - pattern: "tax_id|tin"
+    generation:
+      format_pattern: ssn
+
+  - pattern: "salary|compensation"
+    generation:
+      min_value: 30000
+      max_value: 500000
+      distribution: normal
+      distribution_params: {mean: 80000, std: 30000}
+```
+
+Each `pattern` is a case-insensitive Python regex.  For comment files, use word-boundary anchors and natural-language phrasing (`"social.?security"` rather than `"social_security"`).  First match wins.  Any `GenerationRule` fields are valid in the `generation` block.
+
+To use a non-default locale:
+
+```python
+from src.statschema.semantic_hints import load_builtin_patterns, load_builtin_comment_patterns
+de_names    = load_builtin_patterns("de_DE")
+de_comments = load_builtin_comment_patterns("de_DE")
+tables = apply_hints(tables, de_names, comment_hints=de_comments)
+```
+
+**Option C — LLM inference (planned)**
+
+A future fallback using a Databricks Foundation Model endpoint to classify column semantics from column name and sample values, modelled on [Databricks LogSentinel](https://www.databricks.com/blog/logsentinel-how-databricks-uses-databricks-for-llm-powered-pii-detection-and-governance).  Activated via `llm_inference: true` in `hints.yaml`.  Not yet implemented — `_infer_format_pattern_llm()` currently raises `NotImplementedError`.
 
 ---
 

@@ -46,6 +46,10 @@ tables:
       - name: customer_id
         type: long
         not_null: true
+      - name: customer_ssn
+        type: string
+        length: 11
+        comment: "Customer social security number"   # SQL COMMENT clause → drives SSN generation
       - name: total
         type: decimal
         precision: 10
@@ -70,11 +74,12 @@ tables:
 
 | Function | What it does |
 |----------|-------------|
-| `parse_ddl(ddl, dialect)` | Source DDL → list of `CanonicalTableSchema` |
+| `parse_ddl(ddl, dialect)` | Source DDL → list of `CanonicalTableSchema`; populates `col.comment` from SQL `COMMENT` clauses |
 | `dump_schema(tables, path)` | Canonical tables → YAML string (+ optional file write) |
 | `load_canonical(path, expand=False)` | YAML → list of `CanonicalTableSchema` |
-| `emit_ddl(table, dialect)` | Single `CanonicalTableSchema` → DDL string |
+| `emit_ddl(table, dialect)` | Single `CanonicalTableSchema` → DDL string; inline `COMMENT` for MySQL/Databricks |
 | `emit_ddl_all(tables, dialect)` | List of tables → DDL string |
+| `emit_column_comments(table, dialect)` | List of `COMMENT ON COLUMN` statements for PostgreSQL/Oracle; empty for other dialects |
 | `expand_table_instances(tables)` | Resolve `aliases` / `instance_count` into flat list |
 
 ---

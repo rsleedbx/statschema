@@ -312,7 +312,9 @@ def _spark_type_and_options(
     # Explicit GenerationRule.format_pattern takes priority; fall back to
     # built-in column-name inference (Option A, semantic_hints.py).
     if canonical_type == "string":
-        fp = (g.format_pattern if g else None) or infer_format_pattern(col.name)
+        fp = (g.format_pattern if g else None) or infer_format_pattern(
+            col.name, col_comment=col.comment, col_description=col.description
+        )
         if fp:
             opts["template"] = _template_for_format_pattern(fp)
             opts.pop("prefix", None)

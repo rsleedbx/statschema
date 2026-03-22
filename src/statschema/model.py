@@ -207,7 +207,10 @@ class CanonicalColumn:
 
     Semantic / metadata fields
     --------------------------
-    description   Human-readable column description.
+    comment       Verbatim SQL COMMENT clause text, populated by the DDL parser.
+                  Used by semantic hints for comment-based format_pattern inference.
+    description   Human-written or LLM-generated description of the column's
+                  business meaning.  Not set by the DDL parser.
     constraints   Extra source-specific metadata.
     generation    Data generation hints (ranges, value lists, uniqueness).
     references    Foreign key reference as (parent_table, parent_column).
@@ -232,6 +235,13 @@ class CanonicalColumn:
     unique: bool = False
 
     # ── metadata / generation ─────────────────────────────────────────────────
+    # comment     — verbatim text of the SQL COMMENT clause on the column,
+    #               extracted by the DDL parser and stored as-is.
+    #               Used by semantic hints for comment-based format_pattern inference.
+    # description — human-written or LLM-generated description of the column's
+    #               business meaning.  Not populated by the DDL parser; added
+    #               manually or via an external annotation step.
+    comment: Optional[str] = None
     description: Optional[str] = None
     constraints: Optional[dict[str, Any]] = None   # extra source-specific metadata
     generation: Optional[GenerationRule] = None
@@ -251,6 +261,7 @@ class CanonicalColumn:
         if self.default is not None:       d["default"]       = self.default
         if self.primary_key:               d["primary_key"]   = True
         if self.unique:                    d["unique"]        = True
+        if self.comment is not None:       d["comment"]       = self.comment
         if self.description is not None:   d["description"]   = self.description
         if self.constraints:               d["constraints"]   = self.constraints
         if self.generation is not None:    d["generation"]    = self.generation.to_dict()
@@ -275,6 +286,7 @@ class CanonicalColumn:
             default=d.get("default"),
             primary_key=bool(d.get("primary_key", False)),
             unique=bool(d.get("unique", False)),
+            comment=d.get("comment"),
             description=d.get("description"),
             constraints=d.get("constraints"),
             generation=gen,

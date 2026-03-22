@@ -469,3 +469,165 @@ class TestBuilderOptionA:
         col = CanonicalColumn(name="ssn_count", type="integer")
         _, opts = _spark_type_and_options(col)
         assert "template" not in opts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D. Column-comment inference
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCommentInference:
+    """Option A: column-comment fallback.
+
+    Three separate text sources for semantic inference, in priority order:
+      1. col.name     — matched via col_name parameter
+      2. col.comment  — SQL COMMENT clause text, matched via col_comment parameter
+      3. col.description — human/LLM description, matched via col_description fallback
+    """
+
+    # ── col_comment= (primary DDL source) ────────────────────────────────────
+
+    def test_comment_infers_ssn(self):
+        from src.statschema.semantic_hints import infer_format_pattern
+        assert infer_format_pattern("col_x", col_comment="Customer social security number") == "ssn"
+
+    def test_comment_infers_email(self):
+        from src.statschema.semantic_hints import infer_format_pattern
+        assert infer_format_pattern("col_a", col_comment="Email address of the user") == "email"
+
+    def test_name_wins_over_comment(self):
+        """Column name match takes priority over comment match."""
+        from src.statschema.semantic_hints import infer_format_pattern
+        # Name → email; comment → ssn — name should win
+        assert infer_format_pattern("email", col_comment="social security number") == "email"
+
+    def test_comment_disabled(self):
+        from src.statschema.semantic_hints import infer_format_pattern
+        result = infer_format_pattern("col_x",
+                                      col_comment="social security number",
+                                      comment_hints=False)
+        assert result is None
+
+    def test_no_comment_returns_none(self):
+        from src.statschema.semantic_hints import infer_format_pattern
+        assert infer_format_pattern("col_x", col_comment=None) is None
+
+    def test_custom_comment_hints(self, tmp_path):
+        """A user-supplied comment_hints file is respected."""
+        from src.statschema.semantic_hints import infer_format_pattern, load_hints
+        p = tmp_path / "cc.yaml"
+        p.write_text("hints:\n  - pattern: 'tax.?id'\n    generation:\n      format_pattern: ssn\n")
+        custom = load_hints(str(p))
+        assert infer_format_pattern("ref", col_comment="Federal tax ID", comment_hints=custom) == "ssn"
+
+    # ── col_description= (human/LLM description fallback) ────────────────────
+
+    def test_description_fallback_infers_ssn(self):
+        """col_description= still works as a fallback when col_comment= is absent."""
+        from src.statschema.semantic_hints import infer_format_pattern
+        assert infer_format_pattern("col_x", col_description="Customer social security number") == "ssn"
+
+    def test_comment_takes_priority_over_description(self):
+        """When both col_comment and col_description are given, comment wins."""
+        from src.statschema.semantic_hints import infer_format_pattern
+        # comment → ssn; description → email — comment should win
+        assert infer_format_pattern("col_z",
+                                    col_comment="social security number",
+                                    col_description="email address") == "ssn"
+
+    # ── locale / loader helpers ───────────────────────────────────────────────
+
+    def test_load_builtin_comment_patterns_en_us(self):
+        from src.statschema.semantic_hints import load_builtin_comment_patterns
+        hints = load_builtin_comment_patterns("en_US")
+        assert len(hints) > 0
+
+    def test_load_builtin_comment_patterns_de_de(self):
+        from src.statschema.semantic_hints import load_builtin_comment_patterns
+        hints = load_builtin_comment_patterns("de_DE")
+        assert hints.match("Telefonnummer des Kunden") is not None
+
+    def test_load_builtin_comment_patterns_unknown_locale(self):
+        from src.statschema.semantic_hints import load_builtin_comment_patterns
+        with pytest.raises(FileNotFoundError, match="fr_FR"):
+            load_builtin_comment_patterns("fr_FR")
+
+    # ── apply_hints integration ───────────────────────────────────────────────
+
+    def test_apply_hints_uses_comment_field(self):
+        """apply_hints() uses col.comment (DDL source) for comment matching."""
+        from src.statschema.model import CanonicalColumn, CanonicalTableSchema
+        from src.statschema.semantic_hints import apply_hints, load_builtin_patterns
+        col = CanonicalColumn(name="col_x", type="string",
+                              comment="Email address of the customer")
+        table = CanonicalTableSchema(name="t", columns=[col])
+        apply_hints([table], load_builtin_patterns("en_US"))
+        assert col.generation is not None
+        assert col.generation.format_pattern == "email"
+
+    def test_apply_hints_uses_description_fallback(self):
+        """apply_hints() falls back to col.description when col.comment is absent."""
+        from src.statschema.model import CanonicalColumn, CanonicalTableSchema
+        from src.statschema.semantic_hints import apply_hints, load_builtin_patterns
+        col = CanonicalColumn(name="col_x", type="string",
+                              description="Email address of the customer")
+        table = CanonicalTableSchema(name="t", columns=[col])
+        apply_hints([table], load_builtin_patterns("en_US"))
+        assert col.generation is not None
+        assert col.generation.format_pattern == "email"
+
+    def test_apply_hints_comment_disabled(self):
+        """comment_hints=False skips comment matching in apply_hints()."""
+        from src.statschema.model import CanonicalColumn, CanonicalTableSchema
+        from src.statschema.semantic_hints import apply_hints, load_builtin_patterns
+        col = CanonicalColumn(name="col_x", type="string",
+                              comment="Email address of the customer")
+        table = CanonicalTableSchema(name="t", columns=[col])
+        apply_hints([table], load_builtin_patterns("en_US"), comment_hints=False)
+        assert col.generation is None
+
+    def test_apply_hints_with_db_stats(self):
+        """apply_hints() accepts db_stats without error (stats plumbed for future use)."""
+        from src.statschema.model import CanonicalColumn, CanonicalTableSchema
+        from src.statschema.semantic_hints import apply_hints, load_builtin_patterns
+        from src.statschema.stats_model import ColumnStats, DatabaseStats, TableStats
+        col = CanonicalColumn(name="email_addr", type="string")
+        table = CanonicalTableSchema(name="users", columns=[col])
+        db_stats = DatabaseStats(tables=[
+            TableStats(name="users", row_count=100,
+                       columns=[ColumnStats(name="email_addr")])
+        ])
+        apply_hints([table], load_builtin_patterns("en_US"), db_stats=db_stats)
+        assert col.generation is not None
+        assert col.generation.format_pattern == "email"
+
+    # ── DDL parser → YAML round-trip → semantic inference ────────────────────
+
+    def test_ddl_parser_captures_comment(self):
+        """SQL COMMENT clause is stored in col.comment (not col.description)."""
+        from src.statschema.ddl_parser import parse_ddl
+        ddl = "CREATE TABLE t (id INT, ssn_val VARCHAR(20) COMMENT 'social security number');"
+        tables = parse_ddl(ddl, dialect="mysql")
+        col = tables[0].columns[1]
+        assert col.comment == "social security number"
+        assert col.description is None  # human description is separate
+
+    def test_ddl_comment_roundtrips_in_yaml(self):
+        """col.comment survives schema.yaml round-trip via to_dict/from_dict."""
+        from src.statschema.ddl_parser import parse_ddl
+        from src.statschema.schema_io import dump_schema, load_canonical
+        ddl = "CREATE TABLE t (col_a VARCHAR(20) COMMENT 'Customer email address');"
+        tables = parse_ddl(ddl, dialect="mysql")
+        yaml_str = dump_schema(tables)
+        tables2 = load_canonical(yaml_str)
+        col = tables2[0].columns[0]
+        assert col.comment == "Customer email address"
+        assert col.description is None
+
+    def test_ddl_comment_drives_inference(self):
+        """End-to-end: DDL COMMENT → col.comment → format_pattern inference."""
+        from src.statschema.ddl_parser import parse_ddl
+        from src.statschema.semantic_hints import infer_format_pattern
+        ddl = "CREATE TABLE t (col_a VARCHAR(20) COMMENT 'Customer email address');"
+        tables = parse_ddl(ddl, dialect="mysql")
+        col = tables[0].columns[0]
+        assert infer_format_pattern(col.name, col_comment=col.comment) == "email"

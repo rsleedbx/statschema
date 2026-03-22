@@ -562,6 +562,12 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
             col_constraints["source_type"]    = source_type_str
             col_constraints["source_dialect"] = dialect
 
+        # Column COMMENT clause — stored in col.comment for semantic inference.
+        ddl_comment: Optional[str] = None
+        _comment_node = col_def.find(exp.CommentColumnConstraint)
+        if _comment_node is not None and _comment_node.this is not None:
+            ddl_comment = _comment_node.this.name or None
+
         columns.append(CanonicalColumn(
             name=col_name,
             type=canonical,
@@ -577,6 +583,7 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
             unique=unique,
             constraints=col_constraints if col_constraints else None,
             generation=GenerationRule(unique=True) if is_pk else None,
+            comment=ddl_comment,
         ))
 
     # Back-fill PK flag for columns only referenced by a table-level PRIMARY KEY.
