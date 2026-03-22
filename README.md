@@ -1,9 +1,9 @@
-# statschema — DDL transpiler · stats transpiler · semantic inference · portable YAML
+# statschema — Statistics and Synthetic Data Generator for DBAs and Data Migration Practitioners
 
 **Repository:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema) · `git clone https://github.com/rsleedbx/statschema.git`
 
 > **Your query optimizer produces correct plans before you load a single row.**
-> Collect schema, column comments, and statistics from any source database into dialect-free YAML. Emit correct DDL for any target. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — so the optimizer is not blind on day one.
+> Collect schema, column comments, and statistics from any source database into dialect-free YAML. Transpile DDL to any target dialect. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — without moving a single production row.
 
 ### Quick start
 
