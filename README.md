@@ -16,7 +16,7 @@ pip install statschema
 
 ### Quick start
 
-**Transpile DDL — parse MySQL, emit PostgreSQL / Oracle / SQL Server / Databricks:**
+**Transpile DDL — parse any dialect, emit all six targets:**
 ```python
 from statschema import parse_ddl, emit_ddl
 
@@ -34,6 +34,9 @@ CREATE TABLE orders (
 print(emit_ddl(tables[0], "postgres"))    # SERIAL, BOOLEAN, NUMERIC, TIMESTAMP
 print(emit_ddl(tables[0], "oracle"))      # NUMBER, TIMESTAMP, GENERATED AS IDENTITY
 print(emit_ddl(tables[0], "sqlserver"))   # BIT, DATETIME2, IDENTITY(1,1)
+print(emit_ddl(tables[0], "databricks"))  # BIGINT, BOOLEAN, TIMESTAMP_NTZ
+print(emit_ddl(tables[0], "mysql"))       # round-trip: AUTO_INCREMENT, TINYINT(1)
+print(emit_ddl(tables[0], "db2"))         # GENERATED ALWAYS AS IDENTITY, TIMESTAMP
 ```
 
 **Collect statistics from MySQL, inject into PostgreSQL — optimizer works before any rows are loaded:**
