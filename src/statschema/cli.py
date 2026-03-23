@@ -517,7 +517,7 @@ def _connect_interactive(args) -> tuple[Any, str, int, str, str]:
 
     if dialect == "sqlite":
         import sqlite3
-        path = getattr(args, "database", None) or ":memory:"
+        path = getattr(args, "catalog", None) or ":memory:"
         return sqlite3.connect(path), "localhost", 0, "", path
 
     host = _prompt_if_missing(getattr(args, "host", None),     "Host",     "localhost")
@@ -525,7 +525,7 @@ def _connect_interactive(args) -> tuple[Any, str, int, str, str]:
                                   "Port", str(_DEFAULT_PORTS.get(dialect, 5432))))
     user = _prompt_if_missing(getattr(args, "user", None),     "Username", "")
     pw   = _prompt_if_missing(getattr(args, "password", None), "Password", secret=True)
-    db   = _prompt_if_missing(getattr(args, "database", None), "Database", "")
+    db   = _prompt_if_missing(getattr(args, "catalog", None),  "Catalog",  "")
 
     if dialect in ("postgres", "cockroachdb", "neon"):
         import psycopg2
@@ -853,8 +853,9 @@ def _cmd_collect(args) -> None:
     do_analyze = getattr(args, "analyze", False)
 
     # ── connect ──────────────────────────────────────────────────────────────
-    conn, host, port, user, database = _connect_interactive(args)
-    print(f"\n  Connected to {dialect} @ {host}:{port}/{database} as {user}", file=sys.stderr)
+    conn, host, port, user, catalog = _connect_interactive(args)
+    schema_note = f"/{schema}" if schema else ""
+    print(f"\n  Connected to {dialect} @ {host}:{port}/{catalog}{schema_note} as {user}", file=sys.stderr)
 
     raw_cur = conn.cursor()
     cur = _LoggingCursor(raw_cur, show_sql)
@@ -871,7 +872,7 @@ def _cmd_collect(args) -> None:
     # ── list tables ──────────────────────────────────────────────────────────
     tables_found = _list_tables(cur, dialect, schema, pattern)
     if not tables_found:
-        _die(f"No tables found matching {pattern!r} in {dialect}@{database}")
+        _die(f"No tables found matching {pattern!r} in {dialect}@{catalog}{schema_note}")
     print(f"  Found {len(tables_found)} table(s) matching {pattern!r}\n", file=sys.stderr)
 
     # ── collect per table ─────────────────────────────────────────────────────
@@ -1089,14 +1090,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "Use --show-sql to see every SQL statement sent to the database.\n\n"
             "Examples\n"
             "--------\n"
-            "  # Collect everything from a MySQL database (prompts for password)\n"
+            "  # Collect everything from MySQL (prompts for password)\n"
             "  statschema collect --dialect mysql --host localhost --user root \\\n"
-            "      --database northwind --tables '%'\n\n"
-            "  # Collect only order* tables from PostgreSQL, show SQL, custom output files\n"
+            "      --catalog northwind --tables '%'\n\n"
+            "  # PostgreSQL: catalog=database name, schema=namespace (e.g. public)\n"
             "  statschema collect --dialect postgres --host db.example.com \\\n"
-            "      --user myuser --database prod --schema public --tables 'order%' \\\n"
+            "      --user myuser --catalog prod --schema public --tables 'order%' \\\n"
             "      --show-sql --out-schema orders.yaml --out-stats orders_stats.yaml\n\n"
-            "  # SQL Server — prompts for all connection details\n"
+            "  # SQL Server: catalog=database name, schema=dbo (or other)\n"
+            "  statschema collect --dialect sqlserver --catalog mydb --schema dbo\n\n"
+            "  # Oracle: --schema = owner name; --catalog is not used\n"
+            "  statschema collect --dialect oracle --host orahost --catalog XE --schema HR\n\n"
+            "  # Prompt for everything\n"
             "  statschema collect --dialect sqlserver"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1111,10 +1116,23 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Database username (prompted if omitted).")
     p_col.add_argument("--password", metavar="PASS",
                        help="Database password (prompted securely if omitted).")
-    p_col.add_argument("--database", metavar="DB",
-                       help="Database / catalog name (prompted if omitted).")
+    p_col.add_argument("--catalog",  metavar="CATALOG",
+                       help=(
+                           "Catalog / database name (prompted if omitted). "
+                           "MySQL: the database name. "
+                           "PostgreSQL/SQL Server: the database that contains the schema. "
+                           "Oracle: the service name (XE, XEPDB1, etc.) — schema is the owner. "
+                           "SQLite: file path."
+                       ))
     p_col.add_argument("--schema",   dest="schema_name", metavar="SCHEMA",
-                       help="Schema / namespace within the database (e.g. public, dbo).")
+                       help=(
+                           "Schema / namespace within the catalog (prompted if omitted for "
+                           "dialects that require it). "
+                           "PostgreSQL default: public. "
+                           "SQL Server default: dbo. "
+                           "Oracle: owner name (required). "
+                           "MySQL/SQLite: not used."
+                       ))
     p_col.add_argument("--tables",   default="%", metavar="PATTERN",
                        help="SQL LIKE pattern for table names (default: %% = all tables). "
                             "Shell glob * is accepted and converted to %%.")

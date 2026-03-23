@@ -153,15 +153,18 @@ Three patterns most tools can't express without custom code: **Zipf FK fan-out**
 
 **Collect DDL and statistics from any live database — no SQL knowledge required:**
 ```bash
-# Collect everything from MySQL — prompts for password interactively
-statschema collect --dialect mysql --host localhost --user root --database northwind
+# MySQL — catalog = database name; prompts for password interactively
+statschema collect --dialect mysql --host localhost --user root --catalog northwind
 
-# Collect only order* tables from PostgreSQL, see every SQL statement issued
+# PostgreSQL — catalog = database, schema = namespace (e.g. public)
 statschema collect --dialect postgres --host db.example.com \
-    --user myuser --database prod --schema public --tables 'order%' --show-sql
+    --user myuser --catalog prod --schema public --tables 'order%' --show-sql
 
-# SQL Server — prompts for every missing option
-statschema collect --dialect sqlserver
+# SQL Server — catalog = database, schema = dbo (or other); prompts for missing options
+statschema collect --dialect sqlserver --catalog mydb --schema dbo
+
+# Oracle — --schema = owner name; prompts for everything else
+statschema collect --dialect oracle --host orahost --schema HR
 ```
 ```
   Connected to postgres @ db.example.com:5432/prod as myuser
