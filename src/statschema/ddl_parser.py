@@ -406,29 +406,51 @@ def _dtype_info(
 
 
 # ---------------------------------------------------------------------------
-# FK extraction
+# FK extraction helpers
 # ---------------------------------------------------------------------------
 
+def _fk_from_reference(
+    ref: exp.Reference,
+    child_cols: list[str],
+    fk_name: Optional[str] = None,
+) -> Optional[CanonicalForeignKey]:
+    """
+    Build a CanonicalForeignKey from a sqlglot Reference node.
+
+    The Reference node structure from both table-level FOREIGN KEY and
+    inline column REFERENCES is identical:
+        Reference(this=Schema(this=Table(...), expressions=[Identifier, ...]))
+    """
+    ref_schema = ref.this
+    if isinstance(ref_schema, exp.Schema):
+        ref_table_node = ref_schema.this
+        parent_table = ref_table_node.name if ref_table_node else None
+        parent_schema_name = (ref_table_node.db or None) if ref_table_node else None
+        parent_cols = [ident.name for ident in (ref_schema.expressions or [])]
+    elif isinstance(ref_schema, exp.Table):
+        parent_table = ref_schema.name
+        parent_schema_name = ref_schema.db or None
+        parent_cols = []
+    else:
+        return None
+    if not parent_table:
+        return None
+    return CanonicalForeignKey(
+        columns=child_cols,
+        parent_table=parent_table,
+        parent_columns=parent_cols,
+        name=fk_name,
+        parent_schema=parent_schema_name,
+    )
+
+
 def _parse_fk_constraints(ast: exp.Create) -> list[CanonicalForeignKey]:
+    """Extract table-level FOREIGN KEY … REFERENCES … constraints."""
     fks: list[CanonicalForeignKey] = []
     for fk_node in ast.find_all(exp.ForeignKey):
         child_cols = [c.name for c in fk_node.expressions]
         ref = fk_node.find(exp.Reference)
         if not ref:  # pragma: no cover
-            continue  # pragma: no cover
-
-        # Reference.this is a Schema(this=Table, expressions=[Identifier, ...])
-        ref_schema = ref.this
-        if isinstance(ref_schema, exp.Schema):
-            ref_table_node = ref_schema.this
-            parent_table = ref_table_node.name if ref_table_node else None
-            parent_schema_name = (ref_table_node.db or None) if ref_table_node else None
-            parent_cols = [ident.name for ident in (ref_schema.expressions or [])]
-        elif isinstance(ref_schema, exp.Table):
-            parent_table = ref_schema.name
-            parent_schema_name = ref_schema.db or None
-            parent_cols = []
-        else:  # pragma: no cover
             continue  # pragma: no cover
 
         # CONSTRAINT fk_name FOREIGN KEY …
@@ -438,13 +460,44 @@ def _parse_fk_constraints(ast: exp.Create) -> list[CanonicalForeignKey]:
             name_node = parent.args.get("this")
             fk_name = name_node.name if name_node else None
 
-        fks.append(CanonicalForeignKey(
-            columns=child_cols,
-            parent_table=parent_table,
-            parent_columns=parent_cols,
-            name=fk_name,
-            parent_schema=parent_schema_name,
-        ))
+        fk = _fk_from_reference(ref, child_cols, fk_name)
+        if fk:
+            fks.append(fk)
+    return fks
+
+
+def _parse_inline_fk_constraints(
+    ast: exp.Create,
+    seen_columns: set[str],
+) -> list[CanonicalForeignKey]:
+    """
+    Extract inline column-level REFERENCES constraints, e.g.::
+
+        customer_id INTEGER NOT NULL REFERENCES customer(customer_id)
+
+    These appear as Reference nodes directly inside a ColumnDef's constraint
+    list, not as ForeignKey nodes at the table level.  Only columns already
+    listed in *seen_columns* (i.e. successfully parsed columns) are included.
+    Columns already covered by a table-level FK are de-duplicated by the caller.
+    """
+    fks: list[CanonicalForeignKey] = []
+    for col_def in ast.find_all(exp.ColumnDef):
+        col_name = col_def.name
+        if col_name not in seen_columns:
+            continue
+        # Look for a Reference that is a direct child constraint of this col_def,
+        # but NOT inside a ForeignKey node (those are handled by _parse_fk_constraints).
+        for ref in col_def.find_all(exp.Reference):
+            # Skip if this Reference lives inside a ForeignKey subtree
+            parent = ref.parent
+            while parent is not None and not isinstance(parent, exp.ColumnDef):
+                if isinstance(parent, exp.ForeignKey):
+                    break
+                parent = parent.parent
+            else:
+                fk = _fk_from_reference(ref, [col_name])
+                if fk:
+                    fks.append(fk)
     return fks
 
 
@@ -568,6 +621,21 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
         if _comment_node is not None and _comment_node.this is not None:
             ddl_comment = _comment_node.this.name or None
 
+        # ── Inline REFERENCES (column-level FK) ─────────────────────────────
+        # Store as col.references for backward compatibility.  The full
+        # CanonicalForeignKey is built below after all columns are collected.
+        inline_ref = col_def.find(exp.Reference)
+        col_ref: Optional[tuple[str, str]] = None
+        if inline_ref:
+            ref_schema = inline_ref.this
+            if isinstance(ref_schema, exp.Schema):
+                pt = ref_schema.this.name if ref_schema.this else None
+                pc = [i.name for i in (ref_schema.expressions or [])]
+                if pt:
+                    col_ref = (pt, pc[0] if pc else col_name)
+            elif isinstance(ref_schema, exp.Table):
+                col_ref = (ref_schema.name, col_name)
+
         columns.append(CanonicalColumn(
             name=col_name,
             type=canonical,
@@ -582,8 +650,17 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
             primary_key=is_pk,
             unique=unique,
             constraints=col_constraints if col_constraints else None,
-            generation=GenerationRule(unique=True) if is_pk else None,
+            # PK columns always use sequential generation so that FK child
+            # columns (sampled from [1, parent_row_count]) can join correctly.
+            # For plain INT PRIMARY KEY (no SERIAL/AUTO_INCREMENT) this is
+            # especially important: without sequential we'd emit random large
+            # integers that don't match the FK range.
+            generation=(
+                GenerationRule(distribution="sequential", min_value=1)
+                if is_pk else None
+            ),
             comment=ddl_comment,
+            references=col_ref,
         ))
 
     # Back-fill PK flag for columns only referenced by a table-level PRIMARY KEY.
@@ -593,9 +670,17 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
         if col.name in pk_cols and not col.primary_key:  # pragma: no cover
             col.primary_key = True  # pragma: no cover
             col.not_null = True  # pragma: no cover
-            col.generation = GenerationRule(unique=True)  # pragma: no cover
+            col.generation = GenerationRule(distribution="sequential", min_value=1)  # pragma: no cover
 
-    fk_constraints = _parse_fk_constraints(ast)
+    # Merge table-level and inline FK constraints; de-duplicate by child column set.
+    seen_cols = {c.name for c in columns}
+    table_fks  = _parse_fk_constraints(ast)
+    table_fk_col_sets = {frozenset(fk.columns) for fk in table_fks}
+    inline_fks = [
+        fk for fk in _parse_inline_fk_constraints(ast, seen_cols)
+        if frozenset(fk.columns) not in table_fk_col_sets
+    ]
+    fk_constraints = table_fks + inline_fks
 
     return CanonicalTableSchema(
         name=table_name,
@@ -658,6 +743,66 @@ def _normalize_default(raw: str) -> str:
     return s
 
 
+def _apply_alter_fks(
+    statements: list,
+    tables_by_name: dict[str, "CanonicalTableSchema"],
+) -> None:
+    """
+    Walk ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY statements and attach
+    the discovered FK constraints to the matching CanonicalTableSchema.
+
+    This handles the common pattern used by Liquibase, Flyway, pg_dump, and
+    Chinook where FK constraints are added *after* all CREATE TABLE statements::
+
+        ALTER TABLE invoice
+            ADD CONSTRAINT invoice_customer_id_fkey
+            FOREIGN KEY (customer_id) REFERENCES customer (customer_id);
+
+    The ALTER TABLE target may use quoted identifiers; we normalise to lower-case
+    to match the table_name stored on CanonicalTableSchema.
+    """
+    for stmt in statements:
+        if not isinstance(stmt, exp.Alter):
+            continue
+        if not (stmt.kind or "").upper() == "TABLE":  # type: ignore[union-attr]
+            continue
+
+        tbl_node = stmt.this
+        tbl_name = tbl_node.name if tbl_node else None
+        if not tbl_name:
+            continue
+        target = tables_by_name.get(tbl_name) or tables_by_name.get(tbl_name.lower())
+        if target is None:
+            continue
+
+        for fk_node in stmt.find_all(exp.ForeignKey):
+            child_cols = [c.name for c in fk_node.expressions]
+            ref = fk_node.find(exp.Reference)
+            if not ref:
+                continue
+
+            fk_name: Optional[str] = None
+            p = fk_node.parent
+            if isinstance(p, exp.Constraint):
+                name_node = p.args.get("this")
+                fk_name = name_node.name if name_node else None
+
+            fk = _fk_from_reference(ref, child_cols, fk_name)
+            if fk is None:
+                continue
+
+            # Skip duplicate: same child columns already covered by a prior entry.
+            existing_col_sets = {
+                frozenset(e.columns) for e in (target.fk_constraints or [])
+            }
+            if frozenset(fk.columns) in existing_col_sets:
+                continue
+
+            if target.fk_constraints is None:
+                target.fk_constraints = []
+            target.fk_constraints.append(fk)
+
+
 def parse_ddl(sql: str, dialect: str | None = None) -> list[CanonicalTableSchema]:
     """
     Parse SQL DDL string containing one or more CREATE TABLE statements.
@@ -696,6 +841,14 @@ def parse_ddl(sql: str, dialect: str | None = None) -> list[CanonicalTableSchema
     for stmt in statements:
         if isinstance(stmt, exp.Create) and stmt.kind and stmt.kind.upper() == "TABLE":
             result.append(_parse_create_table(stmt, dialect))
+
+    # Second pass: apply FK constraints from ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY.
+    # This pattern is used by pg_dump, Liquibase, Flyway, Chinook, and many other tools
+    # that emit CREATE TABLE first and ADD CONSTRAINT FK in a separate ALTER statement.
+    if result:
+        tables_by_name = {t.name: t for t in result}
+        _apply_alter_fks(statements, tables_by_name)
+
     return result
 
 
