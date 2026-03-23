@@ -15,6 +15,8 @@ pip install statschema
 > Collect schema, column comments, and statistics from any source database into dialect-free YAML. Transpile DDL to any target dialect. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — without moving a single production row.
 >
 > **No Spark, no Java, no custom code required for core workflows.** The CLI (`statschema collect`, `inject`, `generate`, `load`) works out of the box. Spark is an optional extra only for large-scale distributed data generation on Databricks.
+>
+> **The YAML is the living test artifact.** `statschema collect` produces `schema.yaml` and `stats.yaml` automatically from the source database — but the files are plain text and live in version control. After the first test run, developers edit them directly to tune distributions, tighten FK ranges, add missing constraints, or model a second test scenario. The next `statschema generate` call picks up the changes immediately. No code to rewrite, no data generator to redeploy — just edit YAML, regenerate, rerun.
 
 ### Quick start
 
@@ -160,6 +162,8 @@ df.to_sql("orders", engine, if_exists="replace", index=False)
 
 Three patterns most tools can't express without custom code: **Zipf FK fan-out** (a few hot orders accumulate most line items, matching real e-commerce data), **weighted status distribution** (50% delivered, 5% cancelled — not uniform), and **conditional nulls** (`discount_pct` NULL 65% of the time, non-zero only on promoted SKUs). All declared in YAML; no Python per table.
 
+After the first test run a developer can open `schema.yaml`, change the `delivered` weight from `0.50` to `0.80` to stress-test the hot path, add a `temporal_ordering_constraints: ["ship_date > order_date"]` entry to prevent nonsensical rows, or swap in an override file that cranks up null rates for a data-quality test scenario. The next `statschema generate` call reflects the change immediately. This edit-regenerate-rerun loop — not the initial auto-generation — is where statschema saves the most time in practice.
+
 **Collect DDL and statistics from any live database — no SQL knowledge required:**
 ```bash
 # MySQL — catalog = database name; prompts for password interactively
@@ -207,18 +211,69 @@ Python 3.10+ · [Full docs below](#overview)
 
 ---
 
+### Evaluate a migration to Lakebase in one afternoon
+
+This end-to-end workflow goes from any OLTP source to Lakebase with realistic, referentially correct data and meaningful `EXPLAIN` plans — no production rows copied, no manual DDL editing, no Spark required.
+
+**Step 1 — Collect schema + statistics from the source (read-only, no data leaves)**
+```bash
+statschema collect --dialect mysql \
+    --host prod-mysql --user readonly \
+    --catalog orders_db --tables 'order%'
+# Writes schema.yaml  (DDL, FK constraints, comments)
+#        stats.yaml   (null rates, MCVs, histograms — kilobytes, no PII)
+```
+
+**Step 2 — Spin up a Lakebase endpoint** *(once per project; idempotent)*
+```bash
+make lakebase-up
+# scripts/lakebase-up.sh creates or re-enables the endpoint
+# and writes STATSCHEMA_LAKEBASE_HOST / _ENDPOINT / _USER to .env
+```
+
+**Step 3 — Transpile DDL and create tables on Lakebase**
+```bash
+statschema ddl schema.yaml --dialect lakebase > lakebase.sql
+psql "host=$STATSCHEMA_LAKEBASE_HOST dbname=databricks_postgres \
+      user=$STATSCHEMA_LAKEBASE_USER sslmode=require" -f lakebase.sql
+```
+
+**Step 4 — Generate and load realistic synthetic data**
+```bash
+statschema load schema.yaml --dialect lakebase --sf 1 \
+    --dsn "host=$STATSCHEMA_LAKEBASE_HOST dbname=databricks_postgres \
+           user=$STATSCHEMA_LAKEBASE_USER sslmode=require"
+# FK integrity, Zipf skew, weighted enums, null rates — all from stats.yaml
+```
+
+**Step 5 — Inject optimizer statistics so EXPLAIN plans are meaningful from day one**
+```bash
+statschema inject --dialect postgres \
+    --dsn "host=$STATSCHEMA_LAKEBASE_HOST dbname=databricks_postgres \
+           user=$STATSCHEMA_LAKEBASE_USER sslmode=require" \
+    --stats stats.yaml
+# pg_statistic now reflects production null rates, MCVs, and histograms
+# EXPLAIN plans match production shape before a single production row is loaded
+```
+
+After step 5 you can run application queries, benchmark suites, or migration regression tests against Lakebase with data that behaves like production. Edit `schema.yaml` to tune distributions between runs — change a weight, add a constraint, tighten a range — then re-run from step 4. See [`docs/databases/lakebase.md`](docs/databases/lakebase.md) and the [OLTP migration analysis](docs/learnings/oltp-migration-analysis.md) for the full story.
+
+> **Teardown**: `make lakebase-down` disables the endpoint (zero compute cost, data preserved).
+
+---
+
 ### Who is this for
 
 statschema is built for **DBAs and data engineers doing cross-dialect database migrations**. It addresses the gap that exists in the migration window: the target database has a schema but no data, so the optimizer is blind and test queries produce bad plans.
 
 Other synthetic data tools solve a different problem:
 
-| Tool category | Primary user | Requires production data | Optimizer stats injection | Live multi-dialect test methodology published |
-|---|---|---|---|---|
-| Faker · Mockaroo | App developer — unit test fixtures | No — generates random plausible values | No | No — tests against in-memory data only |
-| SDV · Gretel · Tonic | Data scientist / QA — privacy-safe production clone | Yes — trains on or anonymizes actual rows | No | No — SaaS products; internal test infra not published |
-| AWS SCT · pgloader | DBA — schema and data migration | No — schema or data only, no generation | No | No — closed source |
-| **statschema** | **DBA — cross-dialect migration validation** | **No — works from statistics without the data** | **Yes** | **Yes — per-dialect Podman setup, live integration tests, contributor guide** |
+| Tool category | Primary user | Requires production data | Optimizer stats injection | Editable YAML tuning artifact | Live multi-dialect test methodology published |
+|---|---|---|---|---|---|
+| Faker · Mockaroo | App developer — unit test fixtures | No — generates random plausible values | No | No — code per table | No — tests against in-memory data only |
+| SDV · Gretel · Tonic | Data scientist / QA — privacy-safe production clone | Yes — trains on or anonymizes actual rows | No | No — black-box model | No — SaaS products; internal test infra not published |
+| AWS SCT · pgloader | DBA — schema and data migration | No — schema or data only, no generation | No | No | No — closed source |
+| **statschema** | **DBA — cross-dialect migration validation** | **No — works from statistics without the data** | **Yes** | **Yes — plain-text YAML, version-controlled, edit between runs** | **Yes — per-dialect Podman setup, live integration tests, contributor guide** |
 
 The "no production data required" row is the key difference for DBAs. Moving production data to a test environment has two hard blockers:
 
@@ -925,100 +980,26 @@ generation for PostgreSQL or Databricks without conversion.
 
 ## Exporting DDL and statistics from each database
 
-All examples below read credentials from `.env` at the repo root.
-Copy `.env.example` to `.env` and fill in your values once; every snippet
-below will then work without modification.
+All examples read credentials from `.env` at the repo root.
+Copy `.env.example` to `.env` and fill in your values once:
 
 ```bash
 cp .env.example .env   # fill in passwords, ports, etc.
 ```
 
-```python
-# common preamble — paste at the top of any script below
-import os
-from dotenv import load_dotenv
-load_dotenv()   # reads .env from the current directory (or any parent)
-```
+For **MySQL**, **PostgreSQL**, **MariaDB**, **CockroachDB**, **Neon**, **Databricks**, and **Lakebase**, full DDL export and stats collection instructions live in the per-database setup pages:
 
----
+| Database | Setup + export guide |
+|----------|----------------------|
+| MySQL | [`docs/databases/mysql.md`](docs/databases/mysql.md) |
+| PostgreSQL | [`docs/databases/postgres.md`](docs/databases/postgres.md) |
+| MariaDB | [`docs/databases/mariadb.md`](docs/databases/mariadb.md) |
+| CockroachDB | [`docs/databases/cockroachdb.md`](docs/databases/cockroachdb.md) |
+| Neon | [`docs/databases/neon.md`](docs/databases/neon.md) |
+| Databricks | [`docs/databases/lakebase.md`](docs/databases/lakebase.md) |
+| Lakebase | [`docs/databases/lakebase.md`](docs/databases/lakebase.md) |
 
-### MySQL
-
-```bash
-# DDL export — one file per schema, no data
-# Credentials from .env: MYSQL_ROOT_PASS, MYSQL8_PORT (or MYSQL57_PORT)
-source .env
-mysqldump --no-data --routines=0 --triggers=0 \
-  -h 127.0.0.1 -P "$MYSQL8_PORT" -u root -p"$MYSQL_ROOT_PASS" mydb > schema.sql
-```
-
-```python
-import os, pymysql
-from dotenv import load_dotenv
-from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
-
-load_dotenv()
-
-conn = pymysql.connect(
-    host="127.0.0.1",
-    port=int(os.environ["MYSQL8_PORT"]),
-    user="root",
-    password=os.environ["MYSQL_ROOT_PASS"],
-    db="mydb",
-    autocommit=True,
-)
-
-# Run ANALYZE first so MySQL's column statistics are current
-conn.cursor().execute("ANALYZE TABLE orders;")
-
-tables = parse_ddl(open("schema.sql").read(), dialect="mysql")
-dump_schema(tables, "schema.yaml")
-
-stats = [collect_table_stats(conn, t.name, dialect="mysql") for t in tables]
-dump_stats(DatabaseStats(tables=stats), "stats.yaml")
-```
-
----
-
-### PostgreSQL
-
-```bash
-# DDL export — schema only, no data
-# Credentials from .env: PG_PASSWORD, PG_DB, PG16_PORT (or PG14_PORT)
-source .env
-PGPASSWORD="$PG_PASSWORD" pg_dump --schema-only --no-owner --no-acl \
-  -h localhost -p "$PG16_PORT" -U myuser -d "$PG_DB" > schema.sql
-```
-
-```python
-import os, psycopg2
-from dotenv import load_dotenv
-from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
-
-load_dotenv()
-
-conn = psycopg2.connect(
-    host="localhost",
-    port=int(os.environ["PG16_PORT"]),
-    dbname=os.environ["PG_DB"],
-    user="myuser",
-    password=os.environ["PG_PASSWORD"],
-)
-
-# Run ANALYZE first so pg_stats is populated
-conn.cursor().execute("ANALYZE;")
-conn.commit()
-
-tables = parse_ddl(open("schema.sql").read(), dialect="postgres")
-dump_schema(tables, "schema.yaml")
-
-stats = [collect_table_stats(conn, t.name, dialect="postgres", schema="public")
-         for t in tables]
-dump_stats(DatabaseStats(tables=stats), "stats.yaml")
-```
-
-> `collect_table_stats` reads `pg_stats` (richer MCVs and histogram bounds) in
-> addition to standard SQL aggregates when the dialect is `"postgres"`.
+The three sections below cover **SQL Server**, **Oracle**, and **Db2** — the databases where the DDL export tooling is least obvious.
 
 ---
 
@@ -1062,17 +1043,9 @@ dump_stats(DatabaseStats(tables=stats), "stats.yaml")
 
 ### Oracle
 
-Add Oracle credentials to `.env`:
 ```bash
-# .env additions for Oracle
-ORACLE_USER=myuser
-ORACLE_PASS=mypassword
-ORACLE_DSN=localhost:1521/XEPDB1
-ORACLE_SCHEMA=MYSCHEMA
-```
-
-```bash
-# DDL export via SQL*Plus (dbms_metadata)
+# DDL export via SQL*Plus (dbms_metadata) — no data, schema only
+# Credentials from .env: ORACLE_USER, ORACLE_PASS, ORACLE_DSN, ORACLE_SCHEMA
 source .env
 sqlplus "$ORACLE_USER/$ORACLE_PASS@//$ORACLE_DSN" <<'EOF'
 SET PAGESIZE 0 LONG 99999 FEEDBACK OFF
@@ -1095,9 +1068,9 @@ conn = oracledb.connect(
     dsn=os.environ["ORACLE_DSN"],
 )
 
-# Gather fresh statistics
+# Gather fresh statistics before collecting
 conn.cursor().execute(
-    f"BEGIN dbms_stats.gather_schema_stats('{os.environ[\"ORACLE_SCHEMA\"]}'); END;"
+    f"BEGIN dbms_stats.gather_schema_stats('{os.environ['ORACLE_SCHEMA']}'); END;"
 )
 
 tables = parse_ddl(open("schema.sql").read(), dialect="oracle")
@@ -1111,168 +1084,69 @@ dump_stats(DatabaseStats(tables=stats), "stats.yaml")
 
 ---
 
-### Databricks
+### Db2
 
-Add Databricks credentials to `.env` (already present in `.env.example`):
-```bash
-# .env — already included in .env.example
-DATABRICKS_WORKSPACE_URL=https://<workspace>.cloud.databricks.com
-CLIENT_ID=<service_principal_application_id>
-CLIENT_SECRET=<service_principal_secret>
-# Unity Catalog coordinates for the table to export
-DATABRICKS_CATALOG=main
-DATABRICKS_SCHEMA=myschema
-DATABRICKS_TABLE=orders
-```
+Db2 has no native `arm64` image; it runs inside a Lima VM on Apple Silicon.
+See [`docs/databases/db2.md`](docs/databases/db2.md) for VM setup (`limactl start --name=db2 config/lima/db2.yaml`).
 
 ```bash
-# DDL export via Databricks CLI
-# pip install databricks-cli && databricks configure
-source .env
-databricks sql execute \
-  --profile DEFAULT \
-  "SHOW CREATE TABLE ${DATABRICKS_CATALOG}.${DATABRICKS_SCHEMA}.${DATABRICKS_TABLE}" \
-  > schema.sql
+# DDL export via db2look (runs inside the Lima VM)
+# Credentials from .env: DB2_PASS, DB2_PORT (default 50000)
+limactl shell db2 -- su - db2inst1 -c \
+  "db2look -d testdb -e -a -o /tmp/schema.sql && cat /tmp/schema.sql" > schema.sql
 ```
 
 ```python
-import os
+import os, ibm_db_dbi
 from dotenv import load_dotenv
-from databricks.connect import DatabricksSession
-from databricks import sql as dbsql
 from src.statschema import parse_ddl, dump_schema, collect_table_stats, dump_stats, DatabaseStats
 
 load_dotenv()
 
-catalog = os.environ["DATABRICKS_CATALOG"]
-schema  = os.environ["DATABRICKS_SCHEMA"]
-table   = os.environ["DATABRICKS_TABLE"]
-host    = os.environ["DATABRICKS_WORKSPACE_URL"].removeprefix("https://")
+dsn = (
+    f"DATABASE=testdb;HOSTNAME=127.0.0.1;"
+    f"PORT={os.environ.get('DB2_PORT', '50000')};"
+    f"PROTOCOL=TCPIP;UID=db2inst1;PWD={os.environ['DB2_PASS']};"
+)
+conn = ibm_db_dbi.connect(dsn, "", "")
 
-spark = DatabricksSession.builder.getOrCreate()
+# Gather fresh column statistics before collecting
+cur = conn.cursor()
+cur.execute("CALL SYSPROC.ADMIN_CMD('RUNSTATS ON TABLE db2inst1.ORDERS WITH DISTRIBUTION')")
+conn.commit()
 
-# Extract DDL and run ANALYZE for column-level statistics
-full_name = f"{catalog}.{schema}.{table}"
-ddl = spark.sql(f"SHOW CREATE TABLE {full_name}").collect()[0][0]
-spark.sql(f"ANALYZE TABLE {full_name} COMPUTE STATISTICS FOR ALL COLUMNS")
-
-tables = parse_ddl(ddl, dialect="databricks")
+tables = parse_ddl(open("schema.sql").read(), dialect="db2")
 dump_schema(tables, "schema.yaml")
 
-# Collect stats via the Databricks SQL connector
-# pip install databricks-sql-connector
-conn = dbsql.connect(
-    server_hostname=host,
-    http_path=os.environ.get("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/…"),
-    access_token=os.environ.get("CLIENT_SECRET"),
-)
-stats = [collect_table_stats(conn, t.name, dialect="databricks",
-                              schema=schema, catalog=catalog)
+stats = [collect_table_stats(conn, t.name, dialect="db2", schema="DB2INST1")
          for t in tables]
 dump_stats(DatabaseStats(tables=stats), "stats.yaml")
 ```
 
 ---
 
-### Databricks Lakebase
-
-Lakebase is Databricks' managed Postgres service. It uses the PostgreSQL wire protocol, so all DDL emission, schema collection, and stats injection work through the existing `postgres` dialect code with no changes. The only difference from plain Postgres is that passwords are replaced by short-lived OAuth tokens generated by the Databricks SDK.
-
-**Prerequisites**: a running Lakebase endpoint (see `scripts/lakebase-up.sh` below) and workspace auth configured in `~/.databrickscfg`.
-
-```bash
-# Spin up the smallest Lakebase endpoint and write connection details to .env.
-# Idempotent: re-enables an existing disabled endpoint if already created.
-./scripts/lakebase-up.sh
-
-# Or use the Makefile shortcut:
-make lakebase-up
-```
-
-Add Lakebase credentials to `.env`:
-```bash
-# Written automatically by scripts/lakebase-up.sh
-STATSCHEMA_LAKEBASE_ENDPOINT=projects/<proj>/branches/<branch>/endpoints/<ep>
-STATSCHEMA_LAKEBASE_HOST=<ep>.database.<region>.cloud.databricks.com
-STATSCHEMA_LAKEBASE_DB=databricks_postgres
-STATSCHEMA_LAKEBASE_USER=<service-principal-client-id-or-user-email>
-```
-
-Workspace auth is read by the Databricks SDK from environment variables or `~/.databrickscfg`:
-```bash
-# Service principal (CI/CD)
-export DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
-export DATABRICKS_CLIENT_ID=<sp-client-id>
-export DATABRICKS_CLIENT_SECRET=<sp-oauth-secret>
-
-# Interactive (browser-based OAuth configured with 'databricks auth login')
-# No additional env vars needed — SDK picks up ~/.databrickscfg DEFAULT profile
-```
-
-```bash
-# Collect DDL and stats via CLI (prompts for any missing values)
-statschema collect --dialect lakebase \
-    --endpoint "$STATSCHEMA_LAKEBASE_ENDPOINT" \
-    --host "$STATSCHEMA_LAKEBASE_HOST" \
-    --user "$STATSCHEMA_LAKEBASE_USER" \
-    --catalog databricks_postgres --schema public --tables '%'
-```
-
-```python
-import os
-from dotenv import load_dotenv
-from databricks.sdk import WorkspaceClient
-import psycopg2
-from src.statschema import dump_schema, collect_table_stats, dump_stats, DatabaseStats
-
-load_dotenv()
-
-# OAuth token is generated fresh on each connection (60-minute lifetime).
-w = WorkspaceClient()
-creds = w.postgres.generate_database_credential(
-    endpoint=os.environ["STATSCHEMA_LAKEBASE_ENDPOINT"]
-)
-conn = psycopg2.connect(
-    host=os.environ["STATSCHEMA_LAKEBASE_HOST"],
-    port=5432,
-    dbname=os.environ.get("STATSCHEMA_LAKEBASE_DB", "databricks_postgres"),
-    user=os.environ["STATSCHEMA_LAKEBASE_USER"],
-    password=creds.token,
-    sslmode="require",
-)
-
-tables = ["orders", "order_details"]
-stats = [collect_table_stats(conn, t, dialect="postgres", schema="public") for t in tables]
-dump_stats(DatabaseStats(tables=stats), "lakebase_stats.yaml")
-```
-
-> **Teardown**: `make lakebase-down` disables the endpoint (IDLE state, zero compute cost, data preserved).
-> `make lakebase-destroy` permanently deletes the entire project.
-> The endpoint is re-enabled automatically on the next `make lakebase-up` or `make test-live-lakebase` run.
-
----
-
 ### Using saved YAML files
 
-Once `schema.yaml` and `stats.yaml` are on disk they can be used without any
-database connection:
+Once `schema.yaml` and `stats.yaml` are on disk they drive all downstream
+steps without any database connection:
 
 ```python
-from src.statschema import load_canonical, load_stats, emit_ddl, build_dataframe_from_canonical
+from src.statschema import load_canonical, load_stats, emit_ddl, build_rows_from_canonical
 
-tables    = load_canonical("schema.yaml")
-db_stats  = load_stats("stats.yaml")
+tables   = load_canonical("schema.yaml")
+db_stats = load_stats("stats.yaml")
 
-# Emit DDL for any target
+# Emit DDL for any target dialect
 print(emit_ddl(tables[0], "postgres"))
+print(emit_ddl(tables[0], "lakebase"))
 print(emit_ddl(tables[0], "databricks"))
 
-# Generate synthetic data
-df = build_dataframe_from_canonical(spark, tables[0], rows=100_000,
-                                    stats=db_stats.tables[0])
+# Generate synthetic data — no Spark required
+df = build_rows_from_canonical(tables[0], rows=100_000,
+                               stats=db_stats.tables[0])
+df.to_sql(tables[0].name, engine, if_exists="replace", index=False)
 ```
 
----
 
 ## Stats transpiler — the database migration use case
 
@@ -1550,6 +1424,23 @@ dbldatagen) and is only needed when generating large datasets in a Databricks en
 
 ---
 
+## Real-world migration evidence
+
+[`docs/learnings/oltp-migration-analysis.md`](docs/learnings/oltp-migration-analysis.md) analyses five documented migrations drawn from Hacker News, Reddit, AWS blogs, and migration consultants (2023–2026): SQL Server → PostgreSQL, MySQL → PostgreSQL, Oracle → PostgreSQL, MySQL → Aurora, and SQLite → Neon.
+
+Every migration hit the same four phases where time was lost. statschema's impact on each:
+
+| Evaluation cycle phase | Typical delay | statschema impact | Command |
+|------------------------|--------------|-------------------|---------|
+| Waiting for sanitized production data copy | **4–12 weeks** — GDPR/HIPAA legal review | **Eliminates** — only DDL + statistics (no row values) cross boundaries | `statschema collect` + `statschema generate` |
+| Schema type-conversion errors found late | Days–weeks of debugging failed loads | **Eliminates** — `MONEY`→`NUMERIC`, `DATETIME`→`TIMESTAMP`, `NVARCHAR`→`VARCHAR` visible at parse time | `statschema ddl --dialect postgres` |
+| Optimizer-blind period post-migration | 1–4 weeks diagnosing "slow target" | **Eliminates** — production-representative statistics injected before first evaluation query | `collect_table_stats` + `inject_stats_postgres` |
+| Performance tests at wrong scale | Misses crossovers only visible at production volume | **Shortens** — any scale factor from one YAML | `statschema load --sf 10` |
+
+Where statschema does **not** help: stored procedure rewriting (T-SQL→PL/pgSQL, PL/SQL→PL/pgSQL), network/infrastructure latency, zero-downtime cutover mechanics (CDC, dual-write), ETL pipeline correctness (AWS DMS defects), and ORM query generation differences. Full analysis with commands and worked examples in the document.
+
+---
+
 ## Documentation
 
 > Full documentation map with hierarchy: [`docs/toc.md`](docs/toc.md)
@@ -1593,7 +1484,7 @@ dbldatagen) and is only needed when generating large datasets in a Databricks en
 | [`docs/testing.md`](docs/testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
 | [`docs/test_plan_ddl_roundtrip.md`](docs/test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
 | [`docs/learnings/README.md`](docs/learnings/README.md) | Learnings index: gotchas and decisions captured while building statschema |
-| [`docs/learnings/oltp-migration-analysis.md`](docs/learnings/oltp-migration-analysis.md) | OLTP migration analysis: Northwind, Sakila, Django Auth, WordPress, Chinook |
+| [`docs/learnings/oltp-migration-analysis.md`](docs/learnings/oltp-migration-analysis.md) | **Real-world OLTP migration analysis** — five documented migrations (SQL Server → PostgreSQL, MySQL → PostgreSQL, Oracle → PostgreSQL, MySQL → Aurora, SQLite → Neon) with concrete evidence for where statschema eliminates or shortens each phase of the evaluation cycle, and where it does not help (stored procedures, network latency, CDC cutover, ETL correctness) |
 
 ### Database setup
 

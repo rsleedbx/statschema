@@ -1,20 +1,20 @@
 # Learnings
 
-This directory is for **project learnings**: notes, gotchas, and decisions captured while building and running **statschema** (DDL/stats transpiler and synthetic data pipeline).
+Research and analysis captured while building and evaluating statschema.
 
-## Purpose
+## Documents
 
-- Record what worked and what didn’t (dbldatagen, Protobuf, Databricks Connect, Delta writes).
-- Capture scaling observations (tables, columns, types, row volume).
-- Document decisions and trade-offs for future reference.
+### [`oltp-migration-analysis.md`](oltp-migration-analysis.md) — Real-world OLTP migration analysis
 
-## How to use
+**The most important document in this directory.** Analyzes five documented migrations (SQL Server → PostgreSQL, MySQL → PostgreSQL, Oracle → PostgreSQL, MySQL → Aurora, SQLite → Neon) drawn from Hacker News, Reddit, AWS blogs, and migration consultants (2023–2026).
 
-- Add new files or sections as you go (e.g. `phase1.md`, `connect-setup.md`, `scaling-runs.md`).
-- Or append to a single `learnings.md` with dated entries.
+Covers four phases where migration teams lose time and statschema's concrete impact on each:
 
-## Related docs
+1. **Production data copy blocker** — GDPR/HIPAA compliance review takes 4–12 weeks. statschema eliminates the dependency entirely: only DDL and column statistics (no row values) cross system boundaries.
+2. **Schema conversion errors found late** — type mismatches (`MONEY` → `NUMERIC`, `DATETIME` → `TIMESTAMP`, `NVARCHAR` → `VARCHAR`) are visible at DDL parse time, before any data is loaded. Includes a worked `diff` of SQL Server vs PostgreSQL DDL for the Northwind schema.
+3. **Optimizer-blind period post-migration** — the target has an empty `pg_statistic` table; autovacuum fills it only after real traffic. `inject_stats_postgres` injects production-representative statistics at cutover so `EXPLAIN` plans are meaningful from day one.
+4. **Performance tests at wrong scale** — testing at 10% volume missed index scan vs. hash join crossover in a 400M-row migration. `statschema load --sf 10` generates at any scale factor from one YAML.
 
-- [../plan.md](../plan.md) – Goals and scaling dimensions
-- [../implementation.md](../implementation.md) – Build and SDK usage
-- [../testing.md](../testing.md) – Test strategy by phase
+Also documents **where statschema does not help**: stored procedure rewriting, network latency, zero-downtime cutover mechanics, ETL pipeline correctness, and ORM query generation differences.
+
+The summary table (bottom of the file) maps every evaluation cycle phase to a statschema command or explicit "no impact."
