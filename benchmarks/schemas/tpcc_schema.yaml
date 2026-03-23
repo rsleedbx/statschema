@@ -71,10 +71,10 @@ tables:
         type: integer
         not_null: true
         primary_key: true
-        description: "Warehouse identifier"
+        description: "Warehouse identifier (0-indexed, per CockroachDB workload convention)"
         generation:
           distribution: sequential
-          min_value: 1
+          min_value: 0
           unique: true
       - name: w_name
         type: string
@@ -148,14 +148,18 @@ tables:
         primary_key: true
         description: "District identifier within warehouse (1–10)"
         generation:
+          distribution: cyclic
           min_value: 1
           max_value: 10
-          distribution: uniform
       - name: d_w_id
         type: integer
         not_null: true
         primary_key: true
         description: "Warehouse identifier (FK → warehouse.w_id)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 10}
       - name: d_name
         type: string
         length: 10
@@ -238,19 +242,27 @@ tables:
         primary_key: true
         description: "Customer identifier within district (1–3 000)"
         generation:
+          distribution: cyclic
           min_value: 1
           max_value: 3000
-          distribution: uniform
       - name: c_d_id
         type: integer
         not_null: true
         primary_key: true
         description: "District identifier (FK → district.d_id)"
+        generation:
+          distribution: block
+          min_value: 1
+          distribution_params: {block_size: 3000}
       - name: c_w_id
         type: integer
         not_null: true
         primary_key: true
         description: "Warehouse identifier (FK → district.d_w_id)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 30000}
       - name: c_first
         type: string
         length: 16
@@ -272,7 +284,7 @@ tables:
         not_null: true
         description: "Customer last name (TPC-C syllable encoding)"
         generation:
-          format_pattern: "name_last"
+          format_pattern: "tpcc_last_name"
       - name: c_street_1
         type: string
         length: 20
@@ -413,7 +425,10 @@ tables:
         type: integer
         not_null: true
         description: "Warehouse identifier"
-        references: [warehouse, w_id]
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 30000}
       - name: h_date
         type: timestamp
         not_null: true
@@ -455,24 +470,35 @@ tables:
         primary_key: true
         description: "Order identifier within district (1–3 000)"
         generation:
+          distribution: cyclic
           min_value: 1
           max_value: 3000
-          distribution: uniform
       - name: o_d_id
         type: integer
         not_null: true
         primary_key: true
         description: "District identifier (FK → district)"
+        generation:
+          distribution: block
+          min_value: 1
+          distribution_params: {block_size: 3000}
       - name: o_w_id
         type: integer
         not_null: true
         primary_key: true
         description: "Warehouse identifier (FK → district)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 30000}
       - name: o_c_id
         type: integer
         not_null: true
         description: "Customer identifier (FK → customer.c_id)"
-        references: [customer, c_id]
+        generation:
+          distribution: cyclic
+          min_value: 1
+          max_value: 3000
       - name: o_entry_d
         type: timestamp
         not_null: true
@@ -487,11 +513,11 @@ tables:
       - name: o_ol_cnt
         type: integer
         not_null: true
-        description: "Number of order lines (5–15)"
+        description: "Number of order lines (10, matching order_line block_size)"
         generation:
-          min_value: 5
-          max_value: 15
-          distribution: uniform
+          min_value: 10
+          max_value: 10
+          distribution: constant
       - name: o_all_local
         type: integer
         not_null: true
@@ -519,19 +545,27 @@ tables:
         primary_key: true
         description: "Order identifier (2 101–3 000 per district)"
         generation:
+          distribution: cyclic
           min_value: 2101
           max_value: 3000
-          distribution: uniform
       - name: no_d_id
         type: integer
         not_null: true
         primary_key: true
         description: "District identifier (FK → district)"
+        generation:
+          distribution: block
+          min_value: 1
+          distribution_params: {block_size: 900}
       - name: no_w_id
         type: integer
         not_null: true
         primary_key: true
         description: "Warehouse identifier (FK → district)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 9000}
 
   # ── order_line ────────────────────────────────────────────────────────────
   # Average 10 lines per order → 300,000 * SF total.
@@ -553,25 +587,37 @@ tables:
         not_null: true
         primary_key: true
         description: "Order identifier (FK → orders)"
+        generation:
+          distribution: block_cyclic
+          min_value: 1
+          distribution_params: {block_size: 10, cycle: 3000}
       - name: ol_d_id
         type: integer
         not_null: true
         primary_key: true
         description: "District identifier (FK → orders)"
+        generation:
+          distribution: block
+          min_value: 1
+          distribution_params: {block_size: 30000}
       - name: ol_w_id
         type: integer
         not_null: true
         primary_key: true
         description: "Warehouse identifier (FK → orders)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 300000}
       - name: ol_number
         type: integer
         not_null: true
         primary_key: true
-        description: "Line number within order (1–15)"
+        description: "Line number within order (1–10)"
         generation:
+          distribution: cyclic
           min_value: 1
-          max_value: 15
-          distribution: uniform
+          max_value: 10
       - name: ol_i_id
         type: integer
         not_null: true
@@ -580,8 +626,11 @@ tables:
       - name: ol_supply_w_id
         type: integer
         not_null: true
-        description: "Supply warehouse identifier"
-        references: [warehouse, w_id]
+        description: "Supply warehouse identifier (home warehouse in initial load)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 300000}
       - name: ol_delivery_d
         type: timestamp
         description: "Delivery date (NULL for new orders)"
@@ -628,11 +677,19 @@ tables:
         primary_key: true
         description: "Item identifier (FK → item.i_id)"
         references: [item, i_id]
+        generation:
+          distribution: cyclic
+          min_value: 1
+          max_value: 100000
       - name: s_w_id
         type: integer
         not_null: true
         primary_key: true
         description: "Warehouse identifier (FK → warehouse.w_id)"
+        generation:
+          distribution: block
+          min_value: 0
+          distribution_params: {block_size: 100000}
       - name: s_quantity
         type: integer
         not_null: true

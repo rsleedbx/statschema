@@ -29,18 +29,28 @@ class GenerationRule:
         How values are sampled.  One of:
           "auto"         Let the builder decide based on type and stats (default).
           "uniform"      Equal probability across the range [min_value, max_value].
-          "normal"       Gaussian with mean / std from distribution_params.
-          "zipf"         Power-law / Zipf; use for high-cardinality categoricals.
-                         distribution_params: {"a": 1.5}  (exponent; 1.0 = classic Zipf)
+          "normal"       Gaussian clamped to [min_value, max_value].
+                         distribution_params: {"mean": 150000.0, "std": 80000.0}
+          "zipf"         Power-law / Zipf on integers [min_value, max_value].
+                         Lower-numbered values are most frequent.
+                         distribution_params: {"exponent": 1.5}  (> 1; higher = more skewed)
           "exponential"  Exponential decay; use for inter-arrival times, ages.
                          distribution_params: {"scale": 1.0}  (1/λ)
           "constant"     All rows get the same value (set via ``values[0]``).
           "sequential"   Monotonically increasing integers/dates; use for PK columns.
+          "cyclic"       Cycles min_value..max_value, repeating every (max-min+1) rows.
+                         Use for per-parent IDs: c_id 1..3000 restarts for each district.
+          "block"        Increments min_value by 1 every ``block_size`` rows (set via
+                         distribution_params: {block_size: N}).  Use for parent-group
+                         columns: c_d_id = 1 for rows 0..2999, 2 for rows 3000..5999.
+          "block_cyclic" Cyclic in block-sized steps: base + (row//block_size) % cycle.
+                         distribution_params: {block_size: 10, cycle: 3000}.
+                         Use for order_line ol_o_id (10 lines per order, cycles 1..3000).
 
     distribution_params
         Free-form dict of distribution-specific parameters, e.g.
         ``{"mean": 50.0, "std": 15.0}`` for "normal",
-        ``{"a": 1.2}`` for "zipf".
+        ``{"exponent": 1.2}`` for "zipf".
 
     format_pattern
         Hint for realistic string value generation.  Either a named pattern or a

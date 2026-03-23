@@ -95,6 +95,7 @@ from .model import (
     expand_table_instances,
 )
 from .schema_io import dump_schema, load_canonical, resolve_load_order, resolve_row_counts
+from .schema_transforms import rename_tables, parse_table_map, TABLE_NAME_PRESETS
 from .ydata_parser import parse_ydata_yaml, parse_ydata_yaml_file, parse_ydata_multi_yaml
 from .pipeline_parser import parse_pipeline_tables, parse_pipeline_config
 from .sdv_parser import parse_sdv_metadata, parse_sdv_file
@@ -170,6 +171,10 @@ __all__ = [
     "load_canonical",
     "resolve_load_order",
     "resolve_row_counts",
+    # Table-name rename transform (canonical → client-driver conventions)
+    "rename_tables",
+    "parse_table_map",
+    "TABLE_NAME_PRESETS",
     # Parsers (source → canonical)
     "parse_ydata_yaml",
     "parse_ydata_yaml_file",

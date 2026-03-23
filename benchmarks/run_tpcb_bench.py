@@ -23,6 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 from benchmarks.run_all_bench import TARGETS, DbTarget, probe
 from benchmarks.run_bench import run_benchmark, connect, RESULTS_DIR
 from src.statschema.data_loader import LoadStrategy
+from src.statschema.schema_transforms import TABLE_NAME_PRESETS
 
 # ── Scale factors ────────────────────────────────────────────────────────────
 # SF=1 → 200,011 rows (branch=1, teller=10, account=100K, history=100K)
@@ -153,11 +154,19 @@ def _run_pgbench(target: DbTarget, clients: int = 4, txns: int = 500) -> str:
 def run_one(target: DbTarget, sf: float, append: bool = False) -> BenchResult:
     saved = {k: os.environ.get(k) for k in target.env}
     os.environ.update(target.env)
+    # Apply pgbench preset for PostgreSQL-family databases so that tables are
+    # named pgbench_branches/tellers/accounts/history — required for pgbench
+    # to run its transaction mix.  Non-Postgres dialects keep canonical names.
+    table_map = (
+        TABLE_NAME_PRESETS["pgbench"]
+        if target.dialect in ("postgres", "cockroachdb", "neon")
+        else None
+    )
     try:
         result = run_benchmark(
             schema="tpcb", sf=sf, dialect=target.dialect,
             strategy=target.strategy, out_dir=RESULTS_DIR,
-            seed=42, append=append,
+            seed=42, append=append, table_map=table_map,
         )
         totals = result["totals"]
         return BenchResult(

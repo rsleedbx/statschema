@@ -252,7 +252,70 @@ tables:
         type: string
         length: 25
         not_null: true
-        description: "Part type (syllable-encoded, e.g. 'STANDARD ANODIZED TIN')"
+        description: "Part type — 3-word phrase from dists.dss (5 sizes × 5 finishes × 6 materials = 150 values)"
+        generation:
+          values: [
+            "STANDARD ANODIZED TIN", "STANDARD ANODIZED NICKEL", "STANDARD ANODIZED BRASS",
+            "STANDARD ANODIZED STEEL", "STANDARD ANODIZED COPPER",
+            "STANDARD BURNISHED TIN", "STANDARD BURNISHED NICKEL", "STANDARD BURNISHED BRASS",
+            "STANDARD BURNISHED STEEL", "STANDARD BURNISHED COPPER",
+            "STANDARD PLATED TIN", "STANDARD PLATED NICKEL", "STANDARD PLATED BRASS",
+            "STANDARD PLATED STEEL", "STANDARD PLATED COPPER",
+            "STANDARD POLISHED TIN", "STANDARD POLISHED NICKEL", "STANDARD POLISHED BRASS",
+            "STANDARD POLISHED STEEL", "STANDARD POLISHED COPPER",
+            "STANDARD BRUSHED TIN", "STANDARD BRUSHED NICKEL", "STANDARD BRUSHED BRASS",
+            "STANDARD BRUSHED STEEL", "STANDARD BRUSHED COPPER",
+            "SMALL ANODIZED TIN", "SMALL ANODIZED NICKEL", "SMALL ANODIZED BRASS",
+            "SMALL ANODIZED STEEL", "SMALL ANODIZED COPPER",
+            "SMALL BURNISHED TIN", "SMALL BURNISHED NICKEL", "SMALL BURNISHED BRASS",
+            "SMALL BURNISHED STEEL", "SMALL BURNISHED COPPER",
+            "SMALL PLATED TIN", "SMALL PLATED NICKEL", "SMALL PLATED BRASS",
+            "SMALL PLATED STEEL", "SMALL PLATED COPPER",
+            "SMALL POLISHED TIN", "SMALL POLISHED NICKEL", "SMALL POLISHED BRASS",
+            "SMALL POLISHED STEEL", "SMALL POLISHED COPPER",
+            "SMALL BRUSHED TIN", "SMALL BRUSHED NICKEL", "SMALL BRUSHED BRASS",
+            "SMALL BRUSHED STEEL", "SMALL BRUSHED COPPER",
+            "MEDIUM ANODIZED TIN", "MEDIUM ANODIZED NICKEL", "MEDIUM ANODIZED BRASS",
+            "MEDIUM ANODIZED STEEL", "MEDIUM ANODIZED COPPER",
+            "MEDIUM BURNISHED TIN", "MEDIUM BURNISHED NICKEL", "MEDIUM BURNISHED BRASS",
+            "MEDIUM BURNISHED STEEL", "MEDIUM BURNISHED COPPER",
+            "MEDIUM PLATED TIN", "MEDIUM PLATED NICKEL", "MEDIUM PLATED BRASS",
+            "MEDIUM PLATED STEEL", "MEDIUM PLATED COPPER",
+            "MEDIUM POLISHED TIN", "MEDIUM POLISHED NICKEL", "MEDIUM POLISHED BRASS",
+            "MEDIUM POLISHED STEEL", "MEDIUM POLISHED COPPER",
+            "MEDIUM BRUSHED TIN", "MEDIUM BRUSHED NICKEL", "MEDIUM BRUSHED BRASS",
+            "MEDIUM BRUSHED STEEL", "MEDIUM BRUSHED COPPER",
+            "LARGE ANODIZED TIN", "LARGE ANODIZED NICKEL", "LARGE ANODIZED BRASS",
+            "LARGE ANODIZED STEEL", "LARGE ANODIZED COPPER",
+            "LARGE BURNISHED TIN", "LARGE BURNISHED NICKEL", "LARGE BURNISHED BRASS",
+            "LARGE BURNISHED STEEL", "LARGE BURNISHED COPPER",
+            "LARGE PLATED TIN", "LARGE PLATED NICKEL", "LARGE PLATED BRASS",
+            "LARGE PLATED STEEL", "LARGE PLATED COPPER",
+            "LARGE POLISHED TIN", "LARGE POLISHED NICKEL", "LARGE POLISHED BRASS",
+            "LARGE POLISHED STEEL", "LARGE POLISHED COPPER",
+            "LARGE BRUSHED TIN", "LARGE BRUSHED NICKEL", "LARGE BRUSHED BRASS",
+            "LARGE BRUSHED STEEL", "LARGE BRUSHED COPPER",
+            "ECONOMY ANODIZED TIN", "ECONOMY ANODIZED NICKEL", "ECONOMY ANODIZED BRASS",
+            "ECONOMY ANODIZED STEEL", "ECONOMY ANODIZED COPPER",
+            "ECONOMY BURNISHED TIN", "ECONOMY BURNISHED NICKEL", "ECONOMY BURNISHED BRASS",
+            "ECONOMY BURNISHED STEEL", "ECONOMY BURNISHED COPPER",
+            "ECONOMY PLATED TIN", "ECONOMY PLATED NICKEL", "ECONOMY PLATED BRASS",
+            "ECONOMY PLATED STEEL", "ECONOMY PLATED COPPER",
+            "ECONOMY POLISHED TIN", "ECONOMY POLISHED NICKEL", "ECONOMY POLISHED BRASS",
+            "ECONOMY POLISHED STEEL", "ECONOMY POLISHED COPPER",
+            "ECONOMY BRUSHED TIN", "ECONOMY BRUSHED NICKEL", "ECONOMY BRUSHED BRASS",
+            "ECONOMY BRUSHED STEEL", "ECONOMY BRUSHED COPPER",
+            "PROMO ANODIZED TIN", "PROMO ANODIZED NICKEL", "PROMO ANODIZED BRASS",
+            "PROMO ANODIZED STEEL", "PROMO ANODIZED COPPER",
+            "PROMO BURNISHED TIN", "PROMO BURNISHED NICKEL", "PROMO BURNISHED BRASS",
+            "PROMO BURNISHED STEEL", "PROMO BURNISHED COPPER",
+            "PROMO PLATED TIN", "PROMO PLATED NICKEL", "PROMO PLATED BRASS",
+            "PROMO PLATED STEEL", "PROMO PLATED COPPER",
+            "PROMO POLISHED TIN", "PROMO POLISHED NICKEL", "PROMO POLISHED BRASS",
+            "PROMO POLISHED STEEL", "PROMO POLISHED COPPER",
+            "PROMO BRUSHED TIN", "PROMO BRUSHED NICKEL", "PROMO BRUSHED BRASS",
+            "PROMO BRUSHED STEEL", "PROMO BRUSHED COPPER"
+          ]
       - name: p_size
         type: integer
         not_null: true
@@ -265,13 +328,15 @@ tables:
         type: string
         length: 10
         not_null: true
-        description: "Container type"
+        description: "Container type — 40 values from dists.dss (5 sizes × 8 container types)"
         generation:
-          values: ["SM CASE", "SM BOX", "SM PKG", "SM PACK",
-                   "MED BAG", "MED BOX", "MED PKG", "MED PACK",
-                   "LG CASE", "LG BOX", "LG PKG", "LG PACK",
-                   "JUMBO BAG", "JUMBO BOX", "JUMBO PKG", "JUMBO PACK",
-                   "WRAP CASE", "WRAP BOX", "WRAP PKG", "WRAP PACK"]
+          values: [
+            "SM CASE", "SM BOX", "SM BAG", "SM JAR", "SM PACK", "SM PKG", "SM CAN", "SM DRUM",
+            "LG CASE", "LG BOX", "LG BAG", "LG JAR", "LG PACK", "LG PKG", "LG CAN", "LG DRUM",
+            "MED CASE", "MED BOX", "MED BAG", "MED JAR", "MED PACK", "MED PKG", "MED CAN", "MED DRUM",
+            "JUMBO CASE", "JUMBO BOX", "JUMBO BAG", "JUMBO JAR", "JUMBO PACK", "JUMBO PKG", "JUMBO CAN", "JUMBO DRUM",
+            "WRAP CASE", "WRAP BOX", "WRAP BAG", "WRAP JAR", "WRAP PACK", "WRAP PKG", "WRAP CAN", "WRAP DRUM"
+          ]
       - name: p_retailprice
         type: decimal
         precision: 15
@@ -428,6 +493,12 @@ tables:
   # ── lineitem ──────────────────────────────────────────────────────────────
   # Average 4 line items per order → 6,000,000 per SF.
   # Temporal constraint: l_shipdate <= l_receiptdate (enforced post-generation).
+  #
+  # Skew control — change fk_distribution on fk_lineitem_orders:
+  #   fk_distribution: uniform                              # standard TPC-H
+  #   fk_distribution: zipf                                 # TPCDSkew-style skew
+  #   fk_distribution_params: {exponent: 4.0}              # higher = more skew
+  # The exponent maps roughly to the -z flag of Microsoft's TPCDSkew dbgen.
   - name: lineitem
     description: "TPC-H line items — avg 4 per order, 6 000 000 per SF"
     row_count_per_sf: 6000000
@@ -439,7 +510,7 @@ tables:
         parent_table: orders
         parent_columns: [o_orderkey]
         name: fk_lineitem_orders
-        fk_distribution: uniform
+        fk_distribution: uniform          # set to zipf + fk_distribution_params: {exponent: 4.0} for skew
         fk_children_min: 1
         fk_children_max: 7
       - columns: [l_partkey, l_suppkey]

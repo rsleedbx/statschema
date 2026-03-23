@@ -78,6 +78,17 @@ def _fmt_name_last(rng: random.Random) -> str:
     return rng.choice(_last)
 
 
+_TPCC_SYLLABLES = (
+    "BAR", "OUGHT", "ABLE", "PRI", "PRES", "ESE", "ANTI", "CALLY", "ATION", "EING"
+)
+
+
+def _tpcc_make_last_name(n: int) -> str:
+    """0..999 → TPC-C three-syllable last name (e.g. 0 → 'BARBARBAR', 105 → 'ABLEOUGHTPRES')."""
+    s = _TPCC_SYLLABLES
+    return s[n // 100] + s[(n // 10) % 10] + s[n % 10]
+
+
 def _fmt_address(rng: random.Random) -> str:
     return (
         f"{rng.randint(1, 9999)} "
@@ -103,6 +114,34 @@ _FORMAT_PATTERN_FN = {
     "address":     _fmt_address,
     "city":        _fmt_city,
 }
+
+
+# ---------------------------------------------------------------------------
+# Zipf sampler (no third-party libs)
+# ---------------------------------------------------------------------------
+
+def _zipf_sample(rng: random.Random, a: float, n: int) -> int:
+    """Return one integer from the discrete Zipf distribution on [1, n].
+
+    Uses Devroye's (1986) rejection method for the zeta distribution.
+    P(k) ∝ 1/k^a.  Requires a > 1.  For a ≤ 1 falls back to uniform.
+
+    The expected number of iterations is O(1) for moderate exponents.
+    """
+    if a <= 1.001 or n <= 1:
+        return rng.randint(1, max(1, n))
+    b = 2.0 ** (a - 1.0)
+    while True:
+        u = 1.0 - rng.random()          # (0, 1]
+        v = 1.0 - rng.random()
+        x = int(u ** (-1.0 / (a - 1.0)))
+        if x < 1:
+            x = 1
+        if x > n:
+            continue
+        t = (1.0 + 1.0 / x) ** (a - 1.0)
+        if v * x * (t - 1.0) * b <= t * (b - 1.0):
+            return x
 
 
 # ---------------------------------------------------------------------------
@@ -132,13 +171,21 @@ def _gen_value(
     row_idx: int,
     rng: random.Random,
     row_offset: int = 0,
+    fk_dist: str = "uniform",
+    fk_params: dict | None = None,
 ) -> Any:
     """Generate a single value for *col* at row index *row_idx*.
 
     *row_offset* shifts sequential counters so that an append run continues
     from where a previous run ended without PK collisions.
+
+    *fk_dist* / *fk_params* control the FK sampling distribution for this
+    column when *fk_max* is set.  Supported values: ``"uniform"`` (default),
+    ``"zipf"`` (power-law; params: ``{exponent: 1.2}``).
     """
     ctype = col.type.lower().strip()
+    if fk_params is None:
+        fk_params = {}
 
     # ── 1. Sequential ───────────────────────────────────────────────────────
     if g is not None and g.distribution == "sequential":
@@ -159,6 +206,59 @@ def _gen_value(
             return rng.choices(g.values, weights=g.weights, k=1)[0]
         return rng.choice(g.values)
 
+    # ── 1b. Cyclic — cycles min_value..max_value for every row ───────────────
+    # Useful for IDs that restart per parent block, e.g. c_id 1..3000 per district.
+    if g is not None and g.distribution == "cyclic":
+        base = int(g.min_value) if g.min_value is not None else 1
+        top  = int(g.max_value) if g.max_value is not None else base + 999
+        span = max(1, top - base + 1)
+        return base + (row_idx + row_offset) % span
+
+    # ── 1c. Block — increments every block_size rows ─────────────────────────
+    # Useful for parent IDs, e.g. c_d_id = 1 for rows 0..2999, 2 for 3000..5999.
+    # distribution_params: {block_size: 3000}
+    if g is not None and g.distribution == "block":
+        base       = int(g.min_value) if g.min_value is not None else 1
+        block_size = int((g.distribution_params or {}).get("block_size", 1))
+        return base + (row_idx + row_offset) // block_size
+
+    # ── 1d. Block-cyclic — cyclic in block-sized steps ───────────────────────
+    # Useful for order_line ol_o_id: each order ID repeats for block_size lines
+    # then cycles back. E.g. block_size=10, cycle=3000: IDs 1..3000 × 10 lines each.
+    # distribution_params: {block_size: 10, cycle: 3000}
+    if g is not None and g.distribution == "block_cyclic":
+        base       = int(g.min_value) if g.min_value is not None else 1
+        params     = g.distribution_params or {}
+        block_size = int(params.get("block_size", 1))
+        cycle      = int(params.get("cycle", 1000))
+        return base + ((row_idx + row_offset) // block_size) % cycle
+
+    # ── 1e. Zipf — power-law integer sample ──────────────────────────────────
+    # distribution_params: {exponent: 1.5, min_value: 1, max_value: N}
+    # Produces hot/cold distributions; lower-numbered keys are most frequent.
+    if g is not None and g.distribution == "zipf":
+        a    = float((g.distribution_params or {}).get("exponent", 1.2))
+        lo   = int(g.min_value) if g.min_value is not None else 1
+        hi   = int(g.max_value) if g.max_value is not None else 1_000_000
+        span = max(1, hi - lo + 1)
+        return lo + _zipf_sample(rng, a, span) - 1
+
+    # ── 1f. Normal / Gaussian ────────────────────────────────────────────────
+    # distribution_params: {mean: 150000.0, std: 80000.0}
+    # Falls back to uniform range when mean/std are absent.
+    if g is not None and g.distribution == "normal":
+        params = g.distribution_params or {}
+        lo  = float(g.min_value) if g.min_value is not None else 0.0
+        hi  = float(g.max_value) if g.max_value is not None else 1.0
+        mu  = float(params.get("mean", (lo + hi) / 2.0))
+        std = float(params.get("std",  (hi - lo) / 6.0))
+        val = rng.gauss(mu, std)
+        val = max(lo, min(hi, val))          # clamp to [min, max]
+        if ctype in ("integer", "long"):
+            return int(round(val))
+        scale = col.scale if col.scale is not None else 2
+        return round(val, scale)
+
     # ── 4. FK range ─────────────────────────────────────────────────────────
     if fk_max is not None:
         # Respect explicit GenerationRule min/max over the FK range if set
@@ -167,6 +267,9 @@ def _gen_value(
             hi = min(fk_max, int(g.max_value))
         else:
             lo, hi = 1, fk_max
+        if fk_dist == "zipf":
+            a = float(fk_params.get("exponent", 1.2))
+            return lo + _zipf_sample(rng, a, hi - lo + 1) - 1
         return rng.randint(lo, hi)
 
     # ── 5. Explicit min/max range ────────────────────────────────────────────
@@ -190,6 +293,12 @@ def _gen_value(
 
     # ── 5b. format_pattern for strings ──────────────────────────────────────
     if g is not None and g.format_pattern and ctype == "string":
+        # tpcc_last_name needs the current row position to guarantee full coverage
+        # of all 1000 syllable combinations within each block of 3000 customers.
+        if g.format_pattern == "tpcc_last_name":
+            pos = (row_idx + row_offset) % 3000
+            n   = pos if pos < 1000 else rng.randint(0, 999)
+            return _tpcc_make_last_name(n)
         fn = _FORMAT_PATTERN_FN.get(g.format_pattern)
         if fn:
             return fn(rng)
@@ -281,32 +390,40 @@ def generate_rows(
     """
     rng = random.Random(seed)
 
-    # Build FK column → parent max key mapping from fk_constraints and
-    # column-level references (fk_constraints takes precedence).
-    fk_max: dict[str, int] = {}
+    # Build FK column → (parent_max, fk_dist, fk_params) from fk_constraints
+    # and column-level references (fk_constraints takes precedence).
+    fk_max:    dict[str, int]        = {}
+    fk_dist:   dict[str, str]        = {}
+    fk_params: dict[str, dict]       = {}
+
     if parent_row_counts:
         if table.fk_constraints:
             for fk in table.fk_constraints:
                 parent_count = parent_row_counts.get(fk.parent_table)
                 if parent_count:
                     for col_name in fk.columns:
-                        fk_max[col_name] = parent_count
+                        fk_max[col_name]    = parent_count
+                        fk_dist[col_name]   = fk.fk_distribution or "uniform"
+                        fk_params[col_name] = fk.fk_distribution_params or {}
         for col in table.columns:
             if col.references and col.name not in fk_max:
                 parent_table, _ = col.references
                 parent_count = parent_row_counts.get(parent_table)
                 if parent_count:
-                    fk_max[col.name] = parent_count
+                    fk_max[col.name]    = parent_count
+                    fk_dist[col.name]   = "uniform"
+                    fk_params[col.name] = {}
 
-    # Pre-compute per-column (g, fk_max) so the inner loop is tight.
-    col_specs: list[tuple[CanonicalColumn, GenerationRule | None, int | None]] = [
-        (col, col.generation, fk_max.get(col.name))
+    # Pre-compute per-column specs so the inner loop is tight.
+    col_specs: list[tuple[CanonicalColumn, GenerationRule | None, int | None, str, dict]] = [
+        (col, col.generation, fk_max.get(col.name),
+         fk_dist.get(col.name, "uniform"), fk_params.get(col.name, {}))
         for col in table.columns
     ]
     col_names = [col.name for col in table.columns]
 
     for row_idx in range(row_count):
         yield {
-            name: _gen_value(col, g, fkm, row_idx, rng, row_offset)
-            for name, (col, g, fkm) in zip(col_names, col_specs)
+            name: _gen_value(col, g, fkm, row_idx, rng, row_offset, fd, fp)
+            for name, (col, g, fkm, fd, fp) in zip(col_names, col_specs)
         }

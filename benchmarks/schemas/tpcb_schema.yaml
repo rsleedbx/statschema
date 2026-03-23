@@ -1,20 +1,22 @@
 # TPC-B Canonical Schema — statschema interchange format
 #
-# Table names follow the pgbench convention so that after loading,
-# pgbench can run its standard TPC-B-like transaction mix without
-# any additional setup.  Column names, types, and lengths are taken
-# directly from the pgbench source (src/bin/pgbench/pgbench.c).
+# This file uses stable logical names (branch, teller, account, history).
+# Client-driver naming conventions are applied at pipeline time via
+# rename_tables() + TABLE_NAME_PRESETS, e.g.:
+#
+#   from statschema.schema_transforms import rename_tables, TABLE_NAME_PRESETS
+#   renamed = rename_tables(tables, TABLE_NAME_PRESETS["pgbench"])
+#   # → pgbench_branches, pgbench_tellers, pgbench_accounts, pgbench_history
+#
+# Column names match both TPC-B spec and pgbench source exactly:
+#   bid/bbalance/filler, tid/tbalance/filler, aid/abalance/filler,
+#   tid/bid/aid/delta/mtime/filler — so only table names need renaming.
 #
 # Scale factor (SF) determines the number of branches:
-#   pgbench_branches —      1 row / SF
-#   pgbench_tellers  —     10 rows / SF
-#   pgbench_accounts — 100,000 rows / SF
-#   pgbench_history  — 100,000 rows / SF  (initial population)
-#
-# After loading, add primary keys so pgbench uses index seeks:
-#   ALTER TABLE pgbench_accounts ADD PRIMARY KEY (aid);
-#   ALTER TABLE pgbench_branches ADD PRIMARY KEY (bid);
-#   ALTER TABLE pgbench_tellers  ADD PRIMARY KEY (tid);
+#   branch   —      1 row / SF
+#   teller   —     10 rows / SF
+#   account  — 100,000 rows / SF
+#   history  — 100,000 rows / SF  (initial population; grows during transactions)
 #
 # TPC-B spec: https://tpc.org/tpcb/
 # pgbench reference: https://www.postgresql.org/docs/current/pgbench.html
@@ -22,10 +24,10 @@
 version: "1.0"
 tables:
 
-  # ── pgbench_branches ──────────────────────────────────────────────────────
-  # 1 row per SF; pgbench checks COUNT(*) here to detect scale factor.
-  - name: pgbench_branches
-    description: "TPC-B branch — 1 row per SF unit (pgbench-compatible)"
+  # ── branch ────────────────────────────────────────────────────────────────
+  # 1 row per SF; pgbench checks COUNT(*) on its renamed version to detect SF.
+  - name: branch
+    description: "TPC-B branch — 1 row per SF unit"
     row_count_per_sf: 1
     columns:
       - name: bid
@@ -47,16 +49,16 @@ tables:
       - name: filler
         type: string
         length: 88
-        description: "Padding to 100-byte row (pgbench spec)"
+        description: "Padding to 100-byte row (TPC-B / pgbench spec)"
         generation:
           distribution: uniform
 
-  # ── pgbench_tellers ───────────────────────────────────────────────────────
+  # ── teller ────────────────────────────────────────────────────────────────
   # 10 rows per SF; each teller belongs to a branch.
-  - name: pgbench_tellers
-    description: "TPC-B teller — 10 rows per SF unit (pgbench-compatible)"
+  - name: teller
+    description: "TPC-B teller — 10 rows per SF unit"
     row_count_per_sf: 10
-    load_after: [pgbench_branches]
+    load_after: [branch]
     columns:
       - name: tid
         type: integer
@@ -71,7 +73,7 @@ tables:
         type: integer
         not_null: true
         description: "Branch this teller belongs to"
-        references: [pgbench_branches, bid]
+        references: [branch, bid]
         generation:
           distribution: uniform
       - name: tbalance
@@ -84,16 +86,16 @@ tables:
       - name: filler
         type: string
         length: 84
-        description: "Padding to 100-byte row (pgbench spec)"
+        description: "Padding to 100-byte row (TPC-B / pgbench spec)"
         generation:
           distribution: uniform
 
-  # ── pgbench_accounts ──────────────────────────────────────────────────────
+  # ── account ───────────────────────────────────────────────────────────────
   # 100,000 rows per SF; the hot table in TPC-B (every transaction touches it).
-  - name: pgbench_accounts
-    description: "TPC-B account — 100 000 rows per SF unit (pgbench-compatible)"
+  - name: account
+    description: "TPC-B account — 100 000 rows per SF unit"
     row_count_per_sf: 100000
-    load_after: [pgbench_branches]
+    load_after: [branch]
     columns:
       - name: aid
         type: integer
@@ -108,7 +110,7 @@ tables:
         type: integer
         not_null: true
         description: "Home branch for this account"
-        references: [pgbench_branches, bid]
+        references: [branch, bid]
         generation:
           distribution: uniform
       - name: abalance
@@ -121,37 +123,37 @@ tables:
       - name: filler
         type: string
         length: 84
-        description: "Padding to 100-byte row (pgbench spec)"
+        description: "Padding to 100-byte row (TPC-B / pgbench spec)"
         generation:
           distribution: uniform
 
-  # ── pgbench_history ───────────────────────────────────────────────────────
+  # ── history ───────────────────────────────────────────────────────────────
   # No surrogate PK — append-only audit log, matches TPC-B spec.
-  # pgbench INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) each txn.
-  - name: pgbench_history
-    description: "TPC-B history — 100 000 rows per SF unit (pgbench-compatible)"
+  # pgbench inserts one row per transaction: (tid, bid, aid, delta, mtime).
+  - name: history
+    description: "TPC-B history — 100 000 rows per SF unit (initial population)"
     row_count_per_sf: 100000
-    load_after: [pgbench_accounts, pgbench_tellers, pgbench_branches]
+    load_after: [account, teller, branch]
     columns:
       - name: tid
         type: integer
         not_null: true
         description: "Teller involved in this transaction"
-        references: [pgbench_tellers, tid]
+        references: [teller, tid]
         generation:
           distribution: uniform
       - name: bid
         type: integer
         not_null: true
         description: "Branch involved in this transaction"
-        references: [pgbench_branches, bid]
+        references: [branch, bid]
         generation:
           distribution: uniform
       - name: aid
         type: integer
         not_null: true
         description: "Account affected by this transaction"
-        references: [pgbench_accounts, aid]
+        references: [account, aid]
         generation:
           distribution: uniform
       - name: delta
@@ -173,6 +175,6 @@ tables:
       - name: filler
         type: string
         length: 22
-        description: "Padding to 50-byte row (pgbench spec)"
+        description: "Padding to 50-byte row (TPC-B / pgbench spec)"
         generation:
           distribution: uniform

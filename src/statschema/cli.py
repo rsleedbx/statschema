@@ -45,6 +45,7 @@ from .schema_io import load_canonical, resolve_load_order, resolve_row_counts
 from .ddl_emitter import emit_ddl, SUPPORTED_DIALECTS
 from .row_generator import generate_rows
 from .data_loader import LoadStrategy, load_dataframe
+from .schema_transforms import rename_tables, parse_table_map, TABLE_NAME_PRESETS
 
 logger = logging.getLogger("statschema")
 
@@ -197,9 +198,24 @@ def _connect(dialect: str, dsn: str | None) -> Any:
 # DDL sub-command
 # ---------------------------------------------------------------------------
 
+def _build_table_map(args: argparse.Namespace) -> dict[str, str]:
+    """Merge --table-preset and --table-map into a single mapping dict."""
+    mapping: dict[str, str] = {}
+    preset = getattr(args, "table_preset", None)
+    raw    = getattr(args, "table_map", None)
+    if preset:
+        mapping.update(TABLE_NAME_PRESETS[preset])
+    if raw:
+        mapping.update(parse_table_map(raw))
+    return mapping
+
+
 def _cmd_ddl(args: argparse.Namespace) -> None:
     """Emit CREATE TABLE SQL for every table in the YAML schema."""
     tables = load_canonical(Path(args.schema))
+    mapping = _build_table_map(args)
+    if mapping:
+        tables = rename_tables(tables, mapping)
     ordered = resolve_load_order(tables)
 
     for table in ordered:
@@ -219,6 +235,9 @@ def _cmd_ddl(args: argparse.Namespace) -> None:
 def _cmd_generate(args: argparse.Namespace) -> None:
     """Stream synthetic rows to stdout (CSV or JSONL) or to per-table files."""
     tables  = load_canonical(Path(args.schema))
+    mapping = _build_table_map(args)
+    if mapping:
+        tables = rename_tables(tables, mapping)
     ordered = resolve_load_order(tables)
     counts  = resolve_row_counts(ordered, scale_factor=args.sf)
 
@@ -278,6 +297,9 @@ def _cmd_load(args: argparse.Namespace) -> None:
     import time
 
     tables  = load_canonical(Path(args.schema))
+    mapping = _build_table_map(args)
+    if mapping:
+        tables = rename_tables(tables, mapping)
     ordered = resolve_load_order(tables)
     counts  = resolve_row_counts(ordered, scale_factor=args.sf)
     append  = getattr(args, "append", False)
@@ -407,6 +429,31 @@ def _simple_ddl(table) -> str:
 # Argument parser
 # ---------------------------------------------------------------------------
 
+def _add_rename_args(p: argparse.ArgumentParser) -> None:
+    """Add --table-preset and --table-map to any subcommand parser."""
+    p.add_argument(
+        "--table-preset",
+        dest="table_preset",
+        choices=sorted(TABLE_NAME_PRESETS),
+        metavar="PRESET",
+        help=(
+            "Apply a built-in table-name preset before processing.  "
+            f"Available: {', '.join(sorted(TABLE_NAME_PRESETS))}.  "
+            "pgbench renames TPC-B tables to pgbench_branches/tellers/accounts/history; "
+            "cockroach-tpcc renames orders→order for cockroach workload tpcc."
+        ),
+    )
+    p.add_argument(
+        "--table-map",
+        dest="table_map",
+        metavar="old=new[,old=new…]",
+        help=(
+            "Comma-separated rename pairs, e.g. --table-map orders=order.  "
+            "Applied after --table-preset if both are given."
+        ),
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="statschema",
@@ -447,6 +494,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=_ALL_DIALECTS,
         help="Target SQL dialect.",
     )
+    _add_rename_args(p_ddl)
 
     # ── generate ─────────────────────────────────────────────────────────────
     p_gen = sub.add_parser(
@@ -473,6 +521,7 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Output format (default: jsonl).")
     p_gen.add_argument("--out-dir", metavar="DIR",
                        help="Write one file per table here instead of stdout.")
+    _add_rename_args(p_gen)
 
     # ── load ─────────────────────────────────────────────────────────────────
     p_load = sub.add_parser(
@@ -524,6 +573,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "a new seed is derived automatically so data values are distinct."
         ),
     )
+    _add_rename_args(p_load)
     p_load.add_argument("-v", "--verbose", action="store_true",
                         help="Enable debug logging.")
 

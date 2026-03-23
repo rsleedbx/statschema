@@ -1205,6 +1205,20 @@ Local database setup recipes live in **[`docs/local-databases.md`](docs/local-da
 
 ---
 
+## Verified data generation
+
+TPC benchmark schemas ship as canonical YAML under `benchmarks/schemas/` and have been verified end-to-end with live client workloads:
+
+| Schema | SF=1 rows | Verified against |
+|--------|-----------|-----------------|
+| `tpcc_schema.yaml` | 599,011 | `cockroach workload tpcc` — all 5 transaction types, 0 errors |
+| `tpcb_schema.yaml` | 100,011 | `pgbench` on PostgreSQL; `cockroach workload bank` on CockroachDB |
+| `tpch_schema.yaml` | ~8,600,000 | `cockroach workload tpch` analytical queries |
+
+Generation, DDL emission, and loading are all driven from the same YAML file — no custom Python per database engine. The YAML schema format is designed to be the declarative standard for synthetic data generation: the same role SQL plays for queries. Write the schema once; `statschema` generates correct, referentially-consistent data for any supported engine.
+
+---
+
 ## Verified transpiler coverage
 
 `make test-live-all` executes **~2600 parametrized tests** against real databases,

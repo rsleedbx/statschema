@@ -1,0 +1,67 @@
+{
+  "benchmark_id": "20260323-014853-tpcc-sf1.0-postgres",
+  "timestamp": "2026-03-23T01:48:53.966176+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "cd1bae8",
+  "schema": "tpcc",
+  "scale_factor": 1.0,
+  "append": false,
+  "dialect": "postgres",
+  "driver": "psycopg2",
+  "strategy": "multi_row",
+  "ddl_s": 0.1016,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 2.536,
+      "row_offset": 0
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.0186,
+      "row_offset": 0
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.031,
+      "row_offset": 0
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 6.2542,
+      "row_offset": 0
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 2.2412,
+      "row_offset": 0
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 1.2028,
+      "row_offset": 0
+    },
+    "order": {
+      "rows": 30000,
+      "load_s": 2.6299,
+      "row_offset": 0
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 0.1922,
+      "row_offset": 0
+    },
+    "order_line": {
+      "rows": 300000,
+      "load_s": 10.4314,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 599011,
+    "load_s": 25.5373,
+    "rows_per_s": 23456.0
+  }
+}

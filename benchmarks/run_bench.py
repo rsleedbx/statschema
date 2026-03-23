@@ -72,6 +72,7 @@ from src.statschema.ddl_emitter import emit_ddl
 from src.statschema.model import CanonicalTableSchema
 from src.statschema.row_generator import generate_rows
 from src.statschema.data_loader import BatchConfig, LoadStrategy, load_dataframe
+from src.statschema.schema_transforms import rename_tables, parse_table_map, TABLE_NAME_PRESETS
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,18 @@ def _emit_ddl_for_dialect(table: CanonicalTableSchema, dialect: str) -> str:
 # DDL execution
 # ---------------------------------------------------------------------------
 
+def _quote_tname(name: str, dialect: str) -> str:
+    """Return *name* quoted for use in DDL/DML for the given dialect."""
+    if dialect == "sqlserver":
+        return f"[{name}]"
+    if dialect in ("mysql", "mariadb", "databricks"):
+        return f"`{name}`"
+    if dialect in ("oracle", "db2"):
+        return f'"{name.upper()}"'
+    # postgres / cockroachdb / neon / sqlite
+    return f'"{name}"'
+
+
 def create_tables(conn: Any, tables, dialect: str) -> None:
     """
     Drop-and-create each table in the given canonical schema list using
@@ -239,20 +252,19 @@ def create_tables(conn: Any, tables, dialect: str) -> None:
     """
     cur = conn.cursor()
     for table in tables:
-        tname = table.name
+        tname   = table.name
+        qtname  = _quote_tname(tname, dialect)
         try:
             if dialect in ("postgres", "cockroachdb", "neon", "sqlite",
                            "mysql", "mariadb"):
-                cur.execute(f"DROP TABLE IF EXISTS {tname}")
+                cur.execute(f"DROP TABLE IF EXISTS {qtname}")
             elif dialect == "sqlserver":
                 cur.execute(
-                    f"IF OBJECT_ID('{tname}','U') IS NOT NULL DROP TABLE {tname}"
+                    f"IF OBJECT_ID('{tname}','U') IS NOT NULL DROP TABLE {qtname}"
                 )
             elif dialect in ("oracle", "db2"):
-                # Oracle and Db2 emit DDL with uppercase table names; must drop
-                # the same uppercase name to avoid stale tables with wrong schema.
                 try:
-                    cur.execute(f'DROP TABLE "{tname.upper()}"')
+                    cur.execute(f"DROP TABLE {qtname}")
                 except Exception:
                     pass
         except Exception:
@@ -306,6 +318,7 @@ def run_benchmark(
     out_dir: Path = RESULTS_DIR,
     seed: int = 42,
     append: bool = False,
+    table_map: dict[str, str] | None = None,
 ) -> dict:
     """
     Run the full load benchmark for one schema × dialect combination.
@@ -319,6 +332,12 @@ def run_benchmark(
     from the current table MAX, and FK parent ranges include both existing
     and new rows.  A fresh seed is derived from the existing row totals so
     the appended data has different random values.
+
+    *table_map* renames tables (and all cross-references) before DDL emission,
+    data generation, and loading.  Use ``TABLE_NAME_PRESETS["pgbench"]`` to
+    load TPC-B data into pgbench-compatible table names, or
+    ``TABLE_NAME_PRESETS["cockroach-tpcc"]`` to match ``cockroach workload
+    tpcc`` naming.
 
     Returns the result dict that was also saved to disk.
     """
@@ -334,6 +353,10 @@ def run_benchmark(
             "or tpcb_schema.yaml."
         )
     tables = load_canonical(yaml_path)
+
+    # ── 1b. Apply optional table rename mapping ───────────────────────────────
+    if table_map:
+        tables = rename_tables(tables, table_map)
 
     # ── 2. Resolve load order and row counts ─────────────────────────────────
     ordered_tables = resolve_load_order(tables)
@@ -503,6 +526,29 @@ def _build_parser() -> argparse.ArgumentParser:
                        "the current table MAX; a new random seed is derived "
                        "automatically so data values differ from the first load."
                    ))
+    p.add_argument(
+        "--table-preset",
+        choices=sorted(TABLE_NAME_PRESETS),
+        metavar="PRESET",
+        help=(
+            "Apply a built-in table-name preset before loading.  "
+            f"Available: {', '.join(sorted(TABLE_NAME_PRESETS))}.  "
+            "E.g. --table-preset pgbench renames TPC-B tables to "
+            "pgbench_branches/tellers/accounts/history; "
+            "--table-preset cockroach-tpcc renames orders→order for "
+            "cockroach workload tpcc compatibility."
+        ),
+    )
+    p.add_argument(
+        "--table-map",
+        metavar="old=new[,old=new…]",
+        help=(
+            "Comma-separated table rename pairs applied before loading, "
+            "e.g. --table-map orders=order  or  "
+            "--table-map branch=pgbench_branches,account=pgbench_accounts.  "
+            "Combined with --table-preset: map is applied after the preset."
+        ),
+    )
     p.add_argument("--verbose",  action="store_true",
                    help="Enable debug logging")
     return p
@@ -518,6 +564,13 @@ def main() -> None:
         None if args.strategy == "auto"
         else LoadStrategy(args.strategy)
     )
+    # Build combined table_map: preset first, then explicit overrides
+    table_map: dict[str, str] = {}
+    if args.table_preset:
+        table_map.update(TABLE_NAME_PRESETS[args.table_preset])
+    if args.table_map:
+        table_map.update(parse_table_map(args.table_map))
+
     run_benchmark(
         schema=args.schema,
         sf=args.sf,
@@ -526,6 +579,7 @@ def main() -> None:
         out_dir=Path(args.out_dir),
         seed=args.seed,
         append=args.append,
+        table_map=table_map or None,
     )
 
 

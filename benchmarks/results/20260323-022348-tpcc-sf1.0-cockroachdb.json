@@ -1,0 +1,67 @@
+{
+  "benchmark_id": "20260323-022348-tpcc-sf1.0-cockroachdb",
+  "timestamp": "2026-03-23T02:23:48.669804+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "cd1bae8",
+  "schema": "tpcc",
+  "scale_factor": 1.0,
+  "append": false,
+  "dialect": "cockroachdb",
+  "driver": "psycopg2",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0915,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 1.4581,
+      "row_offset": 0
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.021,
+      "row_offset": 0
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.0434,
+      "row_offset": 0
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 4.45,
+      "row_offset": 0
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 2.7408,
+      "row_offset": 0
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 6.6534,
+      "row_offset": 0
+    },
+    "order": {
+      "rows": 30000,
+      "load_s": 2.653,
+      "row_offset": 0
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 6.1737,
+      "row_offset": 0
+    },
+    "order_line": {
+      "rows": 300000,
+      "load_s": 7.0749,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 599011,
+    "load_s": 31.2681,
+    "rows_per_s": 19157.0
+  }
+}
