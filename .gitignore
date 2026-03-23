@@ -223,3 +223,7 @@ statschema-sdk/
 
 # PySpark local managed table warehouse (created by saveAsTable in local mode)
 spark-warehouse/
+
+# Benchmark SQLite database (large binary — results are in benchmark_table.md)
+benchmarks/results/bench.db
+*.db
