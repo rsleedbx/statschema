@@ -368,9 +368,9 @@ def _source_type_comment(col: CanonicalColumn, emitted_type: str, emit_dialect: 
 
     Examples
     --------
-    TIMETZ (postgres) → STRING (databricks)          → "  -- originally TIMETZ (postgres)"
-    DATETIMEOFFSET (sqlserver) → TIMESTAMP (mysql)   → "  -- originally DATETIMEOFFSET (sqlserver)"
-    NUMBER(10) (oracle) → BIGINT (postgres)          → "  -- originally NUMBER(10) (oracle)"
+    TIMETZ (postgres) → STRING (databricks)          → "  /* originally TIMETZ (postgres) */"
+    DATETIMEOFFSET (sqlserver) → TIMESTAMP (mysql)   → "  /* originally DATETIMEOFFSET (sqlserver) */"
+    NUMBER(10) (oracle) → BIGINT (postgres)          → "  /* originally NUMBER(10) (oracle) */"
     TINYBLOB (mysql) → LONGBLOB (mysql)              → ""  (same dialect, no annotation)
     VARCHAR(100) (postgres) → VARCHAR(100) (mysql)   → ""  (types match, no annotation)
     """
@@ -413,7 +413,7 @@ def _source_type_comment(col: CanonicalColumn, emitted_type: str, emit_dialect: 
         return ""
 
     dialect_note = f" ({source_dialect})" if source_dialect else ""
-    return f"  -- originally {source_type}{dialect_note}"
+    return f"  /* originally {source_type}{dialect_note} */"
 
 
 # Dialects that support inline COMMENT 'text' inside the CREATE TABLE column list.

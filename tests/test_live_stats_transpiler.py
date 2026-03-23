@@ -989,6 +989,30 @@ class TestDatabricksStatsInjection:
 
     # All tests in this class use parquet locally so ANALYZE TABLE works.
     _FMT = "parquet"
+    _TABLES = ["xfer_orders_spark", "xfer_orders_dist_check"]
+
+    def setup_method(self):
+        """Drop managed tables and their warehouse directories before each test.
+
+        `DROP TABLE IF EXISTS` removes Spark metadata but leaves the physical
+        directory under spark-warehouse/, causing LOCATION_ALREADY_EXISTS on
+        the next saveAsTable call.  Removing the directory avoids the conflict.
+        """
+        import shutil
+        from pathlib import Path
+
+        pyspark   = pytest.importorskip("pyspark")   # noqa: F841
+        pytest.importorskip("delta")
+
+        spark = _get_spark_for_stats()
+        # spark.sql.warehouse.dir is a file: URI; strip the scheme to get a Path.
+        raw = spark.conf.get("spark.sql.warehouse.dir", "spark-warehouse")
+        warehouse = Path(raw.removeprefix("file:"))
+        for tbl in self._TABLES:
+            spark.sql(f"DROP TABLE IF EXISTS default.{tbl}")
+            tbl_dir = warehouse / tbl
+            if tbl_dir.exists():
+                shutil.rmtree(tbl_dir)
 
     def test_inject_and_analyze(self):
         """inject_stats_databricks writes a sample and ANALYZE TABLE succeeds."""

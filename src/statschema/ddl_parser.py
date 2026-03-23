@@ -570,7 +570,7 @@ def _parse_create_table(ast: exp.Create, dialect: str) -> CanonicalTableSchema:
         # source_type is stored whenever the original SQL type carries information that
         # the canonical type alone cannot reconstruct, so that:
         #   1. The canonical YAML is self-documenting.
-        #   2. Downstream DDL emitters can add "-- originally <type>" comments when
+        #   2. Downstream DDL emitters can add "/* originally <type> */" comments when
         #      the emitted type differs from the original (e.g. TIMETZ → STRING in Databricks).
         col_constraints: dict = {}
         if is_serial:

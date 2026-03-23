@@ -33,8 +33,9 @@ CockroachDB / PostgreSQL type differences (information_schema)
 --------------------------------------------------------------
   INTEGER / INT          → udt_name: "int8"   (CockroachDB INT is 64-bit; Postgres INT is 32-bit)
   BIGINT                 → udt_name: "int8"
-  BYTEA                  → udt_name: "bytes"   (CRDB's native type name; BYTEA is accepted as alias)
-  TEXT / VARCHAR / STRING → udt_name: "text"   (CRDB normalises all string types to text)
+  BYTEA                  → udt_name: "bytes" (old CRDB) / "bytea" (CRDB 23+; matches Postgres)
+  TEXT                   → udt_name: "text"
+  VARCHAR / CHARACTER VARYING → udt_name: "text" (old CRDB) / "varchar" (CRDB 23+; preserves declared type)
   BOOLEAN                → udt_name: "bool"
   FLOAT / DOUBLE PRECISION → udt_name: "float8"
   DECIMAL / NUMERIC      → udt_name: "numeric"
@@ -207,9 +208,13 @@ class TestCRDBBasicTypes:
                 c CHARACTER VARYING(50)
             )
         """), "crdb_types_str")
-        # CRDB normalises TEXT / VARCHAR / CHARACTER VARYING → "text" in udt_name
-        for col in ("a", "b", "c"):
-            assert cols[col]["udt_name"] == "text", f"{col}: expected text, got {cols[col]['udt_name']}"
+        # TEXT always maps to "text". VARCHAR/CHARACTER VARYING mapped to "text" in older CRDB
+        # but newer versions (23+) preserve the declared type and return "varchar".
+        assert cols["a"]["udt_name"] == "text"
+        for col in ("b", "c"):
+            assert cols[col]["udt_name"] in {"text", "varchar"}, (
+                f"{col}: expected text or varchar, got {cols[col]['udt_name']}"
+            )
 
     def test_uuid(self, conn):
         cols = _run(conn, textwrap.dedent("""
@@ -263,13 +268,13 @@ class TestCRDBBasicTypes:
         assert cols["birth_date"]["udt_name"] == "date"
 
     def test_bytes(self, conn):
-        """BYTEA is accepted as alias; information_schema reports the native CRDB type 'bytes'."""
+        """BYTEA alias: older CRDB reports 'bytes', newer CRDB 23+ reports 'bytea' (Postgres-compatible)."""
         cols = _run(conn, textwrap.dedent("""
             CREATE TABLE crdb_types_bytes (
                 data BYTEA
             )
         """), "crdb_types_bytes")
-        assert cols["data"]["udt_name"] == "bytes"
+        assert cols["data"]["udt_name"] in {"bytes", "bytea"}
 
     def test_primary_key_and_not_null(self, conn):
         cols = _run(conn, textwrap.dedent("""
@@ -392,9 +397,6 @@ class TestCRDBMultiRegion:
                 value TEXT NOT NULL
             ) LOCALITY GLOBAL
         """))
-        rows = _fetchall(multi_conn, """
-            SELECT locality FROM [SHOW CREATE TABLE statschema_mr.config]
-        """)
         # CockroachDB 'SHOW CREATE TABLE' returns the DDL text in the second column
         rows = _fetchall(multi_conn, "SHOW CREATE TABLE statschema_mr.config")
         ddl_text = rows[0][1] if rows else ""
@@ -403,7 +405,8 @@ class TestCRDBMultiRegion:
     def test_locality_regional_by_table(self, multi_conn):
         """LOCALITY REGIONAL BY TABLE pins a table to one region."""
         rows = _fetchall(multi_conn, "SHOW REGIONS FROM DATABASE testdb")
-        primary_region = rows[0][0]  # first region is the primary
+        # rows schema: (database, region, primary, secondary, zones); find the primary region
+        primary_region = next(r[1] for r in rows if r[2])
 
         _execute(multi_conn, "DROP TABLE IF EXISTS statschema_mr.events")
         _execute(multi_conn, textwrap.dedent(f"""
@@ -459,6 +462,6 @@ class TestCRDBMultiRegion:
         sql = sql.replace('"products"', 'statschema_mr."products"', 1)
         _execute(multi_conn, sql)
         cols = _introspect(multi_conn, "statschema_mr", "products")
-        assert cols["name"]["udt_name"]       == "text"
+        assert cols["name"]["udt_name"]       in {"text", "varchar"}
         assert cols["price"]["udt_name"]      == "numeric"
         assert cols["created_at"]["udt_name"] == "timestamptz"
