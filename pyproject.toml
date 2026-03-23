@@ -54,12 +54,13 @@ spark = [
     "delta-spark>=3.2.0",
     "dbldatagen>=0.4.0",
 ]
-postgres = ["psycopg2-binary>=2.9.0"]
-mysql    = ["pymysql>=1.1.0"]
-mssql    = ["pymssql>=2.2.0"]
-oracle   = ["oracledb>=2.0.0"]
+postgres  = ["psycopg2-binary>=2.9.0"]
+mysql     = ["pymysql>=1.1.0"]
+mssql     = ["pymssql>=2.2.0"]
+oracle    = ["oracledb>=2.0.0"]
+lakebase  = ["databricks-sdk>=0.89.0", "psycopg2-binary>=2.9.0"]
 all = [
-    "statschema[spark,postgres,mysql,mssql,oracle]",
+    "statschema[spark,postgres,mysql,mssql,oracle,lakebase]",
     "duckdb>=0.9.0",
     "sqlalchemy>=2.0.0",
 ]

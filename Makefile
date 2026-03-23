@@ -19,7 +19,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase lakebase-up lakebase-down lakebase-destroy lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -215,6 +215,31 @@ test-live-stats-transpiler:
 	SQLSERVER_PASS=$(SQLSERVER_PASS) \
 	SQLSERVER_PORT=$(or $(SQLSERVER_PORT),14330) \
 	$(PYTEST_TEST) tests/test_live_stats_transpiler.py -v
+
+## Spin up the smallest Lakebase endpoint and write connection vars to .env.
+## Uses DEFAULT profile from ~/.databrickscfg (override: DATABRICKS_PROFILE=ci make lakebase-up).
+## Idempotent: reuses existing project/endpoint if already saved in .env.
+lakebase-up:
+	./scripts/lakebase-up.sh
+
+## Delete the Lakebase compute endpoint (project + branch data preserved).
+lakebase-down:
+	./scripts/lakebase-down.sh
+
+## Permanently delete the entire Lakebase project and all data.
+lakebase-destroy:
+	./scripts/lakebase-down.sh --destroy
+
+## Run live Databricks Lakebase tests.
+## Spins up the endpoint, runs tests, then tears down the endpoint.
+## Auth: ~/.databrickscfg DEFAULT profile (or DATABRICKS_PROFILE env var).
+## Prerequisites: databricks CLI, jq, databricks-sdk + psycopg2 in $(VENV_TEST).
+test-live-lakebase:
+	@./scripts/lakebase-up.sh > /tmp/.lakebase_env && \
+	  . /tmp/.lakebase_env && \
+	  set -a && . .env 2>/dev/null; set +a; \
+	  $(PYTEST_TEST) tests/test_live_lakebase.py -v; \
+	  STATUS=$$?; ./scripts/lakebase-down.sh; exit $$STATUS
 
 ## Run Databricks stats injection tests using local PySpark + delta-spark (no live Databricks cluster needed)
 ## The tests use table_format="parquet" locally (delta-spark 4.x ANALYZE TABLE workaround).

@@ -59,6 +59,7 @@ _FASTEST: dict[str, LoadStrategy] = {
     "postgres":    LoadStrategy.BULK_COPY,
     "cockroachdb": LoadStrategy.BULK_COPY,
     "neon":        LoadStrategy.BULK_COPY,
+    "lakebase":    LoadStrategy.BULK_COPY,
     "mysql":       LoadStrategy.BULK_COPY,
     "mariadb":     LoadStrategy.BULK_COPY,
     "sqlserver":   LoadStrategy.BULK_COPY,
@@ -75,6 +76,49 @@ _ALL_DIALECTS = sorted(set(SUPPORTED_DIALECTS) | set(_FASTEST))
 # Connection helper
 # ---------------------------------------------------------------------------
 
+def _lakebase_connect(endpoint: str, host: str, dbname: str, user: str, port: int = 5432) -> Any:
+    """
+    Open a psycopg2 connection to Databricks Lakebase using a fresh OAuth token.
+
+    The Databricks SDK reads workspace credentials from the environment
+    (DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET, or any
+    other auth method the SDK supports such as a PAT in DATABRICKS_TOKEN).
+
+    Parameters
+    ----------
+    endpoint:
+        Full Lakebase endpoint resource path, e.g.
+        ``projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>``
+        Set via STATSCHEMA_LAKEBASE_ENDPOINT or ENDPOINT_NAME.
+    host:
+        PostgreSQL hostname for the endpoint, e.g.
+        ``<endpoint-id>.database.<region>.cloud.databricks.com``
+        Set via STATSCHEMA_LAKEBASE_HOST or PGHOST.
+    dbname:
+        Database name inside Lakebase (default: ``databricks_postgres``).
+        Set via STATSCHEMA_LAKEBASE_DB or PGDATABASE.
+    user:
+        Service-principal client ID (UUID) — this is the Postgres role name.
+        Set via STATSCHEMA_LAKEBASE_USER, PGUSER, or DATABRICKS_CLIENT_ID.
+    """
+    try:
+        from databricks.sdk import WorkspaceClient
+    except ImportError:
+        _die(
+            "databricks-sdk is required for Lakebase connections.\n"
+            "  pip install 'statschema[lakebase]'"
+        )
+    import psycopg2
+
+    w = WorkspaceClient()
+    credential = w.postgres.generate_database_credential(endpoint=endpoint)
+    return psycopg2.connect(
+        host=host, port=port, dbname=dbname,
+        user=user, password=credential.token,
+        sslmode="require",
+    )
+
+
 def _connect(dialect: str, dsn: str | None) -> Any:
     """
     Open and return a DBAPI-2 connection.
@@ -84,6 +128,14 @@ def _connect(dialect: str, dsn: str | None) -> Any:
     postgres / cockroachdb / neon
         libpq keyword string:  "host=localhost port=5432 dbname=mydb user=me password=s3cr3t"
         or URL:                "postgresql://me:s3cr3t@localhost/mydb"
+
+    lakebase
+        Space-separated keys:  "endpoint=projects/.../endpoints/... host=<pg-host> dbname=databricks_postgres user=<sp-client-id>"
+        Or env vars:           STATSCHEMA_LAKEBASE_ENDPOINT (or ENDPOINT_NAME)
+                               STATSCHEMA_LAKEBASE_HOST (or PGHOST)
+                               STATSCHEMA_LAKEBASE_DB   (or PGDATABASE)
+                               STATSCHEMA_LAKEBASE_USER (or PGUSER or DATABRICKS_CLIENT_ID)
+        Workspace auth:        DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET
 
     mysql / mariadb
         DSN format:            "host=localhost port=3306 user=root password=s3cr3t database=mydb"
@@ -108,6 +160,36 @@ def _connect(dialect: str, dsn: str | None) -> Any:
         import sqlite3
         path = dsn or env.get("STATSCHEMA_SQLITE_PATH", ":memory:")
         return sqlite3.connect(path)
+
+    if dialect == "lakebase":
+        parts = dict(kv.split("=", 1) for kv in (dsn or "").split() if "=" in kv)
+        endpoint = (parts.get("endpoint")
+                    or env.get("STATSCHEMA_LAKEBASE_ENDPOINT")
+                    or env.get("ENDPOINT_NAME", ""))
+        host     = (parts.get("host")
+                    or env.get("STATSCHEMA_LAKEBASE_HOST")
+                    or env.get("PGHOST", ""))
+        dbname   = (parts.get("dbname")
+                    or env.get("STATSCHEMA_LAKEBASE_DB")
+                    or env.get("PGDATABASE", "databricks_postgres"))
+        user     = (parts.get("user")
+                    or env.get("STATSCHEMA_LAKEBASE_USER")
+                    or env.get("PGUSER")
+                    or env.get("DATABRICKS_CLIENT_ID", ""))
+        port     = int(parts.get("port") or env.get("PGPORT", "5432"))
+        if not endpoint:
+            _die(
+                "Lakebase: provide endpoint= in --dsn or set STATSCHEMA_LAKEBASE_ENDPOINT.\n"
+                "  Format: projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>"
+            )
+        if not host:
+            _die("Lakebase: provide host= in --dsn or set STATSCHEMA_LAKEBASE_HOST (or PGHOST).")
+        if not user:
+            _die(
+                "Lakebase: provide user= in --dsn or set STATSCHEMA_LAKEBASE_USER / PGUSER.\n"
+                "  Value must be the service-principal client ID (UUID)."
+            )
+        return _lakebase_connect(endpoint, host, dbname, user, port)
 
     if dialect in ("postgres", "cockroachdb", "neon"):
         import psycopg2
@@ -471,7 +553,7 @@ class _LoggingCursor:
 
 _DEFAULT_PORTS: dict[str, int] = {
     "mysql": 3306, "mariadb": 3306,
-    "postgres": 5432, "cockroachdb": 26257, "neon": 5432,
+    "postgres": 5432, "cockroachdb": 26257, "neon": 5432, "lakebase": 5432,
     "sqlserver": 1433, "oracle": 1521, "db2": 50000, "sqlite": 0,
 }
 
@@ -519,6 +601,35 @@ def _connect_interactive(args) -> tuple[Any, str, int, str, str]:
         import sqlite3
         path = getattr(args, "catalog", None) or ":memory:"
         return sqlite3.connect(path), "localhost", 0, "", path
+
+    if dialect == "lakebase":
+        env = os.environ
+        endpoint = _prompt_if_missing(
+            getattr(args, "endpoint", None) or env.get("STATSCHEMA_LAKEBASE_ENDPOINT") or env.get("ENDPOINT_NAME"),
+            "Lakebase endpoint (projects/.../branches/.../endpoints/...)",
+        )
+        host = _prompt_if_missing(
+            getattr(args, "host", None) or env.get("STATSCHEMA_LAKEBASE_HOST") or env.get("PGHOST"),
+            "Lakebase host",
+        )
+        port = int(
+            getattr(args, "port", None)
+            or env.get("PGPORT", "5432")
+        )
+        dbname = (
+            getattr(args, "catalog", None)
+            or env.get("STATSCHEMA_LAKEBASE_DB")
+            or env.get("PGDATABASE", "databricks_postgres")
+        )
+        user = _prompt_if_missing(
+            getattr(args, "user", None)
+            or env.get("STATSCHEMA_LAKEBASE_USER")
+            or env.get("PGUSER")
+            or env.get("DATABRICKS_CLIENT_ID"),
+            "Service-principal client ID (PGUSER)",
+        )
+        conn = _lakebase_connect(endpoint, host, dbname, user, port)
+        return conn, host, port, user, dbname
 
     host = _prompt_if_missing(getattr(args, "host", None),     "Host",     "localhost")
     port = int(_prompt_if_missing(str(getattr(args, "port", None) or ""),
@@ -830,7 +941,7 @@ def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
         return _collect_schema_mysql(cur, table)
     if dialect == "sqlite":
         return _collect_schema_sqlite(cur, table)
-    if dialect in ("postgres", "cockroachdb", "neon"):
+    if dialect in ("postgres", "cockroachdb", "neon", "lakebase"):
         return _collect_schema_postgres(cur, schema or "public", table)
     if dialect == "sqlserver":
         return _collect_schema_sqlserver(cur, schema or "dbo", table)
@@ -935,6 +1046,7 @@ _INJECT_FN: dict[str, str] = {
     "postgres":    "inject_stats_postgres",
     "cockroachdb": "inject_stats_postgres",
     "neon":        "inject_stats_postgres",
+    "lakebase":    "inject_stats_postgres",
     "mysql":       "inject_stats_mysql",
     "mariadb":     "inject_stats_mysql",
     "sqlserver":   "inject_stats_sqlserver",
@@ -1107,6 +1219,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Pass --dsn or set the matching environment variable:\n\n"
             "  Dialect          --dsn format / env var\n"
             '  postgres         "host=H dbname=D user=U password=P"  |  STATSCHEMA_PG_DSN\n'
+            '  lakebase         "endpoint=projects/.../endpoints/... host=H dbname=D user=<sp-client-id>"\n'
+            "                   Workspace auth: DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET\n"
             '  mysql/mariadb    "host=H port=P user=U password=P database=D"  |  STATSCHEMA_MYSQL_*\n'
             '  sqlserver        "SERVER=H,P;DATABASE=D;UID=U;PWD=P"  |  STATSCHEMA_SQLSERVER_DSN\n'
             '  oracle           "user/pass@host:port/service"  |  STATSCHEMA_ORACLE_DSN/_USER/_PASS\n'
@@ -1170,6 +1284,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "  statschema collect --dialect sqlserver --catalog mydb --schema dbo\n\n"
             "  # Oracle: --schema = owner name; --catalog is not used\n"
             "  statschema collect --dialect oracle --host orahost --catalog XE --schema HR\n\n"
+            "  # Lakebase (Databricks): workspace auth via DATABRICKS_HOST / _CLIENT_ID / _CLIENT_SECRET\n"
+            "  statschema collect --dialect lakebase \\\n"
+            "      --endpoint 'projects/<proj-id>/branches/<branch-id>/endpoints/<ep-id>' \\\n"
+            "      --host '<ep-id>.database.<region>.cloud.databricks.com' \\\n"
+            "      --user '<service-principal-client-id>' --catalog databricks_postgres\n\n"
             "  # Prompt for everything\n"
             "  statschema collect --dialect sqlserver"
         ),
@@ -1205,6 +1324,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_col.add_argument("--tables",   default="%", metavar="PATTERN",
                        help="SQL LIKE pattern for table names (default: %% = all tables). "
                             "Shell glob * is accepted and converted to %%.")
+    p_col.add_argument(
+        "--endpoint", metavar="ENDPOINT_NAME",
+        help=(
+            "Lakebase endpoint resource path "
+            "(format: projects/<id>/branches/<id>/endpoints/<id>). "
+            "Required when --dialect lakebase; falls back to "
+            "STATSCHEMA_LAKEBASE_ENDPOINT or ENDPOINT_NAME env vars."
+        ),
+    )
     p_col.add_argument("--show-sql", action="store_true",
                        help="Print every SQL statement sent to the database.")
     p_col.add_argument("--analyze",  action="store_true",

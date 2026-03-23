@@ -43,6 +43,7 @@ DIALECT_ALIASES: dict[str, str] = {
     "spark":       "databricks",
     "delta":       "databricks",
     "dbsql":       "databricks",
+    "lakebase":    "postgres",   # Databricks Lakebase — Postgres wire protocol with OAuth
 }
 
 # sqlglot ``dialect=`` argument per canonical dialect
@@ -57,7 +58,7 @@ SQLGLOT_DIALECT: dict[str, str] = {
 
 # ``schema_source`` / ``format_hint`` strings that mean Postgres-flavored DDL (not enum members).
 SCHEMA_SOURCE_POSTGRES_ALIASES: frozenset[str] = frozenset(
-    {"postgresql", "pg", "neon", "neondb", "cockroach", "cockroachdb", "crdb"}
+    {"postgresql", "pg", "neon", "neondb", "cockroach", "cockroachdb", "crdb", "lakebase"}
 )
 
 # ``schema_source`` / ``format_hint`` strings that mean MySQL-flavored DDL (not enum members).
