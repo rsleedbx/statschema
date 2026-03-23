@@ -171,8 +171,10 @@ def _get_spark():
             .getOrCreate()
         )
         return spark
-    except Exception as exc:
-        pytest.skip(f"Cannot start local Spark: {exc}")
+    except RuntimeError as exc:
+        if "Databricks Connect" in str(exc) or "remote Spark" in str(exc):
+            pytest.skip("Local Spark not available (Databricks Connect only supports remote sessions)")
+        raise
 
 
 # ---------------------------------------------------------------------------

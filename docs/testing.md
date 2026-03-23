@@ -31,8 +31,15 @@ make test-spark
 make test-live-sqlserver
 ```
 
-Current baseline: **2053 passed, 3 skipped** (the 3 skips require live Databricks
-credentials and are expected).  Live-DB tests add:
+Current baselines (run outside the sandbox with `.venv_test/bin/pytest tests/ -k "not live"`):
+
+| `dbldatagen.v1` installed? | Result |
+|----------------------------|--------|
+| No (default) | **2568 passed, 1 skipped** — skip is the entire `test_v1_bridge.py` module |
+| Yes (`make venv-test-v1`) | **2673 passed, 0 skipped** |
+
+Install `dbldatagen.v1` with `make venv-test-v1 DBLDATAGEN_DEV=~/github/dbldatagen`.
+Live-DB tests add:
 - **14** when SQL Server is running (`test_live_sqlserver.py`)
 - **20** when Oracle XE is running (`test_live_oracle.py`)
 - **19** when Mautic is running (`test_live_mautic.py`)
@@ -168,9 +175,10 @@ python3.11 -m venv .venv_test
 
 | File | Tests | Needs Spark | Needs live DB |
 |------|-------|-------------|---------------|
+| `tests/test_cli.py` | 26 | No | No |
 | `tests/test_ddl_roundtrip.py` | ~185 | No | No |
 | `tests/test_schema_parser.py` | ~124 | 3 tests | No |
-| `tests/test_v1_bridge.py` | ~50 | No | No |
+| `tests/test_v1_bridge.py` | 105 | No | No — but requires `dbldatagen.v1` (not on PyPI; see `make venv-test-v1`) |
 | `tests/test_live_sqlserver.py` | 14 | No | **Yes** – SQL Server via Lima VM |
 | `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
 | `tests/test_live_mariadb.py` | ~20 | No | **Yes** – MariaDB 10.11 + 11.4 via Podman |
@@ -185,9 +193,10 @@ python3.11 -m venv .venv_test
 
 ### Tests that are always skipped (expected)
 
-| Test | Reason |
-|------|--------|
-| Any test calling `pytest.importorskip("databricks.connect")` from `.venv_test` | `databricks-connect` intentionally absent |
+| Test | Reason | How to unlock |
+|------|--------|---------------|
+| `test_v1_bridge.py` (all 105 tests) | `dbldatagen.v1` not on PyPI | `make venv-test-v1 DBLDATAGEN_DEV=~/github/dbldatagen` |
+| Any test calling `pytest.importorskip("databricks.connect")` from `.venv_test` | `databricks-connect` intentionally absent | Run from `.venv` (blocks local Spark; not recommended) |
 
 ### Live-DB tests: skipped automatically when DB not configured
 
@@ -380,6 +389,18 @@ if not os.environ.get("JAVA_HOME"):
 ---
 
 ## Sandboxed test runs (Cursor agent)
+
+The Cursor agent sandbox blocks subprocess spawning and network syscalls.
+Two test categories silently misbehave without the bypass — see the project
+skill at `.cursor/skills/pytest-sandbox/SKILL.md` for the full rules.
+
+### Rule: never add skip conditions for infrastructure failures
+
+A skip is indistinguishable from a pass in the summary line.  Only skip when
+infrastructure is genuinely absent (not installed via `pytest.importorskip`,
+or connection refused because the DB is not running).  If the JVM is installed
+and a Spark test gets `JAVA_GATEWAY_EXITED`, that is a real failure — let it
+fail loudly rather than adding a broad `except` that converts it to a skip.
 
 ### Spark tests need network sandbox bypass
 

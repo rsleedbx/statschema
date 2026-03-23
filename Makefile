@@ -27,17 +27,37 @@ venv-test:
 	$(VENV_TEST)/bin/pip install --upgrade pip
 	$(VENV_TEST)/bin/pip install -r requirements-test.txt
 
-## Run the full test suite (local PySpark, conftest.py sets JAVA_HOME)
-test:
-	$(PYTEST_TEST) tests/ -v
+## Install the local dbldatagen dev checkout into .venv_test to unlock test_v1_bridge.py.
+## Usage: make venv-test-v1 DBLDATAGEN_DEV=~/github/dbldatagen
+## The dbldatagen.v1 submodule is not yet on PyPI; it requires a local checkout.
+venv-test-v1:
+	@if [ -z "$(DBLDATAGEN_DEV)" ]; then \
+	  echo "ERROR: Set DBLDATAGEN_DEV to your local dbldatagen checkout path"; \
+	  echo "  Example: make venv-test-v1 DBLDATAGEN_DEV=~/github/dbldatagen"; \
+	  exit 1; \
+	fi
+	$(VENV_TEST)/bin/pip install -e "$(DBLDATAGEN_DEV)[v1]" --quiet
+	@echo "dbldatagen.v1 installed — run: make test-v1"
 
-## Run everything except Spark data-generation and live-DB tests
+## Run everything except Spark data-generation and live-DB tests (safe in any environment)
+## Expected: 2565 passed, 1 skipped (test_v1_bridge: dbldatagen.v1 not on PyPI)
 test-fast:
 	$(PYTEST_TEST) tests/ -v -k "not generate_data and not live"
 
-## Run only the Spark data-generation tests
+## Run everything except live-DB tests, including Spark data-generation (needs Java)
+## Run this outside the Cursor sandbox: required_permissions: ["all"]
+## Expected: 2568 passed, 1 skipped
+test:
+	$(PYTEST_TEST) tests/ -v -k "not live"
+
+## Run only the Spark data-generation tests (needs Java — run outside sandbox)
 test-spark:
 	$(PYTEST_TEST) tests/ -v -k "generate_data"
+
+## Run the dbldatagen.v1 bridge tests (requires: make venv-test-v1 first)
+## Expected: 50 passed, 0 skipped
+test-v1:
+	$(PYTEST_TEST) tests/test_v1_bridge.py -v
 
 ## Run live SQL Server tests (requires: limactl start sqlserver22)
 ## Credentials are loaded automatically from .env (copy .env.example → .env and fill in SQLSERVER_PASS).

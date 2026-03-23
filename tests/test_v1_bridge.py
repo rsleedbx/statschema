@@ -934,7 +934,7 @@ class TestStatsWiring:
       - null_fraction  →  ColumnSpec.null_fraction
       - MCV weights    →  ValuesColumn + WeightedValues
       - numeric min/max →  RangeColumn.min / RangeColumn.max
-      - date begin/end  →  TimestampColumn.begin / .end
+      - date begin/end  →  TimestampColumn.start / .end
     """
 
     from dbldatagen.v1.schema import WeightedValues
@@ -1079,7 +1079,7 @@ class TestStatsWiring:
         plan = to_v1_plan(tbl, stats=ts)
         cs = _find_col(plan, "products", "created")
         assert isinstance(cs.gen, TimestampColumn)
-        assert cs.gen.begin == "2021-03-01"
+        assert cs.gen.start == "2021-03-01"
         assert cs.gen.end == "2024-12-31"
 
     # ── stats dict for multi-table plans ─────────────────────────────────

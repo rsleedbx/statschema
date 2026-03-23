@@ -313,7 +313,7 @@ def _col_to_v1_spec(col, pk_col_names: set[str], fk_map: dict[str, CanonicalFore
         return ColumnSpec(
             name=col.name,
             dtype=dtype,
-            gen=TimestampColumn(begin=begin, end=end),
+            gen=TimestampColumn(start=begin, end=end),
             nullable=nullable,
             null_fraction=null_fraction,
         )

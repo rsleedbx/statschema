@@ -193,6 +193,17 @@ def _gen_value(
         base = int(g.min_value) if g.min_value is not None else 1
         return base + row_offset + row_idx
 
+    # ── null_rate — applied before generating a real value, skipped for ──────
+    # sequential columns (above), FK columns, and NOT NULL columns.
+    if (
+        g is not None
+        and g.null_rate is not None
+        and not col.not_null
+        and fk_max is None
+        and rng.random() < g.null_rate
+    ):
+        return None
+
     # ── 2. Constant ─────────────────────────────────────────────────────────
     if g is not None and g.distribution == "constant":
         if g.values:

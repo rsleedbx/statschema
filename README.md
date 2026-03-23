@@ -133,8 +133,8 @@ tables:
           null_rate: 0.65             # 65% NULL = no discount at all
     fk_constraints:
       - columns: [order_id]
-        ref_table: orders
-        ref_columns: [order_id]
+        parent_table: orders
+        parent_columns: [order_id]
 ```
 ```python
 from statschema import load_canonical, generate_rows, resolve_row_counts, resolve_load_order

@@ -15,7 +15,7 @@ Design goals
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 
 
 @dataclass
@@ -104,6 +104,11 @@ class GenerationRule:
     max_length: Optional[int] = None
     unique: bool = False
 
+    # ── null probability ─────────────────────────────────────────────────
+    # Fraction of rows that should be NULL for this column (0.0–1.0).
+    # Silently ignored when the column is declared NOT NULL.
+    null_rate: Optional[float] = None
+
     # ── distribution control ──────────────────────────────────────────────
     distribution: str = "auto"
     distribution_params: dict[str, Any] = field(default_factory=dict)
@@ -130,6 +135,7 @@ class GenerationRule:
         if self.weights is not None:          d["weights"]   = self.weights
         if self.max_length is not None:       d["max_length"] = self.max_length
         if self.unique:                       d["unique"]    = True
+        if self.null_rate is not None:        d["null_rate"] = self.null_rate
         if self.distribution != "auto":       d["distribution"] = self.distribution
         if self.distribution_params:          d["distribution_params"] = self.distribution_params
         if self.format_pattern is not None:   d["format_pattern"] = self.format_pattern
@@ -140,8 +146,19 @@ class GenerationRule:
         if self.extra:                        d["extra"] = self.extra
         return d
 
+    # Keys that may appear at the top level of a generation: block as convenient
+    # shorthand for distribution_params.  E.g. {distribution: normal, mean: 3, std: 2}
+    # is equivalent to {distribution: normal, distribution_params: {mean: 3, std: 2}}.
+    _DIST_PARAM_ALIASES: ClassVar[frozenset[str]] = frozenset(
+        {"mean", "std", "exponent", "block_size", "cycle", "scale"}
+    )
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GenerationRule":
+        dist_params = dict(d.get("distribution_params") or {})
+        for key in cls._DIST_PARAM_ALIASES:
+            if key in d and key not in dist_params:
+                dist_params[key] = d[key]
         return cls(
             min_value=d.get("min_value"),
             max_value=d.get("max_value"),
@@ -149,8 +166,9 @@ class GenerationRule:
             weights=d.get("weights"),
             max_length=d.get("max_length"),
             unique=bool(d.get("unique", False)),
+            null_rate=float(d["null_rate"]) if d.get("null_rate") is not None else None,
             distribution=str(d.get("distribution", "auto")),
-            distribution_params=dict(d.get("distribution_params") or {}),
+            distribution_params=dist_params,
             format_pattern=d.get("format_pattern"),
             inject_boundary_values=bool(d.get("inject_boundary_values", True)),
             inject_nulls_from_stats=bool(d.get("inject_nulls_from_stats", True)),

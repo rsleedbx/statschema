@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 from src.statschema.model import (
     CanonicalColumn,
@@ -157,10 +160,7 @@ class TestResolveLoadOrder:
 
     def test_tpch_yaml_order(self):
         from src.statschema.schema_io import load_canonical
-        from pathlib import Path
-        yaml_path = Path("benchmarks/schemas/tpch_schema.yaml")
-        if not yaml_path.exists():
-            pytest.skip("tpch_schema.yaml not found")
+        yaml_path = _REPO_ROOT / "benchmarks/schemas/tpch_schema.yaml"
         tables = load_canonical(yaml_path)
         ordered = resolve_load_order(tables)
         names = [t.name for t in ordered]
@@ -216,10 +216,7 @@ class TestResolveRowCounts:
 
     def test_tpcc_sf1_counts(self):
         from src.statschema.schema_io import load_canonical
-        from pathlib import Path
-        yaml_path = Path("benchmarks/schemas/tpcc_schema.yaml")
-        if not yaml_path.exists():
-            pytest.skip("tpcc_schema.yaml not found")
+        yaml_path = _REPO_ROOT / "benchmarks/schemas/tpcc_schema.yaml"
         tables = load_canonical(yaml_path)
         counts = resolve_row_counts(tables, scale_factor=1.0)
         assert counts["item"] == 100_000         # fixed, per TPC-C spec
@@ -460,10 +457,7 @@ class TestGenerateRows:
     def test_tpcc_item_table(self):
         """Smoke-test: generate 10 item rows from the TPC-C canonical YAML."""
         from src.statschema.schema_io import load_canonical
-        from pathlib import Path
-        yaml_path = Path("benchmarks/schemas/tpcc_schema.yaml")
-        if not yaml_path.exists():
-            pytest.skip("tpcc_schema.yaml not found")
+        yaml_path = _REPO_ROOT / "benchmarks/schemas/tpcc_schema.yaml"
         tables = load_canonical(yaml_path)
         item_table = next(t for t in tables if t.name == "item")
         rows = list(generate_rows(item_table, 10, seed=0))
@@ -475,10 +469,7 @@ class TestGenerateRows:
     def test_tpch_lineitem_dates_present(self):
         """Smoke-test: lineitem generates date columns correctly."""
         from src.statschema.schema_io import load_canonical
-        from pathlib import Path
-        yaml_path = Path("benchmarks/schemas/tpch_schema.yaml")
-        if not yaml_path.exists():
-            pytest.skip("tpch_schema.yaml not found")
+        yaml_path = _REPO_ROOT / "benchmarks/schemas/tpch_schema.yaml"
         tables = load_canonical(yaml_path)
         li_table = next(t for t in tables if t.name == "lineitem")
         row_counts = {"orders": 5, "part": 10, "supplier": 3, "partsupp": 40}
