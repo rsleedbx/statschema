@@ -528,6 +528,25 @@ class CanonicalTableSchema:
     row_count: Optional[int] = None
     row_count_per_sf: Optional[float] = None
 
+    # ── built-in generator ───────────────────────────────────────────────
+    # When set, row generation is delegated to a named built-in function
+    # instead of the column-by-column random synthesis path.  The named
+    # generator produces a deterministic, spec-correct row sequence.
+    #
+    # Supported values (all are stdlib-only, no third-party deps):
+    #   "date_dim"              TPC-DS date_dim — 73,049 calendar-day rows from
+    #                           1900-01-02 to 2100-01-01, with all derived columns
+    #                           (year, month, dow, quarter, holiday flags, etc.).
+    #   "time_dim"              TPC-DS time_dim — 86,400 second-of-day rows (00:00:00
+    #                           through 23:59:59) with hour/minute/shift columns.
+    #   "customer_demographics" TPC-DS customer_demographics — 1,920,800-row
+    #                           Cartesian product of 8 demographic attributes.
+    #   "household_demographics" TPC-DS household_demographics — 7,200-row product
+    #                           of income band × buy potential × dep count × vehicles.
+    #   "income_band"           TPC-DS income_band — 20 fixed income ranges.
+    #   "zip_code"              TPC-E zip_code — 14,741 US ZIP-code reference rows.
+    builtin_generator: Optional[str] = None
+
     # ── load ordering ─────────────────────────────────────────────────────
     # Explicit list of table names that must be loaded before this one.
     # resolve_load_order() computes the topological sort from fk_constraints
@@ -557,6 +576,8 @@ class CanonicalTableSchema:
             d["row_count"] = self.row_count
         if self.row_count_per_sf is not None:
             d["row_count_per_sf"] = self.row_count_per_sf
+        if self.builtin_generator is not None:
+            d["builtin_generator"] = self.builtin_generator
         if self.load_after:
             d["load_after"] = list(self.load_after)
         if self.aliases:
@@ -579,6 +600,7 @@ class CanonicalTableSchema:
             temporal_ordering_constraints=list(d.get("temporal_ordering_constraints", [])),
             row_count=d.get("row_count"),
             row_count_per_sf=d.get("row_count_per_sf"),
+            builtin_generator=d.get("builtin_generator"),
             load_after=list(d.get("load_after") or []),
             aliases=list(d.get("aliases") or []),
             instance_count=int(d.get("instance_count", 1)),

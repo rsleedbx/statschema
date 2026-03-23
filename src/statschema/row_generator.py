@@ -37,6 +37,7 @@ import string
 from datetime import date, datetime, timedelta
 from typing import Any, Iterator
 
+from .builtin_generators import dispatch as _builtin_dispatch
 from .model import CanonicalColumn, CanonicalTableSchema, GenerationRule
 
 
@@ -388,6 +389,13 @@ def generate_rows(
                                      parent_row_counts=row_counts):
                 ...
     """
+    # Delegate entirely to the built-in generator when the table declares one.
+    # Built-in generators are deterministic and produce spec-correct rows
+    # (e.g. TPC-DS date_dim, time_dim, customer_demographics).
+    if table.builtin_generator:
+        yield from _builtin_dispatch(table.builtin_generator, row_count, row_offset)
+        return
+
     rng = random.Random(seed)
 
     # Build FK column → (parent_max, fk_dist, fk_params) from fk_constraints

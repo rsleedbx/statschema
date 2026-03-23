@@ -1,0 +1,1888 @@
+# TPC-DS canonical schema  (TPC-DS v3 approximation)
+#
+# Row counts at SF=1 follow the TPC-DS specification §4.1.
+# Tables whose content is fully determined by the spec use
+# builtin_generator instead of random column synthesis.
+#
+# Fixed tables (do not scale with SF):
+#   date_dim              73,049   (1900-01-02 → 2100-01-01)
+#   time_dim              86,400   (one row per second of the day)
+#   customer_demographics 1,920,800 (Cartesian product of 8 demographic attributes)
+#   household_demographics 7,200   (product of income_band × buy_potential × dep/veh)
+#   income_band           20
+#   reason                55
+#   ship_mode             20
+#
+# Scaling tables use row_count_per_sf; integer SF is assumed.
+# Reference: https://www.tpc.org/tpc_documents_current_versions/pdf/tpc-ds_v3.2.0.pdf
+
+tables:
+
+# ── Fixed dimension tables ──────────────────────────────────────────────────
+
+- name: date_dim
+  description: "Calendar day dimension — one row per day from 1900-01-02 to 2100-01-01."
+  builtin_generator: date_dim
+  row_count: 73049
+  columns:
+    - {name: d_date_sk,           type: integer,  not_null: true, primary_key: true}
+    - {name: d_date_id,           type: varchar,  length: 16, not_null: true, unique: true}
+    - {name: d_date,              type: date}
+    - {name: d_month_seq,         type: integer}
+    - {name: d_week_seq,          type: integer}
+    - {name: d_quarter_seq,       type: integer}
+    - {name: d_year,              type: integer}
+    - {name: d_dow,               type: integer}
+    - {name: d_moy,               type: integer}
+    - {name: d_dom,               type: integer}
+    - {name: d_qoy,               type: integer}
+    - {name: d_fy_year,           type: integer}
+    - {name: d_fy_quarter_seq,    type: integer}
+    - {name: d_fy_week_seq,       type: integer}
+    - {name: d_day_name,          type: varchar,  length: 9}
+    - {name: d_quarter_name,      type: varchar,  length: 6}
+    - {name: d_holiday,           type: char,     length: 1}
+    - {name: d_weekend,           type: char,     length: 1}
+    - {name: d_following_holiday, type: char,     length: 1}
+    - {name: d_first_dom,         type: integer}
+    - {name: d_last_dom,          type: integer}
+    - {name: d_same_day_ly,       type: integer}
+    - {name: d_same_day_lq,       type: integer}
+    - {name: d_current_day,       type: char,     length: 1}
+    - {name: d_current_week,      type: char,     length: 1}
+    - {name: d_current_month,     type: char,     length: 1}
+    - {name: d_current_quarter,   type: char,     length: 1}
+    - {name: d_current_year,      type: char,     length: 1}
+
+- name: time_dim
+  description: "Time-of-day dimension — one row per second (86,400 rows)."
+  builtin_generator: time_dim
+  row_count: 86400
+  columns:
+    - {name: t_time_sk,   type: integer, not_null: true, primary_key: true}
+    - {name: t_time_id,   type: varchar, length: 16, not_null: true, unique: true}
+    - {name: t_time,      type: integer}
+    - {name: t_hour,      type: integer}
+    - {name: t_minute,    type: integer}
+    - {name: t_second,    type: integer}
+    - {name: t_am_pm,     type: char,    length: 2}
+    - {name: t_shift,     type: varchar, length: 20}
+    - {name: t_sub_shift, type: varchar, length: 20}
+    - {name: t_meal_time, type: varchar, length: 20}
+
+- name: customer_demographics
+  description: "Full Cartesian product of 8 demographic attributes — 1,920,800 rows."
+  builtin_generator: customer_demographics
+  row_count: 1920800
+  columns:
+    - {name: cd_demo_sk,            type: integer, not_null: true, primary_key: true}
+    - {name: cd_gender,             type: char,    length: 1}
+    - {name: cd_marital_status,     type: char,    length: 1}
+    - {name: cd_education_status,   type: varchar, length: 20}
+    - {name: cd_purchase_estimate,  type: integer}
+    - {name: cd_credit_rating,      type: varchar, length: 10}
+    - {name: cd_dep_count,          type: integer}
+    - {name: cd_dep_employed_count, type: integer}
+    - {name: cd_dep_college_count,  type: integer}
+
+- name: household_demographics
+  description: "Product of income_band × buy_potential × dep_count × vehicle_count — 7,200 rows."
+  builtin_generator: household_demographics
+  row_count: 7200
+  columns:
+    - {name: hd_demo_sk,         type: integer, not_null: true, primary_key: true}
+    - {name: hd_income_band_sk,  type: integer}
+    - {name: hd_buy_potential,   type: varchar, length: 15}
+    - {name: hd_dep_count,       type: integer}
+    - {name: hd_vehicle_count,   type: integer}
+  fk_constraints:
+    - columns: [hd_income_band_sk]
+      parent_table: income_band
+      parent_columns: [ib_income_band_sk]
+
+- name: income_band
+  description: "20 income bracket definitions, each spanning $10,000."
+  builtin_generator: income_band
+  row_count: 20
+  columns:
+    - {name: ib_income_band_sk, type: integer, not_null: true, primary_key: true}
+    - {name: ib_lower_bound,    type: integer}
+    - {name: ib_upper_bound,    type: integer}
+
+- name: reason
+  description: "Return-reason lookup — 55 fixed rows."
+  row_count: 55
+  columns:
+    - name: r_reason_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: r_reason_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: r_reason_desc
+      type: varchar
+      length: 100
+      generation:
+        values:
+          - "Did not fit"
+          - "Not as described"
+          - "Better price available"
+          - "No longer needed"
+          - "Damaged"
+          - "Wrong item shipped"
+          - "Defective"
+          - "Changed mind"
+          - "Gift duplicate"
+          - "Price discrepancy"
+          - "Missing parts"
+          - "Item arrived late"
+          - "Ordered by mistake"
+          - "Expired"
+          - "Poor quality"
+
+- name: ship_mode
+  description: "Shipping method lookup — 20 fixed rows."
+  row_count: 20
+  columns:
+    - name: sm_ship_mode_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: sm_ship_mode_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: sm_type
+      type: varchar
+      length: 30
+      generation:
+        values:
+          - "LIBRARY"
+          - "TWO DAY"
+          - "NEXT DAY AIR"
+          - "SURFACE"
+          - "OVERNIGHT"
+          - "EXPRESS"
+          - "GROUND"
+          - "PRIORITY"
+    - name: sm_code
+      type: varchar
+      length: 10
+      generation:
+        values:
+          - "EXPRESS"
+          - "PRIORITY"
+          - "ECONOMY"
+          - "STANDARD"
+    - name: sm_carrier
+      type: varchar
+      length: 20
+      generation:
+        values:
+          - "Universal"
+          - "Airborne"
+          - "Zouros"
+          - "Tribune"
+          - "Diamond"
+          - "Overnight"
+          - "USPS"
+          - "DHL"
+          - "FedEx"
+          - "UPS"
+    - name: sm_contract
+      type: varchar
+      length: 20
+      generation: {format_pattern: upper_id, length: 16}
+
+# ── Scaling dimension tables ────────────────────────────────────────────────
+
+- name: item
+  description: "Product catalog — 18,000 rows per SF."
+  row_count_per_sf: 18000
+  columns:
+    - name: i_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: i_item_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: i_rec_start_date
+      type: date
+      generation: {min_value: "1997-01-01", max_value: "2001-01-01"}
+    - name: i_rec_end_date
+      type: date
+      generation: {min_value: "2001-01-01", max_value: "2003-01-01"}
+    - name: i_item_desc
+      type: varchar
+      length: 200
+      generation: {format_pattern: sentence}
+    - name: i_current_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.09, max_value: 300.00}
+    - name: i_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.05, max_value: 250.00}
+    - name: i_brand_id
+      type: integer
+      generation: {min_value: 1, max_value: 1000}
+    - name: i_brand
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: i_class_id
+      type: integer
+      generation: {min_value: 1, max_value: 16}
+    - name: i_class
+      type: varchar
+      length: 50
+      generation:
+        values:
+          - "electronics"
+          - "apparel"
+          - "shoes"
+          - "jewelry"
+          - "home"
+          - "garden"
+          - "sporting"
+          - "toys"
+          - "books"
+          - "music"
+          - "video"
+          - "food"
+          - "health"
+          - "beauty"
+          - "automotive"
+          - "hardware"
+    - name: i_category_id
+      type: integer
+      generation: {min_value: 1, max_value: 10}
+    - name: i_category
+      type: varchar
+      length: 50
+      generation:
+        values:
+          - "Books"
+          - "Music"
+          - "Electronics"
+          - "Clothing"
+          - "Home"
+          - "Sports"
+          - "Shoes"
+          - "Jewelry"
+          - "Children"
+          - "Men"
+    - name: i_manufact_id
+      type: integer
+      generation: {min_value: 1, max_value: 1000}
+    - name: i_manufact
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: i_size
+      type: varchar
+      length: 20
+      generation:
+        values:
+          - "small"
+          - "medium"
+          - "large"
+          - "extra large"
+          - "N/A"
+          - "petite"
+          - "plus"
+          - "economy"
+    - name: i_formulation
+      type: varchar
+      length: 20
+      generation: {format_pattern: word}
+    - name: i_color
+      type: varchar
+      length: 20
+      generation:
+        values:
+          - "red"
+          - "blue"
+          - "green"
+          - "black"
+          - "white"
+          - "grey"
+          - "yellow"
+          - "brown"
+          - "pink"
+          - "orange"
+    - name: i_units
+      type: varchar
+      length: 10
+      generation:
+        values:
+          - "Each"
+          - "Dozen"
+          - "Lb"
+          - "Oz"
+          - "Box"
+          - "Case"
+          - "Bundle"
+          - "Tbl"
+          - "Gross"
+          - "N/A"
+    - name: i_container
+      type: varchar
+      length: 10
+      generation:
+        values:
+          - "Unknown"
+          - "Bag"
+          - "Canister"
+          - "Bottle"
+          - "Box"
+          - "Cup"
+          - "Carton"
+    - name: i_manager_id
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: i_product_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+
+- name: warehouse
+  description: "Warehouse locations — 5 rows at SF=1, grows as floor(5*sqrt(SF))."
+  row_count: 5
+  columns:
+    - name: w_warehouse_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: w_warehouse_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: w_warehouse_name
+      type: varchar
+      length: 20
+      generation:
+        values:
+          - "Primary Warehouse"
+          - "East Distribution"
+          - "West Hub"
+          - "Central Logistics"
+          - "South Depot"
+    - name: w_warehouse_sq_ft
+      type: integer
+      generation: {min_value: 50000, max_value: 1000000}
+    - name: w_street_number
+      type: varchar
+      length: 10
+      generation: {min_value: 1, max_value: 9999, distribution: sequential}
+    - name: w_street_name
+      type: varchar
+      length: 60
+      generation: {format_pattern: word}
+    - name: w_street_type
+      type: varchar
+      length: 15
+      generation:
+        values: ["Avenue", "Boulevard", "Circle", "Drive", "Lane", "Road", "Street"]
+    - name: w_suite_number
+      type: varchar
+      length: 10
+      generation:
+        values: ["Suite 100", "Suite 200", "Ste A", "Ste B", "N/A"]
+    - name: w_city
+      type: varchar
+      length: 60
+      generation: {format_pattern: city}
+    - name: w_county
+      type: varchar
+      length: 30
+      generation: {format_pattern: word}
+    - name: w_state
+      type: varchar
+      length: 2
+      generation:
+        values: ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"]
+    - name: w_zip
+      type: varchar
+      length: 10
+      generation: {format_pattern: zip_code}
+    - name: w_country
+      type: varchar
+      length: 20
+      generation: {values: ["United States"]}
+    - name: w_gmt_offset
+      type: decimal
+      precision: 5
+      scale: 2
+      generation:
+        values: [-5.0, -6.0, -7.0, -8.0]
+
+- name: store
+  description: "Retail store locations — 12 rows at SF=1."
+  row_count: 12
+  columns:
+    - name: s_store_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: s_store_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: s_rec_start_date
+      type: date
+      generation: {min_value: "1998-01-01", max_value: "2000-01-01"}
+    - name: s_rec_end_date
+      type: date
+      generation: {min_value: "2001-01-01", max_value: "2003-01-01"}
+    - name: s_closed_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: s_store_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: s_number_employees
+      type: integer
+      generation: {min_value: 10, max_value: 300}
+    - name: s_floor_space
+      type: integer
+      generation: {min_value: 5000, max_value: 50000}
+    - name: s_hours
+      type: varchar
+      length: 20
+      generation:
+        values: ["8AM-12AM", "8AM-8PM", "8AM-4PM", "24 hours"]
+    - name: s_manager
+      type: varchar
+      length: 40
+      generation: {format_pattern: full_name}
+    - name: s_mkt_id
+      type: integer
+      generation: {min_value: 1, max_value: 10}
+    - name: s_mkt_class
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: s_mkt_desc
+      type: varchar
+      length: 100
+      generation: {format_pattern: sentence}
+    - name: s_market_manager
+      type: varchar
+      length: 40
+      generation: {format_pattern: full_name}
+    - name: s_division_id
+      type: integer
+      generation: {min_value: 1, max_value: 5}
+    - name: s_division_name
+      type: varchar
+      length: 50
+      generation:
+        values: ["North America", "Europe", "Asia", "Latin America", "Middle East"]
+    - name: s_company_id
+      type: integer
+      generation: {min_value: 1, max_value: 5}
+    - name: s_company_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: s_street_number
+      type: varchar
+      length: 10
+      generation: {min_value: 1, max_value: 9999}
+    - name: s_street_name
+      type: varchar
+      length: 60
+      generation: {format_pattern: word}
+    - name: s_street_type
+      type: varchar
+      length: 15
+      generation:
+        values: ["Avenue", "Boulevard", "Circle", "Drive", "Lane", "Road", "Street"]
+    - name: s_suite_number
+      type: varchar
+      length: 10
+      generation:
+        values: ["Suite 100", "Suite 200", "Ste A", "Ste B", "N/A"]
+    - name: s_city
+      type: varchar
+      length: 60
+      generation: {format_pattern: city}
+    - name: s_county
+      type: varchar
+      length: 30
+      generation: {format_pattern: word}
+    - name: s_state
+      type: varchar
+      length: 2
+      generation:
+        values: ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"]
+    - name: s_zip
+      type: varchar
+      length: 10
+      generation: {format_pattern: zip_code}
+    - name: s_country
+      type: varchar
+      length: 20
+      generation: {values: ["United States"]}
+    - name: s_gmt_offset
+      type: decimal
+      precision: 5
+      scale: 2
+      generation:
+        values: [-5.0, -6.0, -7.0, -8.0]
+    - name: s_tax_percentage
+      type: decimal
+      precision: 5
+      scale: 2
+      generation: {min_value: 0.0, max_value: 0.11}
+
+- name: call_center
+  description: "Call-center dimension — 6 rows at SF=1."
+  row_count: 6
+  columns:
+    - name: cc_call_center_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: cc_call_center_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: cc_rec_start_date
+      type: date
+      generation: {min_value: "1998-01-01", max_value: "2000-01-01"}
+    - name: cc_rec_end_date
+      type: date
+      generation: {min_value: "2001-01-01", max_value: "2003-01-01"}
+    - name: cc_closed_date_sk
+      type: integer
+    - name: cc_open_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 40000}
+    - name: cc_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: cc_class
+      type: varchar
+      length: 50
+      generation:
+        values: ["large", "medium", "small", "mktg"]
+    - name: cc_employees
+      type: integer
+      generation: {min_value: 1, max_value: 500}
+    - name: cc_sq_ft
+      type: integer
+      generation: {min_value: 1000, max_value: 100000}
+    - name: cc_hours
+      type: varchar
+      length: 20
+      generation:
+        values: ["8AM-12AM", "8AM-8PM", "8AM-4PM", "24 hours"]
+    - name: cc_manager
+      type: varchar
+      length: 40
+      generation: {format_pattern: full_name}
+    - name: cc_mkt_id
+      type: integer
+      generation: {min_value: 1, max_value: 10}
+    - name: cc_mkt_class
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: cc_mkt_desc
+      type: varchar
+      length: 100
+      generation: {format_pattern: sentence}
+    - name: cc_market_manager
+      type: varchar
+      length: 40
+      generation: {format_pattern: full_name}
+    - name: cc_division
+      type: integer
+      generation: {min_value: 1, max_value: 5}
+    - name: cc_division_name
+      type: varchar
+      length: 50
+      generation:
+        values: ["North America", "Europe", "Asia", "Latin America", "Middle East"]
+    - name: cc_company
+      type: integer
+      generation: {min_value: 1, max_value: 5}
+    - name: cc_company_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: cc_street_number
+      type: varchar
+      length: 10
+      generation: {min_value: 1, max_value: 9999}
+    - name: cc_street_name
+      type: varchar
+      length: 60
+      generation: {format_pattern: word}
+    - name: cc_street_type
+      type: varchar
+      length: 15
+      generation:
+        values: ["Avenue", "Boulevard", "Circle", "Drive", "Lane", "Road", "Street"]
+    - name: cc_suite_number
+      type: varchar
+      length: 10
+      generation:
+        values: ["Suite 100", "Suite 200", "Ste A", "Ste B", "N/A"]
+    - name: cc_city
+      type: varchar
+      length: 60
+      generation: {format_pattern: city}
+    - name: cc_county
+      type: varchar
+      length: 30
+      generation: {format_pattern: word}
+    - name: cc_state
+      type: varchar
+      length: 2
+      generation:
+        values: ["AL","CA","CO","FL","GA","IL","NY","OH","TX","WA"]
+    - name: cc_zip
+      type: varchar
+      length: 10
+      generation: {format_pattern: zip_code}
+    - name: cc_country
+      type: varchar
+      length: 20
+      generation: {values: ["United States"]}
+    - name: cc_gmt_offset
+      type: decimal
+      precision: 5
+      scale: 2
+      generation:
+        values: [-5.0, -6.0, -7.0, -8.0]
+    - name: cc_tax_percentage
+      type: decimal
+      precision: 5
+      scale: 2
+      generation: {min_value: 0.0, max_value: 0.11}
+
+- name: customer_address
+  description: "Customer mailing addresses — 50,000 per SF."
+  row_count_per_sf: 50000
+  columns:
+    - name: ca_address_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: ca_address_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: ca_street_number
+      type: varchar
+      length: 10
+      generation: {min_value: 1, max_value: 9999}
+    - name: ca_street_name
+      type: varchar
+      length: 60
+      generation: {format_pattern: word}
+    - name: ca_street_type
+      type: varchar
+      length: 15
+      generation:
+        values: ["Avenue", "Boulevard", "Circle", "Drive", "Lane", "Road", "Street"]
+    - name: ca_suite_number
+      type: varchar
+      length: 10
+      generation:
+        values: ["Suite 100", "Suite 200", "Ste A", "Ste B", "N/A"]
+    - name: ca_city
+      type: varchar
+      length: 60
+      generation: {format_pattern: city}
+    - name: ca_county
+      type: varchar
+      length: 30
+      generation: {format_pattern: word}
+    - name: ca_state
+      type: varchar
+      length: 2
+      generation:
+        values: ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"]
+    - name: ca_zip
+      type: varchar
+      length: 10
+      generation: {format_pattern: zip_code}
+    - name: ca_country
+      type: varchar
+      length: 20
+      generation: {values: ["United States"]}
+    - name: ca_gmt_offset
+      type: decimal
+      precision: 5
+      scale: 2
+      generation:
+        values: [-5.0, -6.0, -7.0, -8.0]
+    - name: ca_location_type
+      type: varchar
+      length: 20
+      generation:
+        values: ["condo", "apartment", "unknown", "single family"]
+
+- name: customer
+  description: "Customer master — 100,000 per SF."
+  row_count_per_sf: 100000
+  columns:
+    - name: c_customer_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: c_customer_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: c_current_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: c_current_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: c_current_addr_sk
+      type: integer
+    - name: c_first_shipto_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 52000}
+    - name: c_first_sales_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 52000}
+    - name: c_salutation
+      type: varchar
+      length: 10
+      generation:
+        values: ["Mr.", "Mrs.", "Ms.", "Miss", "Dr.", "Sir"]
+    - name: c_first_name
+      type: varchar
+      length: 20
+      generation: {format_pattern: first_name}
+    - name: c_last_name
+      type: varchar
+      length: 30
+      generation: {format_pattern: last_name}
+    - name: c_preferred_cust_flag
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: c_birth_day
+      type: integer
+      generation: {min_value: 1, max_value: 28}
+    - name: c_birth_month
+      type: integer
+      generation: {min_value: 1, max_value: 12}
+    - name: c_birth_year
+      type: integer
+      generation: {min_value: 1924, max_value: 1992}
+    - name: c_birth_country
+      type: varchar
+      length: 20
+      generation:
+        values: ["UNITED STATES", "CANADA", "UNITED KINGDOM", "MEXICO", "AUSTRALIA", "JAPAN", "GERMANY", "FRANCE"]
+    - name: c_login
+      type: varchar
+      length: 13
+    - name: c_email_address
+      type: varchar
+      length: 50
+      generation: {format_pattern: email}
+    - name: c_last_review_date_sk
+      type: integer
+      generation: {min_value: 50000, max_value: 73049}
+  fk_constraints:
+    - columns: [c_current_addr_sk]
+      parent_table: customer_address
+      parent_columns: [ca_address_sk]
+
+- name: promotion
+  description: "Promotion/coupon events — 300 per SF."
+  row_count_per_sf: 300
+  columns:
+    - name: p_promo_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: p_promo_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: p_start_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 52000}
+    - name: p_end_date_sk
+      type: integer
+      generation: {min_value: 52000, max_value: 73049}
+    - name: p_item_sk
+      type: integer
+    - name: p_cost
+      type: decimal
+      precision: 15
+      scale: 2
+      generation: {min_value: 0.01, max_value: 1000000.00}
+    - name: p_response_target
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: p_promo_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: p_channel_dmail
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_email
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_catalog
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_tv
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_radio
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_press
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_event
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_demo
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: p_channel_details
+      type: varchar
+      length: 100
+      generation: {format_pattern: sentence}
+    - name: p_purpose
+      type: varchar
+      length: 15
+      generation:
+        values: ["Unknown", "Cross-Sell", "Price", "Brand", "Awareness"]
+    - name: p_discount_active
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+  fk_constraints:
+    - columns: [p_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+
+- name: catalog_page
+  description: "Catalog page inventory — 11,718 per SF."
+  row_count_per_sf: 11718
+  columns:
+    - name: cp_catalog_page_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: cp_catalog_page_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: cp_start_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 52000}
+    - name: cp_end_date_sk
+      type: integer
+      generation: {min_value: 52000, max_value: 73049}
+    - name: cp_department
+      type: varchar
+      length: 50
+      generation:
+        values: ["JEWELRY", "SPORTS", "BOOKS", "MUSIC", "HOME", "ELECTRONICS", "CLOTHING", "SHOES", "KIDS"]
+    - name: cp_catalog_number
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: cp_catalog_page_number
+      type: integer
+      generation: {min_value: 1, max_value: 200}
+    - name: cp_description
+      type: varchar
+      length: 100
+      generation: {format_pattern: sentence}
+    - name: cp_type
+      type: varchar
+      length: 100
+      generation:
+        values: ["bi-annual", "quarterly", "annual", "monthly"]
+
+- name: web_site
+  description: "E-commerce web sites — 54 rows (grows slowly with SF)."
+  row_count: 54
+  columns:
+    - name: web_site_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: web_site_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: web_rec_start_date
+      type: date
+      generation: {min_value: "1997-01-01", max_value: "2001-01-01"}
+    - name: web_rec_end_date
+      type: date
+      generation: {min_value: "2001-01-01", max_value: "2003-01-01"}
+    - name: web_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: web_open_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 40000}
+    - name: web_close_date_sk
+      type: integer
+    - name: web_class
+      type: varchar
+      length: 50
+      generation:
+        values: ["Unknown", "Large", "Medium", "Small"]
+    - name: web_manager
+      type: varchar
+      length: 40
+      generation: {format_pattern: full_name}
+    - name: web_mkt_id
+      type: integer
+      generation: {min_value: 1, max_value: 10}
+    - name: web_mkt_class
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: web_mkt_desc
+      type: varchar
+      length: 100
+      generation: {format_pattern: sentence}
+    - name: web_market_manager
+      type: varchar
+      length: 40
+      generation: {format_pattern: full_name}
+    - name: web_company_id
+      type: integer
+      generation: {min_value: 1, max_value: 5}
+    - name: web_company_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: web_street_number
+      type: varchar
+      length: 10
+      generation: {min_value: 1, max_value: 9999}
+    - name: web_street_name
+      type: varchar
+      length: 60
+      generation: {format_pattern: word}
+    - name: web_street_type
+      type: varchar
+      length: 15
+      generation:
+        values: ["Avenue", "Boulevard", "Drive", "Road", "Street"]
+    - name: web_suite_number
+      type: varchar
+      length: 10
+      generation:
+        values: ["Suite 100", "Suite 200", "Ste A", "N/A"]
+    - name: web_city
+      type: varchar
+      length: 60
+      generation: {format_pattern: city}
+    - name: web_county
+      type: varchar
+      length: 30
+      generation: {format_pattern: word}
+    - name: web_state
+      type: varchar
+      length: 2
+      generation:
+        values: ["CA", "NY", "TX", "FL", "IL", "WA", "CO", "MA"]
+    - name: web_zip
+      type: varchar
+      length: 10
+      generation: {format_pattern: zip_code}
+    - name: web_country
+      type: varchar
+      length: 20
+      generation: {values: ["United States"]}
+    - name: web_gmt_offset
+      type: decimal
+      precision: 5
+      scale: 2
+      generation:
+        values: [-5.0, -6.0, -7.0, -8.0]
+    - name: web_tax_percentage
+      type: decimal
+      precision: 5
+      scale: 2
+      generation: {min_value: 0.0, max_value: 0.11}
+
+- name: web_page
+  description: "Web pages — 2,040 per SF."
+  row_count_per_sf: 2040
+  columns:
+    - name: wp_web_page_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: wp_web_page_id
+      type: varchar
+      length: 16
+      not_null: true
+      generation: {format_pattern: upper_id, length: 16}
+    - name: wp_rec_start_date
+      type: date
+      generation: {min_value: "1997-01-01", max_value: "2001-01-01"}
+    - name: wp_rec_end_date
+      type: date
+      generation: {min_value: "2001-01-01", max_value: "2003-01-01"}
+    - name: wp_creation_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 52000}
+    - name: wp_access_date_sk
+      type: integer
+      generation: {min_value: 52000, max_value: 73049}
+    - name: wp_autogen_flag
+      type: char
+      length: 1
+      generation: {values: ["Y", "N"]}
+    - name: wp_customer_sk
+      type: integer
+    - name: wp_url
+      type: varchar
+      length: 100
+      generation: {format_pattern: url}
+    - name: wp_type
+      type: varchar
+      length: 50
+      generation:
+        values: ["notice", "welcome", "dynamic", "order", "content", "info", "feedback"]
+    - name: wp_char_count
+      type: integer
+      generation: {min_value: 100, max_value: 10000}
+    - name: wp_link_count
+      type: integer
+      generation: {min_value: 0, max_value: 50}
+    - name: wp_image_count
+      type: integer
+      generation: {min_value: 0, max_value: 20}
+    - name: wp_max_ad_count
+      type: integer
+      generation: {min_value: 0, max_value: 10}
+
+# ── Fact tables ─────────────────────────────────────────────────────────────
+
+- name: store_sales
+  description: "Primary retail-channel fact table — ~2,880,404 rows per SF."
+  row_count_per_sf: 2880404
+  load_after: [date_dim, time_dim, customer, customer_demographics, household_demographics, item, store, promotion]
+  columns:
+    - name: ss_sold_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: ss_sold_time_sk
+      type: integer
+      generation: {min_value: 0, max_value: 86399}
+    - name: ss_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: ss_customer_sk
+      type: integer
+    - name: ss_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: ss_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: ss_addr_sk
+      type: integer
+    - name: ss_store_sk
+      type: integer
+    - name: ss_promo_sk
+      type: integer
+    - name: ss_ticket_number
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: ss_quantity
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: ss_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.02, max_value: 100.00}
+    - name: ss_list_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.02, max_value: 300.00}
+    - name: ss_sales_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 300.00}
+    - name: ss_ext_discount_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ss_ext_sales_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ss_ext_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ss_ext_list_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ss_ext_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: ss_coupon_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ss_net_paid
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ss_net_paid_inc_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 33000.00}
+    - name: ss_net_profit
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: -30000.00, max_value: 30000.00}
+  fk_constraints:
+    - columns: [ss_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [ss_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [ss_addr_sk]
+      parent_table: customer_address
+      parent_columns: [ca_address_sk]
+    - columns: [ss_store_sk]
+      parent_table: store
+      parent_columns: [s_store_sk]
+    - columns: [ss_promo_sk]
+      parent_table: promotion
+      parent_columns: [p_promo_sk]
+
+- name: store_returns
+  description: "Retail-channel returns — ~287,514 rows per SF (≈10% of store_sales)."
+  row_count_per_sf: 287514
+  load_after: [store_sales, reason]
+  columns:
+    - name: sr_returned_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: sr_return_time_sk
+      type: integer
+      generation: {min_value: 0, max_value: 86399}
+    - name: sr_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: sr_customer_sk
+      type: integer
+    - name: sr_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: sr_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: sr_addr_sk
+      type: integer
+    - name: sr_store_sk
+      type: integer
+    - name: sr_reason_sk
+      type: integer
+    - name: sr_ticket_number
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: sr_return_quantity
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: sr_return_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 30000.00}
+    - name: sr_return_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: sr_return_amt_inc_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 33000.00}
+    - name: sr_fee
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 100.00}
+    - name: sr_return_ship_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: sr_refunded_cash
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: sr_reversed_charge
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: sr_store_credit
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: sr_net_loss
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 33000.00}
+  fk_constraints:
+    - columns: [sr_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [sr_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [sr_addr_sk]
+      parent_table: customer_address
+      parent_columns: [ca_address_sk]
+    - columns: [sr_store_sk]
+      parent_table: store
+      parent_columns: [s_store_sk]
+    - columns: [sr_reason_sk]
+      parent_table: reason
+      parent_columns: [r_reason_sk]
+
+- name: catalog_sales
+  description: "Catalog-channel fact table — ~1,441,548 rows per SF."
+  row_count_per_sf: 1441548
+  load_after: [date_dim, time_dim, customer, item, call_center, ship_mode, warehouse, promotion]
+  columns:
+    - name: cs_sold_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: cs_sold_time_sk
+      type: integer
+      generation: {min_value: 0, max_value: 86399}
+    - name: cs_ship_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: cs_bill_customer_sk
+      type: integer
+    - name: cs_bill_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: cs_bill_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: cs_bill_addr_sk
+      type: integer
+    - name: cs_ship_customer_sk
+      type: integer
+    - name: cs_ship_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: cs_ship_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: cs_ship_addr_sk
+      type: integer
+    - name: cs_call_center_sk
+      type: integer
+    - name: cs_catalog_page_sk
+      type: integer
+    - name: cs_ship_mode_sk
+      type: integer
+    - name: cs_warehouse_sk
+      type: integer
+    - name: cs_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: cs_promo_sk
+      type: integer
+    - name: cs_order_number
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: cs_quantity
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: cs_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.02, max_value: 100.00}
+    - name: cs_list_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.02, max_value: 300.00}
+    - name: cs_sales_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 300.00}
+    - name: cs_ext_discount_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cs_ext_sales_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cs_ext_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cs_ext_list_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cs_ext_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: cs_coupon_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cs_ext_ship_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 15000.00}
+    - name: cs_net_paid
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cs_net_paid_inc_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 33000.00}
+    - name: cs_net_paid_inc_ship
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 45000.00}
+    - name: cs_net_paid_inc_ship_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 48000.00}
+    - name: cs_net_profit
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: -30000.00, max_value: 30000.00}
+  fk_constraints:
+    - columns: [cs_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [cs_bill_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [cs_ship_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [cs_bill_addr_sk]
+      parent_table: customer_address
+      parent_columns: [ca_address_sk]
+    - columns: [cs_call_center_sk]
+      parent_table: call_center
+      parent_columns: [cc_call_center_sk]
+    - columns: [cs_ship_mode_sk]
+      parent_table: ship_mode
+      parent_columns: [sm_ship_mode_sk]
+    - columns: [cs_warehouse_sk]
+      parent_table: warehouse
+      parent_columns: [w_warehouse_sk]
+
+- name: catalog_returns
+  description: "Catalog-channel returns — ~144,067 rows per SF."
+  row_count_per_sf: 144067
+  load_after: [catalog_sales, reason]
+  columns:
+    - name: cr_returned_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: cr_returned_time_sk
+      type: integer
+      generation: {min_value: 0, max_value: 86399}
+    - name: cr_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: cr_refunded_customer_sk
+      type: integer
+    - name: cr_refunded_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: cr_refunded_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: cr_refunded_addr_sk
+      type: integer
+    - name: cr_returning_customer_sk
+      type: integer
+    - name: cr_returning_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: cr_returning_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: cr_returning_addr_sk
+      type: integer
+    - name: cr_call_center_sk
+      type: integer
+    - name: cr_catalog_page_sk
+      type: integer
+    - name: cr_ship_mode_sk
+      type: integer
+    - name: cr_warehouse_sk
+      type: integer
+    - name: cr_reason_sk
+      type: integer
+    - name: cr_order_number
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: cr_return_quantity
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: cr_return_amount
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 30000.00}
+    - name: cr_return_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: cr_return_amt_inc_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 33000.00}
+    - name: cr_fee
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 100.00}
+    - name: cr_return_ship_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: cr_refunded_cash
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cr_reversed_charge
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cr_store_credit
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: cr_net_loss
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 33000.00}
+  fk_constraints:
+    - columns: [cr_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [cr_refunded_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [cr_returning_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [cr_reason_sk]
+      parent_table: reason
+      parent_columns: [r_reason_sk]
+
+- name: web_sales
+  description: "Web-channel fact table — ~719,384 rows per SF."
+  row_count_per_sf: 719384
+  load_after: [date_dim, time_dim, customer, item, web_site, web_page, ship_mode, warehouse, promotion]
+  columns:
+    - name: ws_sold_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: ws_sold_time_sk
+      type: integer
+      generation: {min_value: 0, max_value: 86399}
+    - name: ws_ship_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: ws_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: ws_bill_customer_sk
+      type: integer
+    - name: ws_bill_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: ws_bill_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: ws_bill_addr_sk
+      type: integer
+    - name: ws_ship_customer_sk
+      type: integer
+    - name: ws_ship_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: ws_ship_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: ws_ship_addr_sk
+      type: integer
+    - name: ws_web_page_sk
+      type: integer
+    - name: ws_web_site_sk
+      type: integer
+    - name: ws_ship_mode_sk
+      type: integer
+    - name: ws_warehouse_sk
+      type: integer
+    - name: ws_promo_sk
+      type: integer
+    - name: ws_order_number
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: ws_quantity
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: ws_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.02, max_value: 100.00}
+    - name: ws_list_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.02, max_value: 300.00}
+    - name: ws_sales_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 300.00}
+    - name: ws_ext_discount_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ws_ext_sales_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ws_ext_wholesale_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ws_ext_list_price
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ws_ext_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: ws_coupon_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ws_ext_ship_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 15000.00}
+    - name: ws_net_paid
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: ws_net_paid_inc_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 33000.00}
+    - name: ws_net_paid_inc_ship
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 45000.00}
+    - name: ws_net_paid_inc_ship_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 48000.00}
+    - name: ws_net_profit
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: -30000.00, max_value: 30000.00}
+  fk_constraints:
+    - columns: [ws_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [ws_bill_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [ws_ship_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [ws_bill_addr_sk]
+      parent_table: customer_address
+      parent_columns: [ca_address_sk]
+    - columns: [ws_web_page_sk]
+      parent_table: web_page
+      parent_columns: [wp_web_page_sk]
+    - columns: [ws_web_site_sk]
+      parent_table: web_site
+      parent_columns: [web_site_sk]
+    - columns: [ws_ship_mode_sk]
+      parent_table: ship_mode
+      parent_columns: [sm_ship_mode_sk]
+    - columns: [ws_warehouse_sk]
+      parent_table: warehouse
+      parent_columns: [w_warehouse_sk]
+
+- name: web_returns
+  description: "Web-channel returns — ~71,763 rows per SF."
+  row_count_per_sf: 71763
+  load_after: [web_sales, reason]
+  columns:
+    - name: wr_returned_date_sk
+      type: integer
+      generation: {min_value: 36530, max_value: 73049}
+    - name: wr_returned_time_sk
+      type: integer
+      generation: {min_value: 0, max_value: 86399}
+    - name: wr_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: wr_refunded_customer_sk
+      type: integer
+    - name: wr_refunded_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: wr_refunded_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: wr_refunded_addr_sk
+      type: integer
+    - name: wr_returning_customer_sk
+      type: integer
+    - name: wr_returning_cdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 1920800}
+    - name: wr_returning_hdemo_sk
+      type: integer
+      generation: {min_value: 1, max_value: 7200}
+    - name: wr_returning_addr_sk
+      type: integer
+    - name: wr_web_page_sk
+      type: integer
+    - name: wr_reason_sk
+      type: integer
+    - name: wr_order_number
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: wr_return_quantity
+      type: integer
+      generation: {min_value: 1, max_value: 100}
+    - name: wr_return_amt
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 30000.00}
+    - name: wr_return_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: wr_return_amt_inc_tax
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 33000.00}
+    - name: wr_fee
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 100.00}
+    - name: wr_return_ship_cost
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 3300.00}
+    - name: wr_refunded_cash
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: wr_reversed_charge
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: wr_account_credit
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30000.00}
+    - name: wr_net_loss
+      type: decimal
+      precision: 7
+      scale: 2
+      generation: {min_value: 0.50, max_value: 33000.00}
+  fk_constraints:
+    - columns: [wr_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [wr_refunded_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [wr_returning_customer_sk]
+      parent_table: customer
+      parent_columns: [c_customer_sk]
+    - columns: [wr_reason_sk]
+      parent_table: reason
+      parent_columns: [r_reason_sk]
+
+- name: inventory
+  description: "Daily inventory snapshot per item per warehouse — ~11,745,000 rows per SF."
+  row_count_per_sf: 11745000
+  load_after: [date_dim, item, warehouse]
+  columns:
+    - name: inv_date_sk
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {min_value: 36530, max_value: 73049}
+    - name: inv_item_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: inv_warehouse_sk
+      type: integer
+      not_null: true
+      primary_key: true
+    - name: inv_quantity_on_hand
+      type: integer
+      generation: {min_value: 0, max_value: 1000}
+  fk_constraints:
+    - columns: [inv_item_sk]
+      parent_table: item
+      parent_columns: [i_item_sk]
+    - columns: [inv_warehouse_sk]
+      parent_table: warehouse
+      parent_columns: [w_warehouse_sk]

@@ -1,0 +1,1340 @@
+# TPC-E canonical schema  (TPC-E v1.14 approximation)
+#
+# TPC-E models a brokerage workload.  The minimum scale is 1,000 customers
+# (EF=1).  Row counts below target EF=500 (500,000 customers) — the TPC-E
+# minimum for a published result — but the schema scales via row_count_per_ef
+# expressed through row_count_per_sf (sf = EF here).
+#
+# Reference: https://www.tpc.org/tpce/
+#
+# Table taxonomy
+# ──────────────
+# Reference tables (static content, small)
+#   EXCHANGE, SECTOR, STATUS_TYPE, TRADE_TYPE, TAXRATE, CHARGE,
+#   COMMISSION_RATE — defined with fixed values lists or builtin_generator.
+# Scaling customer tables
+#   CUSTOMER, ADDRESS, CUSTOMER_ACCOUNT, CUSTOMER_TAXRATE,
+#   ACCOUNT_PERMISSION, WATCH_LIST, WATCH_ITEM
+# Scaling market tables
+#   BROKER, COMPANY, COMPANY_COMPETITOR, INDUSTRY, SECURITY,
+#   FINANCIAL, NEWS_ITEM, NEWS_XREF, DAILY_MARKET, LAST_TRADE
+# Scaling transaction tables
+#   TRADE, TRADE_HISTORY, TRADE_REQUEST, HOLDING, HOLDING_HISTORY,
+#   HOLDING_SUMMARY, CASH_TRANSACTION
+# ZIP reference
+#   ZIP_CODE — builtin_generator for 14,741 US ZIP-code rows
+
+tables:
+
+# ── Reference tables ────────────────────────────────────────────────────────
+
+- name: exchange
+  description: "Stock exchanges — 4 fixed rows."
+  row_count: 4
+  columns:
+    - name: ex_id
+      type: varchar
+      length: 6
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["NYSE", "NASDAQ", "AMEX", "CBT"]
+    - name: ex_name
+      type: varchar
+      length: 100
+      generation:
+        values:
+          - "New York Stock Exchange"
+          - "National Association of Securities Dealers Automated Quotations"
+          - "American Stock Exchange"
+          - "Chicago Board of Trade"
+    - name: ex_num_symb
+      type: integer
+      generation:
+        values: [3000, 4000, 1000, 500]
+    - name: ex_open
+      type: integer
+      generation: {values: [900, 930, 930, 840]}
+    - name: ex_close
+      type: integer
+      generation: {values: [1600, 1600, 1600, 1515]}
+    - name: ex_desc
+      type: varchar
+      length: 150
+    - name: ex_ad_id
+      type: varchar
+      length: 80
+
+- name: sector
+  description: "Industry sectors — 12 fixed rows."
+  row_count: 12
+  columns:
+    - name: sc_id
+      type: varchar
+      length: 2
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["BK","EL","EN","FI","HC","IN","MF","ME","RE","RT","TC","UT"]
+    - name: sc_name
+      type: varchar
+      length: 30
+      generation:
+        values:
+          - "Banking"
+          - "Electronics"
+          - "Energy"
+          - "Finance"
+          - "Healthcare"
+          - "Insurance"
+          - "Manufacturing"
+          - "Media"
+          - "Real Estate"
+          - "Retail"
+          - "Technology"
+          - "Utilities"
+
+- name: industry
+  description: "Industry codes — 102 rows (GICS-derived)."
+  row_count: 102
+  columns:
+    - name: in_id
+      type: varchar
+      length: 2
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1, format_pattern: zero_padded_int, length: 2}
+    - name: in_name
+      type: varchar
+      length: 50
+      generation:
+        values:
+          - "Aerospace & Defense"
+          - "Air Freight & Logistics"
+          - "Airlines"
+          - "Auto Components"
+          - "Automobiles"
+          - "Banks"
+          - "Beverages"
+          - "Biotechnology"
+          - "Building Products"
+          - "Capital Markets"
+          - "Chemicals"
+          - "Commercial Services & Supplies"
+          - "Communications Equipment"
+          - "Construction & Engineering"
+          - "Construction Materials"
+          - "Consumer Electronics"
+          - "Containers & Packaging"
+          - "Distributors"
+          - "Diversified Financial Services"
+          - "Diversified Telecommunication Services"
+          - "Electric Utilities"
+          - "Electrical Equipment"
+          - "Electronic Equipment & Components"
+          - "Energy Equipment & Services"
+          - "Entertainment"
+          - "Environmental & Facilities Services"
+          - "Food & Drug Retailing"
+          - "Food & Staples Retailing"
+          - "Food Products"
+          - "Gas Utilities"
+          - "Health Care Equipment & Supplies"
+          - "Health Care Facilities"
+          - "Health Care Providers & Services"
+          - "Health Care Technology"
+          - "Hotels Restaurants & Leisure"
+          - "Household Durables"
+          - "Household Products"
+          - "Independent Power and Renewable Electricity Producers"
+          - "Industrial Conglomerates"
+          - "Insurance"
+          - "Internet & Direct Marketing Retail"
+          - "Internet Software & Services"
+          - "IT Services"
+          - "Leisure Products"
+          - "Life Sciences Tools & Services"
+          - "Machinery"
+          - "Marine"
+          - "Media"
+          - "Metals & Mining"
+          - "Mortgage Real Estate Investment Trusts"
+          - "Multi-Utilities"
+          - "Multiline Retail"
+          - "Oil Gas & Consumable Fuels"
+          - "Paper & Forest Products"
+          - "Personal Products"
+          - "Pharmaceuticals"
+          - "Professional Services"
+          - "Real Estate Management & Development"
+          - "Road & Rail"
+          - "Semiconductors & Semiconductor Equipment"
+          - "Software"
+          - "Specialty Retail"
+          - "Technology Hardware Storage & Peripherals"
+          - "Textiles Apparel & Luxury Goods"
+          - "Thrifts & Mortgage Finance"
+          - "Tobacco"
+          - "Trading Companies & Distributors"
+          - "Transportation Infrastructure"
+          - "Water Utilities"
+          - "Wireless Telecommunication Services"
+    - name: in_sc_id
+      type: varchar
+      length: 2
+      generation:
+        values: ["BK","EL","EN","FI","HC","IN","MF","ME","RE","RT","TC","UT"]
+  fk_constraints:
+    - columns: [in_sc_id]
+      parent_table: sector
+      parent_columns: [sc_id]
+
+- name: status_type
+  description: "Trade/order status codes — 5 fixed rows."
+  row_count: 5
+  columns:
+    - name: st_id
+      type: varchar
+      length: 4
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["ACTV", "CMPT", "CNCL", "PNDG", "SBMT"]
+    - name: st_name
+      type: varchar
+      length: 10
+      generation:
+        values: ["Active", "Completed", "Canceled", "Pending", "Submitted"]
+
+- name: trade_type
+  description: "Trade type codes — 5 fixed rows."
+  row_count: 5
+  columns:
+    - name: tt_id
+      type: varchar
+      length: 3
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["TLB", "TLS", "TMB", "TMS", "TSL"]
+    - name: tt_name
+      type: varchar
+      length: 12
+      generation:
+        values:
+          - "Limit-Buy"
+          - "Limit-Sell"
+          - "Market-Buy"
+          - "Market-Sell"
+          - "Stop-Loss"
+    - name: tt_is_sell
+      type: integer
+      generation: {values: [0, 1, 0, 1, 1]}
+    - name: tt_is_mrkt
+      type: integer
+      generation: {values: [0, 0, 1, 1, 1]}
+
+- name: taxrate
+  description: "Tax rate definitions — 320 rows (US states + territories + foreign)."
+  row_count: 320
+  columns:
+    - name: tx_id
+      type: varchar
+      length: 4
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1, format_pattern: upper_id, length: 4}
+    - name: tx_name
+      type: varchar
+      length: 50
+      generation:
+        values:
+          - "Federal Income Tax"
+          - "Alabama State Tax"
+          - "Alaska State Tax"
+          - "Arizona State Tax"
+          - "Arkansas State Tax"
+          - "California State Tax"
+          - "Colorado State Tax"
+          - "Connecticut State Tax"
+          - "Delaware State Tax"
+          - "Florida State Tax"
+          - "Georgia State Tax"
+          - "Hawaii State Tax"
+          - "Idaho State Tax"
+          - "Illinois State Tax"
+          - "Indiana State Tax"
+          - "Iowa State Tax"
+          - "Kansas State Tax"
+          - "Kentucky State Tax"
+          - "Louisiana State Tax"
+          - "Maine State Tax"
+          - "Maryland State Tax"
+          - "Massachusetts State Tax"
+          - "Michigan State Tax"
+          - "Minnesota State Tax"
+          - "Mississippi State Tax"
+          - "Missouri State Tax"
+          - "Montana State Tax"
+          - "Nebraska State Tax"
+          - "Nevada State Tax"
+          - "New Hampshire State Tax"
+          - "New Jersey State Tax"
+          - "New Mexico State Tax"
+          - "New York State Tax"
+          - "North Carolina State Tax"
+          - "North Dakota State Tax"
+          - "Ohio State Tax"
+          - "Oklahoma State Tax"
+          - "Oregon State Tax"
+          - "Pennsylvania State Tax"
+          - "Rhode Island State Tax"
+          - "South Carolina State Tax"
+          - "South Dakota State Tax"
+          - "Tennessee State Tax"
+          - "Texas State Tax"
+          - "Utah State Tax"
+          - "Vermont State Tax"
+          - "Virginia State Tax"
+          - "Washington State Tax"
+          - "West Virginia State Tax"
+          - "Wisconsin State Tax"
+          - "Wyoming State Tax"
+    - name: tx_rate
+      type: decimal
+      precision: 6
+      scale: 5
+      generation: {min_value: 0.00, max_value: 0.15}
+
+- name: charge
+  description: "Brokerage fee schedule — 1 row per trade-type × tier."
+  row_count: 15
+  columns:
+    - name: ch_tt_id
+      type: varchar
+      length: 3
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["TLB", "TLS", "TMB", "TMS", "TSL"]
+    - name: ch_c_tier
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {min_value: 1, max_value: 3}
+    - name: ch_chrg
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: 1.00, max_value: 30.00}
+
+- name: commission_rate
+  description: "Broker commission rate schedule — 1 row per type × tier × qty range."
+  row_count: 240
+  columns:
+    - name: cr_c_tier
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {min_value: 1, max_value: 4}
+    - name: cr_tt_id
+      type: varchar
+      length: 3
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["TLB", "TLS", "TMB", "TMS", "TSL"]
+    - name: cr_ex_id
+      type: varchar
+      length: 6
+      not_null: true
+      primary_key: true
+      generation:
+        values: ["NYSE", "NASDAQ", "AMEX", "CBT"]
+    - name: cr_from_qty
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {min_value: 1, max_value: 500}
+    - name: cr_to_qty
+      type: integer
+      not_null: true
+      generation: {min_value: 501, max_value: 10000}
+    - name: cr_rate
+      type: decimal
+      precision: 5
+      scale: 2
+      generation: {min_value: 0.01, max_value: 0.50}
+
+- name: zip_code
+  description: "US ZIP code reference — 14,741 synthetic entries."
+  builtin_generator: zip_code
+  row_count: 14741
+  columns:
+    - {name: zc_code,     type: varchar, length: 12, not_null: true, primary_key: true}
+    - {name: zc_town,     type: varchar, length: 80, not_null: true}
+    - {name: zc_div,      type: varchar, length: 80, not_null: true}
+    - {name: zc_country,  type: varchar, length: 80}
+    - {name: zc_is_metro, type: integer}
+
+# ── Customer & account tables ────────────────────────────────────────────────
+
+- name: address
+  description: "Mailing addresses — 1.33 addresses per customer (2 per account owner on average)."
+  row_count_per_sf: 1333333
+  columns:
+    - name: ad_id
+      type: varchar
+      length: 80
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1, format_pattern: upper_id, length: 20}
+    - name: ad_line1
+      type: varchar
+      length: 80
+      generation: {format_pattern: word}
+    - name: ad_line2
+      type: varchar
+      length: 80
+    - name: ad_zc_code
+      type: varchar
+      length: 12
+      generation: {min_value: 1, max_value: 14741, format_pattern: zero_padded_int, length: 5}
+    - name: ad_ctry
+      type: varchar
+      length: 80
+      generation: {values: ["United States"]}
+
+- name: customer
+  description: "Brokerage customers — 1,000,000 per EF (expressed as SF)."
+  row_count_per_sf: 1000000
+  columns:
+    - name: c_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 4300000001}
+    - name: c_tax_id
+      type: varchar
+      length: 20
+      not_null: true
+      generation: {format_pattern: upper_id, length: 12}
+    - name: c_st_id
+      type: varchar
+      length: 4
+      not_null: true
+      generation: {values: ["ACTV"]}
+    - name: c_l_name
+      type: varchar
+      length: 25
+      not_null: true
+      generation: {format_pattern: last_name}
+    - name: c_f_name
+      type: varchar
+      length: 20
+      not_null: true
+      generation: {format_pattern: first_name}
+    - name: c_m_name
+      type: char
+      length: 1
+      generation: {format_pattern: upper_alpha, length: 1}
+    - name: c_gndr
+      type: char
+      length: 1
+      generation: {values: ["M", "F"]}
+    - name: c_tier
+      type: integer
+      generation: {min_value: 1, max_value: 3}
+    - name: c_dob
+      type: date
+      generation: {min_value: "1924-01-01", max_value: "1999-12-31"}
+    - name: c_ad_id
+      type: varchar
+      length: 80
+      not_null: true
+    - name: c_ctry_1
+      type: varchar
+      length: 3
+      generation: {values: ["001"]}
+    - name: c_area_1
+      type: varchar
+      length: 3
+      generation: {min_value: 200, max_value: 999}
+    - name: c_local_1
+      type: varchar
+      length: 7
+      generation: {format_pattern: upper_id, length: 7}
+    - name: c_ctry_2
+      type: varchar
+      length: 3
+    - name: c_area_2
+      type: varchar
+      length: 3
+    - name: c_local_2
+      type: varchar
+      length: 7
+    - name: c_ctry_3
+      type: varchar
+      length: 3
+    - name: c_area_3
+      type: varchar
+      length: 3
+    - name: c_local_3
+      type: varchar
+      length: 7
+    - name: c_ext
+      type: varchar
+      length: 5
+    - name: c_email_1
+      type: varchar
+      length: 50
+      generation: {format_pattern: email}
+    - name: c_email_2
+      type: varchar
+      length: 50
+  fk_constraints:
+    - columns: [c_st_id]
+      parent_table: status_type
+      parent_columns: [st_id]
+    - columns: [c_ad_id]
+      parent_table: address
+      parent_columns: [ad_id]
+
+- name: customer_taxrate
+  description: "Customer→tax-rate mapping (2–4 tax rates per customer)."
+  row_count_per_sf: 3000000
+  load_after: [customer, taxrate]
+  columns:
+    - name: cx_tx_id
+      type: varchar
+      length: 4
+      not_null: true
+      primary_key: true
+    - name: cx_c_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: cx_rate
+      type: decimal
+      precision: 6
+      scale: 5
+      generation: {min_value: 0.00, max_value: 0.15}
+  fk_constraints:
+    - columns: [cx_c_id]
+      parent_table: customer
+      parent_columns: [c_id]
+    - columns: [cx_tx_id]
+      parent_table: taxrate
+      parent_columns: [tx_id]
+
+- name: broker
+  description: "Broker accounts — 1 broker per 1,000 customers."
+  row_count_per_sf: 1000
+  columns:
+    - name: b_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: b_st_id
+      type: varchar
+      length: 4
+      not_null: true
+      generation: {values: ["ACTV"]}
+    - name: b_name
+      type: varchar
+      length: 49
+      not_null: true
+      generation: {format_pattern: full_name}
+    - name: b_num_trades
+      type: integer
+      generation: {min_value: 0, max_value: 100000}
+    - name: b_comm_total
+      type: decimal
+      precision: 12
+      scale: 2
+      generation: {min_value: 0.00, max_value: 1000000.00}
+    - name: b_ad_id
+      type: varchar
+      length: 80
+      not_null: true
+  fk_constraints:
+    - columns: [b_st_id]
+      parent_table: status_type
+      parent_columns: [st_id]
+
+- name: customer_account
+  description: "Brokerage accounts — 5 accounts per customer on average."
+  row_count_per_sf: 5000000
+  load_after: [customer, broker]
+  columns:
+    - name: ca_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: ca_b_id
+      type: long
+      not_null: true
+    - name: ca_c_id
+      type: long
+      not_null: true
+    - name: ca_name
+      type: varchar
+      length: 50
+      generation: {format_pattern: word}
+    - name: ca_tax_st
+      type: integer
+      not_null: true
+      generation: {min_value: 0, max_value: 2}
+    - name: ca_bal
+      type: decimal
+      precision: 12
+      scale: 2
+      generation: {min_value: -1000000.00, max_value: 10000000.00}
+  fk_constraints:
+    - columns: [ca_b_id]
+      parent_table: broker
+      parent_columns: [b_id]
+    - columns: [ca_c_id]
+      parent_table: customer
+      parent_columns: [c_id]
+
+- name: account_permission
+  description: "Additional users permitted on an account — ~1.5 extra per account."
+  row_count_per_sf: 7500000
+  load_after: [customer_account]
+  columns:
+    - name: ap_ca_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: ap_acl
+      type: varchar
+      length: 4
+      not_null: true
+      primary_key: true
+      generation: {values: ["0000", "0001", "0011", "0111", "1111"]}
+    - name: ap_tax_id
+      type: varchar
+      length: 20
+      not_null: true
+      generation: {format_pattern: upper_id, length: 12}
+    - name: ap_l_name
+      type: varchar
+      length: 25
+      not_null: true
+      generation: {format_pattern: last_name}
+    - name: ap_f_name
+      type: varchar
+      length: 20
+      not_null: true
+      generation: {format_pattern: first_name}
+  fk_constraints:
+    - columns: [ap_ca_id]
+      parent_table: customer_account
+      parent_columns: [ca_id]
+
+- name: watch_list
+  description: "Customer watch lists — 1 per customer."
+  row_count_per_sf: 1000000
+  load_after: [customer]
+  columns:
+    - name: wl_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: wl_c_id
+      type: long
+      not_null: true
+    - name: wl_created_date
+      type: date
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+  fk_constraints:
+    - columns: [wl_c_id]
+      parent_table: customer
+      parent_columns: [c_id]
+
+- name: watch_item
+  description: "Securities on customer watch lists — 10–20 securities per list."
+  row_count_per_sf: 15000000
+  load_after: [watch_list]
+  columns:
+    - name: wi_wl_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: wi_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      primary_key: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: wi_creation_date
+      type: date
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+  fk_constraints:
+    - columns: [wi_wl_id]
+      parent_table: watch_list
+      parent_columns: [wl_id]
+
+# ── Market / securities tables ───────────────────────────────────────────────
+
+- name: company
+  description: "Listed companies — 5,000 per SF."
+  row_count_per_sf: 5000
+  load_after: [exchange, industry, status_type]
+  columns:
+    - name: co_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 4100000001}
+    - name: co_st_id
+      type: varchar
+      length: 4
+      not_null: true
+      generation: {values: ["ACTV"]}
+    - name: co_name
+      type: varchar
+      length: 60
+      not_null: true
+      generation: {format_pattern: word}
+    - name: co_in_id
+      type: varchar
+      length: 2
+      not_null: true
+      generation: {min_value: 1, max_value: 102, format_pattern: zero_padded_int, length: 2}
+    - name: co_sp_rate
+      type: varchar
+      length: 4
+      generation:
+        values: ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB", "BB", "B", "C", "D"]
+    - name: co_ceo
+      type: varchar
+      length: 46
+      generation: {format_pattern: full_name}
+    - name: co_ad_id
+      type: varchar
+      length: 80
+      not_null: true
+    - name: co_desc
+      type: varchar
+      length: 150
+      generation: {format_pattern: sentence}
+    - name: co_open_date
+      type: date
+      generation: {min_value: "1960-01-01", max_value: "2004-01-01"}
+  fk_constraints:
+    - columns: [co_st_id]
+      parent_table: status_type
+      parent_columns: [st_id]
+    - columns: [co_in_id]
+      parent_table: industry
+      parent_columns: [in_id]
+
+- name: company_competitor
+  description: "Competitor pairs — 3 competitors per company."
+  row_count_per_sf: 15000
+  load_after: [company, industry]
+  columns:
+    - name: cp_co_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: cp_comp_co_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: cp_in_id
+      type: varchar
+      length: 2
+      not_null: true
+      primary_key: true
+      generation: {min_value: 1, max_value: 102, format_pattern: zero_padded_int, length: 2}
+  fk_constraints:
+    - columns: [cp_co_id]
+      parent_table: company
+      parent_columns: [co_id]
+    - columns: [cp_comp_co_id]
+      parent_table: company
+      parent_columns: [co_id]
+    - columns: [cp_in_id]
+      parent_table: industry
+      parent_columns: [in_id]
+
+- name: security
+  description: "Listed securities — ~6,850 per SF (1–2 per company)."
+  row_count_per_sf: 6850
+  load_after: [company, exchange, status_type]
+  columns:
+    - name: s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      primary_key: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: s_issue
+      type: varchar
+      length: 6
+      not_null: true
+      generation: {values: ["COMMON", "PREF_A", "PREF_B"]}
+    - name: s_st_id
+      type: varchar
+      length: 4
+      not_null: true
+      generation: {values: ["ACTV"]}
+    - name: s_name
+      type: varchar
+      length: 70
+      not_null: true
+      generation: {format_pattern: word}
+    - name: s_ex_id
+      type: varchar
+      length: 6
+      not_null: true
+      generation: {values: ["NYSE", "NASDAQ", "AMEX"]}
+    - name: s_co_id
+      type: long
+      not_null: true
+    - name: s_num_out
+      type: long
+      not_null: true
+      generation: {min_value: 1000000, max_value: 10000000000}
+    - name: s_start_date
+      type: date
+      generation: {min_value: "1960-01-01", max_value: "2001-01-01"}
+    - name: s_exch_date
+      type: date
+      generation: {min_value: "1960-01-01", max_value: "2001-01-01"}
+    - name: s_pe
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: 1.00, max_value: 200.00}
+    - name: s_52wk_high
+      type: decimal
+      precision: 8
+      scale: 2
+      generation: {min_value: 1.00, max_value: 2000.00}
+    - name: s_52wk_high_date
+      type: date
+      generation: {min_value: "2003-01-01", max_value: "2005-01-01"}
+    - name: s_52wk_low
+      type: decimal
+      precision: 8
+      scale: 2
+      generation: {min_value: 0.50, max_value: 500.00}
+    - name: s_52wk_low_date
+      type: date
+      generation: {min_value: "2003-01-01", max_value: "2005-01-01"}
+    - name: s_dividend
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: 0.00, max_value: 50.00}
+    - name: s_yield
+      type: decimal
+      precision: 5
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30.00}
+  fk_constraints:
+    - columns: [s_co_id]
+      parent_table: company
+      parent_columns: [co_id]
+    - columns: [s_st_id]
+      parent_table: status_type
+      parent_columns: [st_id]
+    - columns: [s_ex_id]
+      parent_table: exchange
+      parent_columns: [ex_id]
+
+- name: financial
+  description: "Annual financial summaries — 5 years × 4 quarters per company."
+  row_count_per_sf: 100000
+  load_after: [company]
+  columns:
+    - name: fi_co_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: fi_year
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {min_value: 1999, max_value: 2004}
+    - name: fi_qtr
+      type: integer
+      not_null: true
+      primary_key: true
+      generation: {min_value: 1, max_value: 4}
+    - name: fi_qtr_start_date
+      type: date
+      generation: {min_value: "1999-01-01", max_value: "2004-12-31"}
+    - name: fi_revenue
+      type: decimal
+      precision: 15
+      scale: 2
+      generation: {min_value: 0.00, max_value: 1000000000.00}
+    - name: fi_net_earn
+      type: decimal
+      precision: 15
+      scale: 2
+      generation: {min_value: -500000000.00, max_value: 500000000.00}
+    - name: fi_basic_eps
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: -99.00, max_value: 99.00}
+    - name: fi_dilut_eps
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: -99.00, max_value: 99.00}
+    - name: fi_margin
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: -0.99, max_value: 0.99}
+    - name: fi_inventory
+      type: decimal
+      precision: 15
+      scale: 2
+      generation: {min_value: 0.00, max_value: 500000000.00}
+    - name: fi_assets
+      type: decimal
+      precision: 15
+      scale: 2
+      generation: {min_value: 0.00, max_value: 5000000000.00}
+    - name: fi_liability
+      type: decimal
+      precision: 15
+      scale: 2
+      generation: {min_value: 0.00, max_value: 2000000000.00}
+    - name: fi_out_basic
+      type: long
+      generation: {min_value: 1000000, max_value: 10000000000}
+    - name: fi_out_dilut
+      type: long
+      generation: {min_value: 1000000, max_value: 10000000000}
+  fk_constraints:
+    - columns: [fi_co_id]
+      parent_table: company
+      parent_columns: [co_id]
+
+- name: news_item
+  description: "Financial news articles — ~4 articles per company."
+  row_count_per_sf: 20000
+  columns:
+    - name: ni_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 1}
+    - name: ni_headline
+      type: varchar
+      length: 80
+      not_null: true
+      generation: {format_pattern: sentence}
+    - name: ni_summary
+      type: varchar
+      length: 255
+      not_null: true
+      generation: {format_pattern: sentence}
+    - name: ni_item
+      type: varchar
+      length: 100
+      not_null: true
+      generation: {format_pattern: sentence}
+    - name: ni_dts
+      type: timestamp
+      not_null: true
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+    - name: ni_source
+      type: varchar
+      length: 30
+      not_null: true
+      generation:
+        values: ["Reuters", "Bloomberg", "AP", "Dow Jones", "PRNewswire"]
+    - name: ni_author
+      type: varchar
+      length: 30
+      generation: {format_pattern: full_name}
+
+- name: news_xref
+  description: "News-to-company cross reference — ~3 companies per article."
+  row_count_per_sf: 60000
+  load_after: [news_item, company]
+  columns:
+    - name: nx_ni_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: nx_co_id
+      type: long
+      not_null: true
+      primary_key: true
+  fk_constraints:
+    - columns: [nx_ni_id]
+      parent_table: news_item
+      parent_columns: [ni_id]
+    - columns: [nx_co_id]
+      parent_table: company
+      parent_columns: [co_id]
+
+- name: daily_market
+  description: "OHLCV data per security per day — ~1,825 trading days × 6,850 securities."
+  row_count_per_sf: 12502750
+  load_after: [security]
+  columns:
+    - name: dm_date
+      type: date
+      not_null: true
+      primary_key: true
+      generation: {min_value: "2000-01-03", max_value: "2005-01-01"}
+    - name: dm_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      primary_key: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: dm_close
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: dm_high
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: dm_low
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: dm_vol
+      type: integer
+      not_null: true
+      generation: {min_value: 100, max_value: 100000000}
+  fk_constraints:
+    - columns: [dm_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
+
+- name: last_trade
+  description: "Most recent trade price per security — 1 row per security."
+  row_count_per_sf: 6850
+  load_after: [security]
+  columns:
+    - name: lt_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      primary_key: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: lt_dts
+      type: timestamp
+      not_null: true
+      generation: {min_value: "2005-01-01", max_value: "2005-12-31"}
+    - name: lt_price
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: lt_open_price
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: lt_vol
+      type: long
+      generation: {min_value: 0, max_value: 100000000}
+  fk_constraints:
+    - columns: [lt_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
+
+# ── Trade tables ─────────────────────────────────────────────────────────────
+
+- name: trade
+  description: "Core trade fact table — ~3,320 trades per account (3,318 × 5M accounts / some factor)."
+  row_count_per_sf: 3338760
+  load_after: [customer_account, security, broker, trade_type, status_type]
+  columns:
+    - name: t_id
+      type: long
+      not_null: true
+      primary_key: true
+      generation: {distribution: sequential, min_value: 200000000001}
+    - name: t_dts
+      type: timestamp
+      not_null: true
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+    - name: t_st_id
+      type: varchar
+      length: 4
+      not_null: true
+      generation: {values: ["CMPT"]}
+    - name: t_tt_id
+      type: varchar
+      length: 3
+      not_null: true
+      generation: {values: ["TLB","TLS","TMB","TMS","TSL"]}
+    - name: t_is_cash
+      type: integer
+      not_null: true
+      generation: {values: [0, 1]}
+    - name: t_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: t_qty
+      type: integer
+      not_null: true
+      generation: {min_value: 1, max_value: 10000}
+    - name: t_bid_price
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: t_ca_id
+      type: long
+      not_null: true
+    - name: t_exec_name
+      type: varchar
+      length: 49
+      not_null: true
+      generation: {format_pattern: full_name}
+    - name: t_trade_price
+      type: decimal
+      precision: 8
+      scale: 2
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: t_chrg
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: 0.00, max_value: 30.00}
+    - name: t_comm
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: 0.00, max_value: 500.00}
+    - name: t_tax
+      type: decimal
+      precision: 10
+      scale: 2
+      generation: {min_value: 0.00, max_value: 500.00}
+    - name: t_lifo
+      type: integer
+      not_null: true
+      generation: {values: [0, 1]}
+  fk_constraints:
+    - columns: [t_ca_id]
+      parent_table: customer_account
+      parent_columns: [ca_id]
+    - columns: [t_st_id]
+      parent_table: status_type
+      parent_columns: [st_id]
+    - columns: [t_tt_id]
+      parent_table: trade_type
+      parent_columns: [tt_id]
+
+- name: trade_history
+  description: "State-transition log — ~3 status changes per trade."
+  row_count_per_sf: 10000000
+  load_after: [trade, status_type]
+  columns:
+    - name: th_t_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: th_dts
+      type: timestamp
+      not_null: true
+      primary_key: true
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+    - name: th_st_id
+      type: varchar
+      length: 4
+      not_null: true
+      generation: {values: ["SBMT", "PNDG", "CMPT"]}
+  fk_constraints:
+    - columns: [th_t_id]
+      parent_table: trade
+      parent_columns: [t_id]
+    - columns: [th_st_id]
+      parent_table: status_type
+      parent_columns: [st_id]
+
+- name: trade_request
+  description: "Open limit-order queue (a small fraction of all trades)."
+  row_count_per_sf: 100000
+  load_after: [trade, security, broker]
+  columns:
+    - name: tr_t_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: tr_tt_id
+      type: varchar
+      length: 3
+      not_null: true
+      generation: {values: ["TLB", "TLS"]}
+    - name: tr_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: tr_qty
+      type: integer
+      not_null: true
+      generation: {min_value: 1, max_value: 10000}
+    - name: tr_bid_price
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: tr_b_id
+      type: long
+      not_null: true
+  fk_constraints:
+    - columns: [tr_t_id]
+      parent_table: trade
+      parent_columns: [t_id]
+    - columns: [tr_tt_id]
+      parent_table: trade_type
+      parent_columns: [tt_id]
+    - columns: [tr_b_id]
+      parent_table: broker
+      parent_columns: [b_id]
+
+- name: holding
+  description: "Current portfolio positions — ~5,000 holdings per 1M customers."
+  row_count_per_sf: 5000000
+  load_after: [customer_account, trade]
+  columns:
+    - name: h_t_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: h_ca_id
+      type: long
+      not_null: true
+    - name: h_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: h_dts
+      type: timestamp
+      not_null: true
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+    - name: h_price
+      type: decimal
+      precision: 8
+      scale: 2
+      not_null: true
+      generation: {min_value: 0.01, max_value: 2000.00}
+    - name: h_qty
+      type: integer
+      not_null: true
+      generation: {min_value: 1, max_value: 10000}
+  fk_constraints:
+    - columns: [h_t_id]
+      parent_table: trade
+      parent_columns: [t_id]
+    - columns: [h_ca_id]
+      parent_table: customer_account
+      parent_columns: [ca_id]
+
+- name: holding_history
+  description: "Holding modification log — ~2 events per holding."
+  row_count_per_sf: 10000000
+  load_after: [holding, trade]
+  columns:
+    - name: hh_h_t_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: hh_t_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: hh_before_qty
+      type: integer
+      not_null: true
+      generation: {min_value: 0, max_value: 10000}
+    - name: hh_after_qty
+      type: integer
+      not_null: true
+      generation: {min_value: 0, max_value: 10000}
+  fk_constraints:
+    - columns: [hh_h_t_id]
+      parent_table: trade
+      parent_columns: [t_id]
+    - columns: [hh_t_id]
+      parent_table: trade
+      parent_columns: [t_id]
+
+- name: holding_summary
+  description: "Aggregated position per account+symbol — 1 row per unique (account, symbol) pair."
+  row_count_per_sf: 3800000
+  load_after: [customer_account]
+  columns:
+    - name: hs_ca_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: hs_s_symb
+      type: varchar
+      length: 15
+      not_null: true
+      primary_key: true
+      generation: {format_pattern: upper_id, length: 7}
+    - name: hs_qty
+      type: integer
+      not_null: true
+      generation: {min_value: -10000, max_value: 10000}
+  fk_constraints:
+    - columns: [hs_ca_id]
+      parent_table: customer_account
+      parent_columns: [ca_id]
+
+- name: cash_transaction
+  description: "Cash debits/credits linked to completed trades."
+  row_count_per_sf: 3338760
+  load_after: [trade]
+  columns:
+    - name: ct_t_id
+      type: long
+      not_null: true
+      primary_key: true
+    - name: ct_dts
+      type: timestamp
+      not_null: true
+      generation: {min_value: "2000-01-01", max_value: "2005-01-01"}
+    - name: ct_amt
+      type: decimal
+      precision: 10
+      scale: 2
+      not_null: true
+      generation: {min_value: -1000000.00, max_value: 1000000.00}
+    - name: ct_name
+      type: varchar
+      length: 100
+      generation: {format_pattern: sentence}
+  fk_constraints:
+    - columns: [ct_t_id]
+      parent_table: trade
+      parent_columns: [t_id]
