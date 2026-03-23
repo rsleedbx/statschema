@@ -1,0 +1,121 @@
+# statschema
+
+> Cross-dialect DDL transpiler, optimizer statistics bootstrapper, and semantic-aware synthetic data generator for database migrations. Works without production data — collect statistics from the source, inject into the target, generate referentially-correct synthetic rows, all from a portable YAML schema.
+
+## Install
+
+```
+pip install statschema
+```
+
+## When to use statschema
+
+Use statschema when you need to:
+- Transpile DDL between database dialects (MySQL → PostgreSQL → Oracle → SQL Server → Databricks)
+- Bootstrap query optimizer statistics on a migration target *before* loading production data
+- Generate synthetic data that has correct types, realistic distributions, and referential integrity across FK relationships
+- Validate a migration schema against real-world workloads (TPC-B, TPC-C, TPC-H, TPC-DS, TPC-E, Northwind, Sakila, Chinook)
+
+Do NOT use statschema for:
+- Privacy-safe production data cloning (use SDV or Gretel for that)
+- Application test fixtures with fake PII (use Faker for that)
+- Full ETL pipelines or production data movement
+
+## Core API
+
+```python
+from statschema import parse_ddl, emit_ddl
+from statschema import collect_table_stats, dump_stats, load_stats, inject_stats_postgres
+from statschema import load_canonical, generate_rows, resolve_row_counts, resolve_load_order
+```
+
+### DDL transpilation
+
+```python
+tables = parse_ddl(ddl_string, dialect="mysql")   # dialect: mysql|postgres|oracle|sqlserver|databricks
+sql    = emit_ddl(tables[0], "postgres")           # emit for any target dialect
+```
+
+### Optimizer statistics bootstrap
+
+```python
+# Collect from source (read-only, no PII)
+stats = collect_table_stats(conn, "orders", dialect="mysql")
+dump_stats(stats, "orders_stats.yaml")
+
+# Inject into target before loading data
+stats = load_stats("orders_stats.yaml")
+inject_stats_postgres(pg_conn, stats.table_stats("orders"))
+```
+
+### Synthetic data generation
+
+```python
+from statschema import load_canonical, generate_rows, resolve_row_counts, resolve_load_order
+
+tables  = load_canonical("schema.yaml")
+counts  = resolve_row_counts(tables, scale_factor=1.0)
+ordered = resolve_load_order(tables)          # topological sort respecting FK order
+
+for tbl in ordered:
+    rows = list(generate_rows(tbl, counts[tbl.name], parent_row_counts=counts))
+    # rows is a list of dicts — load into any database or DataFrame
+```
+
+### Semantic hints
+
+Column names and SQL COMMENTs drive realistic generators automatically:
+
+```python
+from statschema import infer_format_pattern, load_hints, apply_hints
+
+hints = load_hints("hints.yaml")   # optional custom overrides
+apply_hints(tables, hints)         # mutates generation rules in-place
+```
+
+## Schema format (canonical YAML)
+
+```yaml
+tables:
+  - name: orders
+    primary_key: [order_id]
+    columns:
+      - name: order_id
+        type: integer
+        not_null: true
+        generation:
+          distribution: sequential
+          min_value: 1
+      - name: customer_id
+        type: integer
+        not_null: true
+      - name: status
+        type: varchar
+        length: 20
+        generation:
+          values: [pending, processing, shipped, delivered, cancelled]
+    fk_constraints:
+      - columns: [customer_id]
+        ref_table: customers
+        ref_columns: [customer_id]
+```
+
+## Supported dialects
+
+MySQL · MariaDB · PostgreSQL · CockroachDB · Neon · SQL Server · Oracle · IBM Db2 · Databricks
+
+## Key files
+
+- [README.md](README.md) — full feature overview and quick start
+- [docs/toc.md](docs/toc.md) — complete documentation map
+- [docs/dba-yaml-guide.md](docs/dba-yaml-guide.md) — DBA quick-start (no Python required)
+- [docs/canonical_yaml.md](docs/canonical_yaml.md) — schema YAML reference
+- [docs/stats_transpiler.md](docs/stats_transpiler.md) — statistics transpiler reference
+- [docs/learnings/oltp-migration-analysis.md](docs/learnings/oltp-migration-analysis.md) — real-world migration examples (Northwind, Sakila, Django, WordPress, Chinook)
+- [benchmarks/README.md](benchmarks/README.md) — TPC benchmark results
+
+## Optional resources
+
+- [docs/testing.md](docs/testing.md) — running the full test suite
+- [docs/adding-a-database.md](docs/adding-a-database.md) — contributor guide for adding a new dialect
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute

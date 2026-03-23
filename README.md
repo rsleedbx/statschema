@@ -1,5 +1,14 @@
 # statschema — Statistics and Synthetic Data Generator for DBAs and Data Migration Practitioners
 
+[![CI](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml/badge.svg)](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/statschema)](https://pypi.org/project/statschema/)
+[![Python](https://img.shields.io/pypi/pyversions/statschema)](https://pypi.org/project/statschema/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+```
+pip install statschema
+```
+
 **Repository:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema) · `git clone https://github.com/rsleedbx/statschema.git`
 
 > **Your query optimizer produces correct plans before you load a single row.**
@@ -42,7 +51,7 @@ inject_stats_postgres(pg_conn, db_stats.table_stats("orders"))
 # → EXPLAIN plans match production shape before a single row is loaded
 ```
 
-`pip install statschema` · Python 3.10+ · [Full docs below](#overview)
+Python 3.10+ · [Full docs below](#overview)
 
 ---
 
@@ -1299,14 +1308,87 @@ connection, Spark session, or Java installation.
 
 ## Documentation
 
+> Full documentation map with hierarchy: [`docs/toc.md`](docs/toc.md)
+
+### Data generation
+
+| Document | Contents |
+|----------|----------|
+| [`docs/dba-yaml-guide.md`](docs/dba-yaml-guide.md) | DBA quick-start: write one YAML file, run three commands, no Python required |
+| [`docs/canonical_yaml.md`](docs/canonical_yaml.md) | Canonical schema YAML — feature reference (overview page) |
+| [`docs/canonical_yaml/01-core-structure.md`](docs/canonical_yaml/01-core-structure.md) | Core structure: `name`, `columns`, `primary_key` |
+| [`docs/canonical_yaml/02-column-types.md`](docs/canonical_yaml/02-column-types.md) | Column types and type mapping |
+| [`docs/canonical_yaml/03-column-constraints.md`](docs/canonical_yaml/03-column-constraints.md) | Column constraints: `nullable`, `unique`, `default` |
+| [`docs/canonical_yaml/04-column-precision-length.md`](docs/canonical_yaml/04-column-precision-length.md) | Precision and length for numeric/string columns |
+| [`docs/canonical_yaml/05-foreign-keys.md`](docs/canonical_yaml/05-foreign-keys.md) | Foreign key declarations and referential integrity |
+| [`docs/canonical_yaml/06-generation-rules.md`](docs/canonical_yaml/06-generation-rules.md) | `generation` block: distributions, patterns, value lists |
+| [`docs/canonical_yaml/07-temporal-ordering.md`](docs/canonical_yaml/07-temporal-ordering.md) | Temporal ordering and `depends_on` for time-series data |
+| [`docs/canonical_yaml/08-multi-instance-expansion.md`](docs/canonical_yaml/08-multi-instance-expansion.md) | Multi-instance expansion for replicated table patterns |
+| [`docs/canonical_yaml/09-round-trip-guarantee.md`](docs/canonical_yaml/09-round-trip-guarantee.md) | Round-trip guarantee: parse → emit → parse stability |
+| [`docs/implementation.md`](docs/implementation.md) | Project structure, schema sources, and data-generation wiring |
+| [`docs/synthetic_data_shortcomings.md`](docs/synthetic_data_shortcomings.md) | Known limitations of synthetic data generation and mitigations |
+| [`docs/dbldatagen.md`](docs/dbldatagen.md) | dbldatagen v0/v1 integration notes |
+
+### Benchmarks
+
+| Document | Contents |
+|----------|----------|
+| [`benchmarks/README.md`](benchmarks/README.md) | TPC load benchmark guide: how to run, scale factors, output |
+| [`benchmarks/results/benchmark_table.md`](benchmarks/results/benchmark_table.md) | Latest benchmark results (rows/sec by engine and SF) |
+
+### Stats transpiler
+
+| Document | Contents |
+|----------|----------|
+| [`docs/stats_transpiler.md`](docs/stats_transpiler.md) | Full details, per-engine workarounds, and function reference |
+
+### Testing
+
 | Document | Contents |
 |----------|----------|
 | [`docs/testing.md`](docs/testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
-| [`docs/adding-a-database.md`](docs/adding-a-database.md) | **Contributor guide**: add a new engine end-to-end (pre-checks, dialect registry, emitter, tests, docs) |
-| [`docs/local-databases.md`](docs/local-databases.md) | Index of all local database setup guides |
-| [`docs/databases/`](docs/databases/) | Per-database setup pages (postgres, mysql, mariadb, cockroachdb, sqlserver, oracle, db2, neon, …) |
 | [`docs/test_plan_ddl_roundtrip.md`](docs/test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
-| [`docs/synthetic_data_shortcomings.md`](docs/synthetic_data_shortcomings.md) | Known limitations of synthetic data generation and mitigations |
+| [`docs/learnings/README.md`](docs/learnings/README.md) | Learnings index: gotchas and decisions captured while building statschema |
+| [`docs/learnings/oltp-migration-analysis.md`](docs/learnings/oltp-migration-analysis.md) | OLTP migration analysis: Northwind, Sakila, Django Auth, WordPress, Chinook |
+
+### Database setup
+
+| Document | Contents |
+|----------|----------|
+| [`docs/local-databases.md`](docs/local-databases.md) | Index of all local database setup guides |
+| [`docs/databases/postgres.md`](docs/databases/postgres.md) | PostgreSQL — Podman, native ARM64 |
+| [`docs/databases/neon.md`](docs/databases/neon.md) | Neon — Podman + Neon Local cloud proxy |
+| [`docs/databases/cockroachdb.md`](docs/databases/cockroachdb.md) | CockroachDB — Podman, native ARM64 (single-node + multi-region) |
+| [`docs/databases/mysql.md`](docs/databases/mysql.md) | MySQL — Podman, native ARM64 |
+| [`docs/databases/mariadb.md`](docs/databases/mariadb.md) | MariaDB — Podman, native ARM64 |
+| [`docs/databases/sqlserver.md`](docs/databases/sqlserver.md) | SQL Server — Lima VM + QEMU (x86_64) |
+| [`docs/databases/oracle.md`](docs/databases/oracle.md) | Oracle — Lima VM + Podman + QEMU (x86_64) |
+| [`docs/databases/oracle-hr.md`](docs/databases/oracle-hr.md) | Oracle HR/CO sample schemas — application-level testing |
+| [`docs/databases/db2.md`](docs/databases/db2.md) | DB2 — Lima VM + Podman + QEMU (x86_64) |
+| [`docs/databases/adventureworks.md`](docs/databases/adventureworks.md) | AdventureWorks — application-level testing (SQL Server) |
+| [`docs/databases/chinook.md`](docs/databases/chinook.md) | Chinook — application-level testing (SQL Server) |
+| [`docs/databases/mautic.md`](docs/databases/mautic.md) | Mautic — application-level testing (MySQL) |
+| [`docs/databases/gitea.md`](docs/databases/gitea.md) | Gitea — application-level testing (PostgreSQL) |
+| [`docs/faq/README.md`](docs/faq/README.md) | FAQ index — local database tooling |
+| [`docs/faq/17-what-is-gvenzl-oracle-xe.md`](docs/faq/17-what-is-gvenzl-oracle-xe.md) | FAQ: what is the gvenzl/oracle-xe image? |
+| [`docs/faq/18-podman-machine-on-macos.md`](docs/faq/18-podman-machine-on-macos.md) | FAQ: Podman machine setup on macOS |
+
+### Contributing & project
+
+| Document | Contents |
+|----------|----------|
+| [`docs/adding-a-database.md`](docs/adding-a-database.md) | **Contributor guide**: add a new engine end-to-end (pre-checks, dialect registry, emitter, tests, docs) |
 | [`docs/PLAN.md`](docs/PLAN.md) | Architecture and implementation notes |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Roadmap and planned work |
+| [`docs/git-submodules.md`](docs/git-submodules.md) | Git submodule workflow (commit and push `.cursor` + parent repo) |
 | [`.env.example`](.env.example) | Credential template — copy to `.env` and fill in values |
-|| [`docs/git-submodules.md`](docs/git-submodules.md) | Git submodule workflow (commit and push `.cursor` + parent repo) |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, the contributor guide for adding a new database dialect, and the test patterns all contributors follow.

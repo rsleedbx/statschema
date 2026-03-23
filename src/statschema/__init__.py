@@ -149,6 +149,8 @@ from .data_loader import (
     bulk_load_db2,
 )
 
+__version__ = "0.1.0"
+
 __all__ = [
     # Dialect registry (aliases, sqlglot mapping, loader hints)
     "CANONICAL_DIALECTS",
