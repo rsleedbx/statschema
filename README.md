@@ -54,6 +54,103 @@ inject_stats_postgres(pg_conn, db_stats.table_stats("orders"))
 # → EXPLAIN plans match production shape before a single row is loaded
 ```
 
+**Generate referentially-correct synthetic data from YAML — with realistic skew and FK fan-out:**
+
+`orders_schema.yaml`:
+```yaml
+tables:
+  - name: orders
+    primary_key: [order_id]
+    row_count_per_sf: 100000
+    columns:
+      - name: order_id
+        type: integer
+        not_null: true
+        generation: {distribution: sequential, min_value: 1}
+      - name: customer_id
+        type: integer
+        not_null: true
+        generation:
+          distribution: zipf          # power-law: top 10% of customers place 60% of orders
+          min_value: 1
+          max_value: 50000
+      - name: status
+        type: varchar
+        length: 20
+        not_null: true
+        generation:
+          values:   [pending, processing, shipped, delivered, cancelled]
+          weights:  [0.08,    0.12,       0.25,    0.50,      0.05]
+      - name: order_date
+        type: date
+        not_null: true
+        generation: {distribution: uniform, min_value: "2023-01-01", max_value: "2024-12-31"}
+      - name: ship_date
+        type: date
+        generation:
+          distribution: uniform
+          min_value: "2023-01-15"
+          max_value: "2025-01-31"
+          null_rate: 0.08             # ~8% of orders still unshipped
+
+  - name: order_details
+    primary_key: [detail_id]
+    row_count_per_sf: 350000          # avg 3.5 items/order — but Zipf means a few orders have 20+
+    columns:
+      - name: detail_id
+        type: integer
+        not_null: true
+        generation: {distribution: sequential, min_value: 1}
+      - name: order_id                # FK — sampled with Zipf skew: hot orders get most line items
+        type: integer
+        not_null: true
+      - name: product_id
+        type: integer
+        not_null: true
+        generation:
+          distribution: zipf          # top products dominate — long-tail catalog
+          min_value: 1
+          max_value: 10000
+      - name: quantity
+        type: integer
+        not_null: true
+        generation: {distribution: normal, mean: 3, std: 2, min_value: 1, max_value: 100}
+      - name: unit_price
+        type: decimal
+        precision: 10
+        scale: 2
+        not_null: true
+        generation: {distribution: normal, mean: 49.99, std: 30.0, min_value: 0.99, max_value: 999.99}
+      - name: discount_pct
+        type: decimal
+        precision: 5
+        scale: 2
+        generation:
+          distribution: zipf          # most items get no discount; a few get deep cuts
+          min_value: 0
+          max_value: 50
+          null_rate: 0.65             # 65% NULL = no discount at all
+    fk_constraints:
+      - columns: [order_id]
+        ref_table: orders
+        ref_columns: [order_id]
+```
+```python
+from statschema import load_canonical, generate_rows, resolve_row_counts, resolve_load_order
+
+tables  = load_canonical("orders_schema.yaml")
+counts  = resolve_row_counts(tables, scale_factor=1.0)
+ordered = resolve_load_order(tables)        # topological sort: orders before order_details
+
+for tbl in ordered:
+    rows = list(generate_rows(tbl, counts[tbl.name], parent_row_counts=counts))
+    print(f"{tbl.name}: {len(rows):,} rows generated")
+# orders:        100,000 rows
+# order_details: 350,000 rows  (Zipf FK: top 1% of orders absorb ~30% of line items)
+```
+
+Three patterns most tools can't express without custom code: **Zipf FK fan-out** (a few hot orders accumulate most line items, matching real e-commerce data), **weighted status distribution** (50% delivered, 5% cancelled — not uniform), and **conditional nulls** (`discount_pct` NULL 65% of the time, non-zero only on promoted SKUs). All declared in YAML; no Python per table.
+
 Python 3.10+ · [Full docs below](#overview)
 
 ---
