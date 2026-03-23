@@ -1,8 +1,8 @@
 # statschema — Statistics and Synthetic Data Generator for DBAs and Data Migration Practitioners
 
 [![CI](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml/badge.svg)](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/statschema)](https://pypi.org/project/statschema/)
-[![Python](https://img.shields.io/pypi/pyversions/statschema)](https://pypi.org/project/statschema/)
+[![PyPI](https://img.shields.io/badge/pypi-coming%20soon-orange)](https://pypi.org/project/statschema/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/statschema/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ```
