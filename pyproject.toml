@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "statschema"
-version = "0.1.0"
+version = "0.1.1"
 description = "Cross-dialect DDL transpiler, optimizer statistics bootstrapper, and synthetic data generator for database migrations"
 readme = "README.md"
 license = { file = "LICENSE" }
