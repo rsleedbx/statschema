@@ -149,7 +149,7 @@ how much the target engine exposes:
 
 statschema is designed so that an AI agent can add a new dialect, a new stats field, or a new semantic pattern — and the test suite immediately confirms whether it is correct across all nine supported databases.
 
-**3,214 tests · 23 test files · 9 live dialects**
+**3,232 tests · 25 test files · 9 live dialects**
 
 | Category | Tests | What is covered |
 |---|---|---|
@@ -157,11 +157,13 @@ statschema is designed so that an AI agent can add a new dialect, a new stats fi
 | Semantic hints (offline) | 150 | Name inference, comment inference, locale (`en_US`, `de_DE`), custom hint files, `apply_hints` wiring, stats passthrough |
 | Stats model, schema parser, builder (offline) | 420 | `ColumnStats` / `TableStats` / `DatabaseStats` serialization, stats I/O, v1 bridge, dbldatagen builder, loader edge paths, override application |
 | **Migration round-trip (offline)** | **5** | **Parse real-world DDL → generate at SF=0.1 → load SQLite → run representative queries. Covers Northwind (SQL Server), Sakila (MySQL), Django Auth (PostgreSQL), WordPress (MySQL, no-FK DDL), Chinook (PostgreSQL)** |
+| **TPC-DS workload (offline, DuckDB)** | **2** | **Generate all 24 tables at SF=0.01 → load DuckDB → run all 99 official TPC-DS queries; 0 SQL errors, ≥40 queries return rows** |
+| **TPC-E workload (offline, DuckDB)** | **16** | **Generate all 32 tables at SF=0.01 → load DuckDB → run representative queries for all 10 TPC-E transaction types; every query returns rows** |
 | Live — DDL round-trip | 430+ | Parse DDL on a real database, emit to every other dialect, verify column types survive |
 | Live — stats collection | 200+ | `collect_table_stats` on MySQL, PostgreSQL, SQL Server, Oracle, Db2, CockroachDB, MariaDB |
 | Live — real schemas | 170+ | Chinook music DB, AdventureWorks, Mautic CRM, Oracle HR — multi-table FK schemas |
 
-**2,407 tests run offline** (no database required) — any contributor or AI agent can run the full offline suite in under 60 seconds on a laptop with no setup. The 807 live tests run against real databases spun up locally with Podman using the per-dialect guides in [`docs/databases/`](docs/databases/).
+**2,539 tests run offline** (no database required) — any contributor or AI agent can run the full offline suite in under 60 seconds on a laptop with no setup. The 693 live tests run against real databases spun up locally with Podman using the per-dialect guides in [`docs/databases/`](docs/databases/).
 
 The migration round-trip tests (`tests/test_migration_roundtrip.py`) are the canonical example of how statschema handles real-world database migrations. Each test represents a migration story a DBA would actually encounter:
 
@@ -1220,13 +1222,15 @@ Local database setup recipes live in **[`docs/local-databases.md`](docs/local-da
 
 ## Verified data generation
 
-TPC benchmark schemas ship as canonical YAML under `benchmarks/schemas/` and have been verified end-to-end with live client workloads:
+All five TPC benchmark schemas ship as canonical YAML under `benchmarks/schemas/`. All five have been verified end-to-end: TPC-B/C/H against live client workloads (pgbench, CockroachDB), and TPC-DS/E against DuckDB using the official 99-query TPC-DS suite and representative queries for all 10 TPC-E transaction types.
 
-| Schema | SF=1 rows | Verified against |
-|--------|-----------|-----------------|
-| `tpcc_schema.yaml` | 599,011 | `cockroach workload tpcc` — all 5 transaction types, 0 errors |
-| `tpcb_schema.yaml` | 100,011 | `pgbench` on PostgreSQL; `cockroach workload bank` on CockroachDB |
-| `tpch_schema.yaml` | ~8,600,000 | `cockroach workload tpch` analytical queries |
+| Schema | Tables | SF=1 rows | Status |
+|--------|--------|-----------|--------|
+| `tpcb_schema.yaml` | 4 | 100,011 | Verified — `pgbench` on PostgreSQL; `cockroach workload bank` on CockroachDB |
+| `tpcc_schema.yaml` | 9 | 599,011 | Verified — `cockroach workload tpcc`, all 5 transaction types, 0 errors |
+| `tpch_schema.yaml` | 8 | ~8,600,000 | Verified — `cockroach workload tpch` analytical queries |
+| `tpcds_schema.yaml` | 24 | ~19,500,000 | Verified — all 99 official TPC-DS queries execute against DuckDB with 0 SQL errors at SF=0.01; fixed dimension tables (date_dim, time_dim, customer_demographics) use deterministic built-in generators |
+| `tpce_schema.yaml` | 32 | ~82,000,000 | Verified — representative SELECT queries for all 10 TPC-E transaction types (Broker-Volume, Customer-Position, Market-Watch, Security-Detail, Trade-Lookup ×3, Trade-Order, Trade-Result, Trade-Status, Trade-Update) return rows against DuckDB at SF=0.01 |
 
 Generation, DDL emission, and loading are all driven from the same YAML file — no custom Python per database engine. The YAML schema format is designed to be the declarative standard for synthetic data generation: the same role SQL plays for queries. Write the schema once; `statschema` generates correct, referentially-consistent data for any supported engine.
 

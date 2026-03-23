@@ -474,7 +474,7 @@ tables:
       type: varchar
       length: 40
       generation: {format_pattern: full_name}
-    - name: s_mkt_id
+    - name: s_market_id
       type: integer
       generation: {min_value: 1, max_value: 10}
     - name: s_mkt_class

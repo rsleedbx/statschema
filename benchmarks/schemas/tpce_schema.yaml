@@ -413,7 +413,7 @@ tables:
       type: long
       not_null: true
       primary_key: true
-      generation: {distribution: sequential, min_value: 4300000001}
+      generation: {distribution: sequential, min_value: 1}
     - name: c_tax_id
       type: varchar
       length: 20
@@ -678,6 +678,9 @@ tables:
     - columns: [wi_wl_id]
       parent_table: watch_list
       parent_columns: [wl_id]
+    - columns: [wi_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
 
 # ── Market / securities tables ───────────────────────────────────────────────
 
@@ -690,7 +693,7 @@ tables:
       type: long
       not_null: true
       primary_key: true
-      generation: {distribution: sequential, min_value: 4100000001}
+      generation: {distribution: sequential, min_value: 1}
     - name: co_st_id
       type: varchar
       length: 4
@@ -733,6 +736,9 @@ tables:
     - columns: [co_in_id]
       parent_table: industry
       parent_columns: [in_id]
+    - columns: [co_ad_id]
+      parent_table: address
+      parent_columns: [ad_id]
 
 - name: company_competitor
   description: "Competitor pairs — 3 competitors per company."
@@ -774,7 +780,7 @@ tables:
       length: 15
       not_null: true
       primary_key: true
-      generation: {format_pattern: upper_id, length: 7}
+      generation: {distribution: sequential, min_value: 1}
     - name: s_issue
       type: varchar
       length: 6
@@ -1072,7 +1078,7 @@ tables:
       type: long
       not_null: true
       primary_key: true
-      generation: {distribution: sequential, min_value: 200000000001}
+      generation: {distribution: sequential, min_value: 1}
     - name: t_dts
       type: timestamp
       not_null: true
@@ -1148,6 +1154,9 @@ tables:
     - columns: [t_tt_id]
       parent_table: trade_type
       parent_columns: [tt_id]
+    - columns: [t_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
 
 - name: trade_history
   description: "State-transition log — ~3 status changes per trade."
@@ -1218,6 +1227,9 @@ tables:
     - columns: [tr_b_id]
       parent_table: broker
       parent_columns: [b_id]
+    - columns: [tr_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
 
 - name: holding
   description: "Current portfolio positions — ~5,000 holdings per 1M customers."
@@ -1257,6 +1269,9 @@ tables:
     - columns: [h_ca_id]
       parent_table: customer_account
       parent_columns: [ca_id]
+    - columns: [h_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
 
 - name: holding_history
   description: "Holding modification log — ~2 events per holding."
@@ -1310,6 +1325,9 @@ tables:
     - columns: [hs_ca_id]
       parent_table: customer_account
       parent_columns: [ca_id]
+    - columns: [hs_s_symb]
+      parent_table: security
+      parent_columns: [s_symb]
 
 - name: cash_transaction
   description: "Cash debits/credits linked to completed trades."
