@@ -41,11 +41,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .schema_io import load_canonical, resolve_load_order, resolve_row_counts
+from .schema_io import load_canonical, resolve_load_order, resolve_row_counts, dump_schema
 from .ddl_emitter import emit_ddl, SUPPORTED_DIALECTS
 from .row_generator import generate_rows
 from .data_loader import LoadStrategy, load_dataframe
 from .schema_transforms import rename_tables, parse_table_map, TABLE_NAME_PRESETS
+from .model import CanonicalTableSchema, CanonicalColumn, CanonicalForeignKey
+from .stats_model import DatabaseStats
 
 logger = logging.getLogger("statschema")
 
@@ -426,6 +428,505 @@ def _simple_ddl(table) -> str:
 
 
 # ---------------------------------------------------------------------------
+# collect sub-command — connect to a live database, pull schema + stats
+# ---------------------------------------------------------------------------
+
+def _prompt_if_missing(value: str | None, label: str, default: str | None = None,
+                       secret: bool = False) -> str:
+    """Return value if already set; otherwise prompt the user interactively."""
+    if value:
+        return value
+    if not sys.stdin.isatty():
+        if default is not None:
+            return default
+        _die(f"--{label.lower().replace(' ', '-')} is required (not running interactively).")
+    display = f"  {label} [{default}]: " if default else f"  {label}: "
+    if secret:
+        import getpass
+        result = getpass.getpass(display)
+    else:
+        result = input(display).strip()
+    return result or default or ""
+
+
+class _LoggingCursor:
+    """Thin cursor wrapper that prints every SQL statement when show_sql=True."""
+
+    def __init__(self, cursor, show_sql: bool) -> None:
+        self._cur = cursor
+        self._show = show_sql
+
+    def execute(self, sql: str, params=None):
+        if self._show:
+            import re
+            disp = re.sub(r"\s+", " ", sql.strip())[:300]
+            print(f"    → SQL: {disp}", file=sys.stderr)
+        return self._cur.execute(sql, params) if params is not None else self._cur.execute(sql)
+
+    def fetchall(self):   return self._cur.fetchall()
+    def fetchone(self):   return self._cur.fetchone()
+    def __iter__(self):   return iter(self._cur)
+    def __getattr__(self, name): return getattr(self._cur, name)
+
+
+_DEFAULT_PORTS: dict[str, int] = {
+    "mysql": 3306, "mariadb": 3306,
+    "postgres": 5432, "cockroachdb": 26257, "neon": 5432,
+    "sqlserver": 1433, "oracle": 1521, "db2": 50000, "sqlite": 0,
+}
+
+# information_schema / udt_name → canonical type
+_SQL_TO_CANONICAL: dict[str, str] = {
+    "int": "integer", "integer": "integer", "int4": "integer", "int32": "integer",
+    "int2": "smallint", "smallint": "smallint",
+    "bigint": "bigint", "int8": "bigint", "int64": "bigint",
+    "tinyint": "tinyint",
+    "float": "float", "float4": "float", "real": "float",
+    "double": "double", "float8": "double", "double precision": "double",
+    "decimal": "decimal", "numeric": "decimal", "number": "decimal",
+    "varchar": "varchar", "character varying": "varchar",
+    "nvarchar": "nvarchar",
+    "char": "char", "character": "char", "bpchar": "char", "nchar": "nchar",
+    "text": "text", "longtext": "text", "mediumtext": "text", "clob": "text",
+    "boolean": "boolean", "bool": "boolean", "bit": "boolean",
+    "date": "date",
+    "timestamp": "timestamp", "timestamp without time zone": "timestamp",
+    "datetime": "timestamp", "datetime2": "timestamp", "smalldatetime": "timestamp",
+    "timestamptz": "timestamptz", "timestamp with time zone": "timestamptz",
+    "time": "time",
+    "json": "json", "jsonb": "json",
+    "uuid": "uuid",
+    "binary": "binary", "varbinary": "binary", "blob": "binary",
+    "bytea": "binary", "image": "binary",
+    "money": "decimal", "smallmoney": "decimal",
+    "xml": "text",
+}
+
+
+def _canonical_type(sql_type: str, udt_name: str | None = None) -> str:
+    key = (udt_name or sql_type).lower().strip()
+    return _SQL_TO_CANONICAL.get(key) or _SQL_TO_CANONICAL.get(sql_type.lower().strip(), sql_type.lower())
+
+
+def _connect_interactive(args) -> tuple[Any, str, int, str, str]:
+    """
+    Build a live DB connection from parsed args, prompting for any missing values.
+    Returns (conn, host, port, user, database).
+    """
+    dialect = args.dialect
+
+    if dialect == "sqlite":
+        import sqlite3
+        path = getattr(args, "database", None) or ":memory:"
+        return sqlite3.connect(path), "localhost", 0, "", path
+
+    host = _prompt_if_missing(getattr(args, "host", None),     "Host",     "localhost")
+    port = int(_prompt_if_missing(str(getattr(args, "port", None) or ""),
+                                  "Port", str(_DEFAULT_PORTS.get(dialect, 5432))))
+    user = _prompt_if_missing(getattr(args, "user", None),     "Username", "")
+    pw   = _prompt_if_missing(getattr(args, "password", None), "Password", secret=True)
+    db   = _prompt_if_missing(getattr(args, "database", None), "Database", "")
+
+    if dialect in ("postgres", "cockroachdb", "neon"):
+        import psycopg2
+        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw), host, port, user, db
+
+    if dialect in ("mysql", "mariadb"):
+        import pymysql
+        return (pymysql.connect(host=host, port=port, user=user, password=pw,
+                                database=db, local_infile=True, autocommit=True),
+                host, port, user, db)
+
+    if dialect == "sqlserver":
+        try:
+            import mssql_python
+            cs = f"SERVER={host},{port};DATABASE={db};UID={user};PWD={pw}"
+            return mssql_python.connect(cs), host, port, user, db
+        except ImportError:
+            import pymssql
+            return pymssql.connect(server=host, port=port, database=db,
+                                   user=user, password=pw), host, port, user, db
+
+    if dialect == "oracle":
+        import oracledb
+        dsn = f"{host}:{port}/{db}"
+        return oracledb.connect(user=user, password=pw, dsn=dsn), host, port, user, db
+
+    if dialect == "db2":
+        import ibm_db_dbi
+        cs = f"DATABASE={db};HOSTNAME={host};PORT={port};UID={user};PWD={pw}"
+        return ibm_db_dbi.connect(cs, "", ""), host, port, user, db
+
+    _die(f"Unsupported dialect: {dialect!r}")
+
+
+def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None,
+                 pattern: str) -> list[str]:
+    """Return table names matching the SQL LIKE pattern."""
+    like = pattern.replace("*", "%")
+
+    if dialect == "sqlite":
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?", (like,))
+
+    elif dialect in ("mysql", "mariadb"):
+        if schema:
+            cur.execute(
+                "SELECT TABLE_NAME FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME LIKE %s ORDER BY TABLE_NAME",
+                (schema, like),
+            )
+        else:
+            cur.execute(f"SHOW TABLES LIKE %s", (like,))
+
+    elif dialect in ("postgres", "cockroachdb", "neon"):
+        pg_schema = schema or "public"
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = %s AND table_name LIKE %s "
+            "AND table_type = 'BASE TABLE' ORDER BY table_name",
+            (pg_schema, like),
+        )
+
+    elif dialect == "sqlserver":
+        ss_schema = schema or "dbo"
+        cur.execute(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME LIKE %s "
+            "AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
+            (ss_schema, like),
+        )
+
+    elif dialect == "oracle":
+        cur.execute(
+            "SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER = :1 AND TABLE_NAME LIKE :2 ORDER BY TABLE_NAME",
+            ((schema or "").upper(), like.upper()),
+        )
+
+    elif dialect == "db2":
+        cur.execute(
+            "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TABNAME LIKE ? AND TYPE = 'T' ORDER BY TABNAME",
+            ((schema or "").upper(), like.upper()),
+        )
+
+    else:
+        return []
+
+    return [row[0] for row in cur.fetchall()]
+
+
+def _fk_groups(rows) -> list[CanonicalForeignKey]:
+    """Group FK rows (constraint_name, col, ref_table, ref_col) into CanonicalForeignKey list."""
+    from collections import defaultdict
+    groups: dict[str, dict] = defaultdict(lambda: {"cols": [], "ref_table": "", "ref_cols": []})
+    for (cname, col, ref_tbl, ref_col) in rows:
+        g = groups[cname]
+        g["cols"].append(col)
+        g["ref_table"] = ref_tbl
+        g["ref_cols"].append(ref_col)
+    return [
+        CanonicalForeignKey(columns=v["cols"], ref_table=v["ref_table"], ref_columns=v["ref_cols"])
+        for v in groups.values()
+    ]
+
+
+def _collect_schema_mysql(cur: _LoggingCursor, table: str) -> CanonicalTableSchema | None:
+    """Use SHOW CREATE TABLE — captures AUTO_INCREMENT, defaults, COMMENTs exactly."""
+    from .ddl_parser import parse_ddl
+    cur.execute(f"SHOW CREATE TABLE `{table}`")
+    row = cur.fetchone()
+    if not row:
+        return None
+    ddl = row[1]
+    tables = parse_ddl(ddl, dialect="mysql")
+    return tables[0] if tables else None
+
+
+def _collect_schema_sqlite(cur: _LoggingCursor, table: str) -> CanonicalTableSchema | None:
+    from .ddl_parser import parse_ddl
+    cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,))
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return None
+    tables = parse_ddl(row[0], dialect="sqlite")
+    return tables[0] if tables else None
+
+
+def _collect_schema_postgres(cur: _LoggingCursor, schema: str, table: str) -> CanonicalTableSchema | None:
+    pg_schema = schema or "public"
+
+    cur.execute(
+        "SELECT column_name, udt_name, data_type, character_maximum_length, "
+        "       numeric_precision, numeric_scale, is_nullable, column_default "
+        "FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+        (pg_schema, table),
+    )
+    col_rows = cur.fetchall()
+    if not col_rows:
+        return None
+
+    # PKs
+    cur.execute(
+        "SELECT kcu.column_name FROM information_schema.table_constraints tc "
+        "JOIN information_schema.key_column_usage kcu "
+        "     ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
+        "WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = %s AND tc.table_name = %s "
+        "ORDER BY kcu.ordinal_position",
+        (pg_schema, table),
+    )
+    pk_cols = [r[0] for r in cur.fetchall()]
+
+    # FKs
+    cur.execute(
+        "SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name "
+        "FROM information_schema.table_constraints tc "
+        "JOIN information_schema.key_column_usage kcu "
+        "     ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
+        "JOIN information_schema.constraint_column_usage ccu "
+        "     ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema "
+        "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = %s AND tc.table_name = %s "
+        "ORDER BY kcu.ordinal_position",
+        (pg_schema, table),
+    )
+    fks = _fk_groups(cur.fetchall())
+
+    cols = []
+    for (col_name, udt_name, data_type, char_len, num_prec, num_scale, is_null, col_def) in col_rows:
+        ctype = _canonical_type(data_type, udt_name)
+        c = CanonicalColumn(
+            name=col_name,
+            type=ctype,
+            not_null=(is_null == "NO"),
+            primary_key=(col_name in pk_cols),
+            length=char_len,
+            precision=num_prec if ctype == "decimal" else None,
+            scale=num_scale if ctype == "decimal" else None,
+            default=col_def if col_def not in (None, "NULL", "null") else None,
+        )
+        cols.append(c)
+
+    return CanonicalTableSchema(
+        name=table,
+        columns=cols,
+        primary_key=pk_cols or None,
+        fk_constraints=fks or None,
+    )
+
+
+def _collect_schema_sqlserver(cur: _LoggingCursor, schema: str, table: str) -> CanonicalTableSchema | None:
+    ss_schema = schema or "dbo"
+
+    cur.execute(
+        "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH, "
+        "       c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.IS_NULLABLE, c.COLUMN_DEFAULT, "
+        "       COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA+'.'+c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') "
+        "FROM INFORMATION_SCHEMA.COLUMNS c "
+        "WHERE c.TABLE_SCHEMA = %s AND c.TABLE_NAME = %s ORDER BY c.ORDINAL_POSITION",
+        (ss_schema, table),
+    )
+    col_rows = cur.fetchall()
+    if not col_rows:
+        return None
+
+    cur.execute(
+        "SELECT kcu.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc "
+        "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu "
+        "     ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME "
+        "WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = %s AND tc.TABLE_NAME = %s "
+        "ORDER BY kcu.ORDINAL_POSITION",
+        (ss_schema, table),
+    )
+    pk_cols = [r[0] for r in cur.fetchall()]
+
+    cur.execute(
+        "SELECT tc.CONSTRAINT_NAME, kcu.COLUMN_NAME, ccu.TABLE_NAME, ccu.COLUMN_NAME "
+        "FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc "
+        "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu "
+        "     ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME "
+        "JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu "
+        "     ON tc.CONSTRAINT_NAME = ccu.CONSTRAINT_NAME "
+        "WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY' AND tc.TABLE_SCHEMA = %s AND tc.TABLE_NAME = %s "
+        "ORDER BY kcu.ORDINAL_POSITION",
+        (ss_schema, table),
+    )
+    fks = _fk_groups(cur.fetchall())
+
+    cols = []
+    for (col_name, data_type, char_len, num_prec, num_scale, is_null, col_def, is_identity) in col_rows:
+        ctype = _canonical_type(data_type)
+        c = CanonicalColumn(
+            name=col_name,
+            type=ctype,
+            not_null=(is_null == "NO"),
+            primary_key=(col_name in pk_cols),
+            auto_increment=bool(is_identity),
+            length=char_len,
+            precision=num_prec if ctype == "decimal" else None,
+            scale=num_scale if ctype == "decimal" else None,
+            default=col_def if col_def not in (None, "NULL", "(null)") else None,
+        )
+        cols.append(c)
+
+    return CanonicalTableSchema(
+        name=table,
+        columns=cols,
+        primary_key=pk_cols or None,
+        fk_constraints=fks or None,
+    )
+
+
+def _collect_schema_oracle(cur: _LoggingCursor, schema: str, table: str) -> CanonicalTableSchema | None:
+    from .ddl_parser import parse_ddl
+    try:
+        cur.execute(
+            "SELECT DBMS_METADATA.GET_DDL('TABLE', :1, :2) FROM DUAL",
+            (table.upper(), schema.upper()),
+        )
+        row = cur.fetchone()
+    except Exception:
+        row = None
+    if row and row[0]:
+        tables = parse_ddl(str(row[0]), dialect="oracle")
+        return tables[0] if tables else None
+
+    # Fallback: ALL_TAB_COLUMNS
+    cur.execute(
+        "SELECT COLUMN_NAME, DATA_TYPE, CHAR_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE, DATA_DEFAULT "
+        "FROM ALL_TAB_COLUMNS WHERE OWNER = :1 AND TABLE_NAME = :2 ORDER BY COLUMN_ID",
+        (schema.upper(), table.upper()),
+    )
+    col_rows = cur.fetchall()
+    if not col_rows:
+        return None
+
+    cur.execute(
+        "SELECT cc.COLUMN_NAME FROM ALL_CONSTRAINTS c JOIN ALL_CONS_COLUMNS cc "
+        "ON c.CONSTRAINT_NAME = cc.CONSTRAINT_NAME AND c.OWNER = cc.OWNER "
+        "WHERE c.CONSTRAINT_TYPE = 'P' AND c.OWNER = :1 AND c.TABLE_NAME = :2 ORDER BY cc.POSITION",
+        (schema.upper(), table.upper()),
+    )
+    pk_cols = [r[0] for r in cur.fetchall()]
+
+    cols = [
+        CanonicalColumn(
+            name=col_name,
+            type=_canonical_type(data_type),
+            not_null=(nullable == "N"),
+            primary_key=(col_name in pk_cols),
+            length=char_len,
+            precision=prec,
+            scale=scale,
+            default=default.strip() if default and default.strip() not in ("NULL",) else None,
+        )
+        for (col_name, data_type, char_len, prec, scale, nullable, default) in col_rows
+    ]
+    return CanonicalTableSchema(name=table, columns=cols, primary_key=pk_cols or None)
+
+
+def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
+                         table: str) -> CanonicalTableSchema | None:
+    """Dispatch to the dialect-specific schema collector."""
+    if dialect in ("mysql", "mariadb"):
+        return _collect_schema_mysql(cur, table)
+    if dialect == "sqlite":
+        return _collect_schema_sqlite(cur, table)
+    if dialect in ("postgres", "cockroachdb", "neon"):
+        return _collect_schema_postgres(cur, schema or "public", table)
+    if dialect == "sqlserver":
+        return _collect_schema_sqlserver(cur, schema or "dbo", table)
+    if dialect == "oracle":
+        return _collect_schema_oracle(cur, schema or "", table)
+    _die(f"Schema collection not yet supported for dialect {dialect!r}; collect DDL manually.")
+
+
+def _cmd_collect(args) -> None:
+    """Connect to a live database, collect schema + statistics, write YAML files."""
+    import time
+    from .db_stats_collector import collect_table_stats
+
+    dialect    = args.dialect
+    schema     = getattr(args, "schema_name", None) or None
+    pattern    = getattr(args, "tables", "%")
+    show_sql   = getattr(args, "show_sql", False)
+    out_schema = Path(getattr(args, "out_schema", "schema.yaml"))
+    out_stats  = Path(getattr(args, "out_stats",  "stats.yaml"))
+    do_analyze = getattr(args, "analyze", False)
+
+    # ── connect ──────────────────────────────────────────────────────────────
+    conn, host, port, user, database = _connect_interactive(args)
+    print(f"\n  Connected to {dialect} @ {host}:{port}/{database} as {user}", file=sys.stderr)
+
+    raw_cur = conn.cursor()
+    cur = _LoggingCursor(raw_cur, show_sql)
+
+    # ── optional ANALYZE ─────────────────────────────────────────────────────
+    if do_analyze:
+        if dialect in ("mysql", "mariadb"):
+            print("  Running ANALYZE TABLE … (use --no-analyze to skip)", file=sys.stderr)
+        elif dialect in ("postgres", "cockroachdb", "neon"):
+            print("  Running ANALYZE … (use --no-analyze to skip)", file=sys.stderr)
+            cur.execute("ANALYZE")
+            conn.commit()
+
+    # ── list tables ──────────────────────────────────────────────────────────
+    tables_found = _list_tables(cur, dialect, schema, pattern)
+    if not tables_found:
+        _die(f"No tables found matching {pattern!r} in {dialect}@{database}")
+    print(f"  Found {len(tables_found)} table(s) matching {pattern!r}\n", file=sys.stderr)
+
+    # ── collect per table ─────────────────────────────────────────────────────
+    canonical_tables: list[CanonicalTableSchema] = []
+    table_stats_list = []
+
+    for tname in tables_found:
+        t0 = time.perf_counter()
+
+        # Schema
+        tbl = _collect_schema_live(cur, dialect, schema, tname)
+        if tbl is None:
+            print(f"  ⚠  {tname}: schema not found — skipped", file=sys.stderr)
+            continue
+        canonical_tables.append(tbl)
+        n_cols = len(tbl.columns)
+        n_fks  = len(tbl.fk_constraints or [])
+
+        # Stats
+        if do_analyze and dialect in ("mysql", "mariadb"):
+            cur.execute(f"ANALYZE TABLE `{tname}`")
+
+        try:
+            ts = collect_table_stats(conn, tname, dialect=dialect, schema=schema)
+            table_stats_list.append(ts)
+            row_count = ts.row_count or 0
+        except Exception as exc:
+            logger.warning("Stats collection failed for %s: %s", tname, exc)
+            row_count = 0
+
+        elapsed = time.perf_counter() - t0
+        fk_note = f", {n_fks} FK{'s' if n_fks != 1 else ''}" if n_fks else ""
+        print(
+            f"  ✓  {tname:<30} {n_cols} cols{fk_note}, {row_count:,} rows  ({elapsed:.1f}s)",
+            file=sys.stderr,
+        )
+
+    if not canonical_tables:
+        _die("No tables collected — nothing to write.")
+
+    # ── write output ─────────────────────────────────────────────────────────
+    dump_schema(canonical_tables, str(out_schema))
+    db_stats = DatabaseStats(tables=table_stats_list)
+    from .stats_io import dump_stats as _dump_stats
+    _dump_stats(db_stats, str(out_stats))
+
+    total_rows = sum(ts.row_count or 0 for ts in table_stats_list)
+    print(
+        f"\n  Wrote {out_schema}  ({len(canonical_tables)} tables)\n"
+        f"  Wrote {out_stats}   ({len(table_stats_list)} tables, {total_rows:,} total rows)\n",
+        file=sys.stderr,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -577,6 +1078,57 @@ def _build_parser() -> argparse.ArgumentParser:
     p_load.add_argument("-v", "--verbose", action="store_true",
                         help="Enable debug logging.")
 
+    # ── collect ───────────────────────────────────────────────────────────────
+    p_col = sub.add_parser(
+        "collect",
+        help="Connect to a live database and collect DDL + statistics into YAML.",
+        description=(
+            "Connect to a live database, extract the schema and column statistics\n"
+            "for every table matching --tables, and write canonical YAML files.\n\n"
+            "Any missing connection flags are prompted for interactively.\n"
+            "Use --show-sql to see every SQL statement sent to the database.\n\n"
+            "Examples\n"
+            "--------\n"
+            "  # Collect everything from a MySQL database (prompts for password)\n"
+            "  statschema collect --dialect mysql --host localhost --user root \\\n"
+            "      --database northwind --tables '%'\n\n"
+            "  # Collect only order* tables from PostgreSQL, show SQL, custom output files\n"
+            "  statschema collect --dialect postgres --host db.example.com \\\n"
+            "      --user myuser --database prod --schema public --tables 'order%' \\\n"
+            "      --show-sql --out-schema orders.yaml --out-stats orders_stats.yaml\n\n"
+            "  # SQL Server — prompts for all connection details\n"
+            "  statschema collect --dialect sqlserver"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_col.add_argument("--dialect", required=True, choices=_ALL_DIALECTS,
+                       help="Source database dialect.")
+    p_col.add_argument("--host",     metavar="HOST",
+                       help="Database host (default: localhost — prompted if omitted).")
+    p_col.add_argument("--port",     type=int, metavar="PORT",
+                       help="Database port (dialect default — prompted if omitted).")
+    p_col.add_argument("--user",     metavar="USER",
+                       help="Database username (prompted if omitted).")
+    p_col.add_argument("--password", metavar="PASS",
+                       help="Database password (prompted securely if omitted).")
+    p_col.add_argument("--database", metavar="DB",
+                       help="Database / catalog name (prompted if omitted).")
+    p_col.add_argument("--schema",   dest="schema_name", metavar="SCHEMA",
+                       help="Schema / namespace within the database (e.g. public, dbo).")
+    p_col.add_argument("--tables",   default="%", metavar="PATTERN",
+                       help="SQL LIKE pattern for table names (default: %% = all tables). "
+                            "Shell glob * is accepted and converted to %%.")
+    p_col.add_argument("--show-sql", action="store_true",
+                       help="Print every SQL statement sent to the database.")
+    p_col.add_argument("--analyze",  action="store_true",
+                       help="Run ANALYZE (MySQL/PostgreSQL) before collecting statistics.")
+    p_col.add_argument("--out-schema", default="schema.yaml", metavar="FILE",
+                       help="Output path for the canonical schema YAML (default: schema.yaml).")
+    p_col.add_argument("--out-stats",  default="stats.yaml",  metavar="FILE",
+                       help="Output path for the statistics YAML (default: stats.yaml).")
+    p_col.add_argument("-v", "--verbose", action="store_true",
+                       help="Enable debug logging.")
+
     return root
 
 
@@ -608,6 +1160,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_generate(args)
     elif args.cmd == "load":
         _cmd_load(args)
+    elif args.cmd == "collect":
+        _cmd_collect(args)
 
 
 if __name__ == "__main__":

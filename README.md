@@ -151,6 +151,40 @@ for tbl in ordered:
 
 Three patterns most tools can't express without custom code: **Zipf FK fan-out** (a few hot orders accumulate most line items, matching real e-commerce data), **weighted status distribution** (50% delivered, 5% cancelled — not uniform), and **conditional nulls** (`discount_pct` NULL 65% of the time, non-zero only on promoted SKUs). All declared in YAML; no Python per table.
 
+**Collect DDL and statistics from any live database — no SQL knowledge required:**
+```bash
+# Collect everything from MySQL — prompts for password interactively
+statschema collect --dialect mysql --host localhost --user root --database northwind
+
+# Collect only order* tables from PostgreSQL, see every SQL statement issued
+statschema collect --dialect postgres --host db.example.com \
+    --user myuser --database prod --schema public --tables 'order%' --show-sql
+
+# SQL Server — prompts for every missing option
+statschema collect --dialect sqlserver
+```
+```
+  Connected to postgres @ db.example.com:5432/prod as myuser
+  Found 4 table(s) matching 'order%'
+
+    → SQL: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ...
+    → SQL: SELECT column_name, udt_name ... FROM information_schema.columns WHERE table_name = 'orders' ...
+    → SQL: SELECT COUNT(*) FROM orders
+    → SQL: SELECT status, COUNT(*) FROM orders GROUP BY status ORDER BY 2 DESC LIMIT 10
+  ✓  orders                         8 cols, 2 FKs, 50,000 rows  (0.4s)
+  ✓  order_details                  6 cols, 2 FKs, 175,000 rows  (1.1s)
+  ✓  order_status_history           4 cols, 1 FK,  62,000 rows   (0.8s)
+  ✓  order_payments                 7 cols, 1 FK,  48,500 rows   (0.6s)
+
+  Wrote schema.yaml  (4 tables)
+  Wrote stats.yaml   (4 tables, 335,500 total rows)
+```
+Then generate referentially-correct synthetic data at any scale factor:
+```bash
+statschema generate schema.yaml --sf 10 --out-dir ./data
+statschema load     schema.yaml --dialect sqlite --dsn /tmp/test.db --sf 10
+```
+
 Python 3.10+ · [Full docs below](#overview)
 
 ---
