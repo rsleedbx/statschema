@@ -12,6 +12,7 @@ Root conftest.py — runs before any test collection.
    manually export JAVA_HOME in each shell.
 """
 import os
+import sys
 from pathlib import Path
 
 try:
@@ -34,6 +35,32 @@ def _find_java_home() -> str | None:
         if Path(candidate, "bin", "java").exists():
             return candidate
     return None
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """When STATSCHEMA_ASSERT_NO_SKIPS=1, turn any skip into a hard failure.
+
+    Set automatically by all test-live-* Makefile targets.  Prevents silent
+    passes when a database container or endpoint is not running.
+    """
+    if not os.environ.get("STATSCHEMA_ASSERT_NO_SKIPS"):
+        return
+    skipped = terminalreporter.stats.get("skipped", [])
+    if not skipped:
+        return
+    # Collect unique skip reasons from longrepr (filename, lineno, "Skipped: …")
+    reasons = dict.fromkeys(
+        r.longrepr[2] if isinstance(r.longrepr, tuple) else str(r.longrepr)
+        for r in skipped
+    )
+    terminalreporter.write_sep(
+        "=",
+        f"ASSERT_NO_SKIPS: {len(skipped)} test(s) skipped — fix the infrastructure or unset STATSCHEMA_ASSERT_NO_SKIPS",
+        red=True,
+    )
+    for reason in reasons:
+        terminalreporter.write_line(f"  {reason}", red=True)
+    sys.exit(1)
 
 
 if not os.environ.get("JAVA_HOME"):
