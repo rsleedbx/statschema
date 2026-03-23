@@ -928,6 +928,75 @@ def _cmd_collect(args) -> None:
 
 
 # ---------------------------------------------------------------------------
+# inject sub-command — push collected stats into a target database
+# ---------------------------------------------------------------------------
+
+_INJECT_FN: dict[str, str] = {
+    "postgres":    "inject_stats_postgres",
+    "cockroachdb": "inject_stats_postgres",
+    "neon":        "inject_stats_postgres",
+    "mysql":       "inject_stats_mysql",
+    "mariadb":     "inject_stats_mysql",
+    "sqlserver":   "inject_stats_sqlserver",
+    "oracle":      "inject_stats_oracle",
+    "db2":         "inject_stats_db2",
+    "databricks":  "inject_stats_databricks",
+}
+
+
+def _cmd_inject(args) -> None:
+    """Inject stats YAML into the target database's optimizer statistics catalog."""
+    import importlib
+    from .stats_io import load_stats as _load_stats
+
+    dialect   = args.dialect
+    show_sql  = getattr(args, "show_sql", False)
+    schema    = getattr(args, "schema_name", None) or None
+    only_tbls = set(t.strip() for t in args.tables.split(",")) if args.tables else None
+
+    fn_name = _INJECT_FN.get(dialect)
+    if fn_name is None:
+        _die(f"Stats injection not supported for dialect {dialect!r}.")
+
+    inject_fn = getattr(importlib.import_module(".stats_injector", "statschema"), fn_name)
+
+    db_stats = _load_stats(args.stats)
+    tables   = [ts for ts in db_stats.tables if not only_tbls or ts.name in only_tbls]
+    if not tables:
+        _die(f"No matching tables found in {args.stats}.")
+
+    conn = _connect(dialect, args.dsn)
+
+    print(f"\n  Injecting stats from {args.stats} → {dialect}", file=sys.stderr)
+    if only_tbls:
+        print(f"  Tables: {', '.join(sorted(only_tbls))}", file=sys.stderr)
+
+    ok = err = 0
+    for ts in tables:
+        try:
+            kwargs: dict = {}
+            if dialect in ("postgres", "cockroachdb", "neon") and schema:
+                kwargs["schema"] = schema
+            elif dialect in ("mysql", "mariadb") and schema:
+                kwargs["database"] = schema
+            if show_sql:
+                print(f"  → injecting {ts.name} ({ts.row_count or 0:,} rows) …", file=sys.stderr)
+            result = inject_fn(conn, ts, **kwargs)
+            status = getattr(result, "status", "ok")
+            print(f"  ✓  {ts.name:<30} {status}", file=sys.stderr)
+            ok += 1
+        except Exception as exc:
+            print(f"  ✗  {ts.name:<30} {exc}", file=sys.stderr)
+            err += 1
+
+    conn.close()
+    print(f"\n  {ok} table(s) injected", *(["—", err, "error(s)"] if err else []),
+          file=sys.stderr)
+    if err:
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -1147,6 +1216,46 @@ def _build_parser() -> argparse.ArgumentParser:
     p_col.add_argument("-v", "--verbose", action="store_true",
                        help="Enable debug logging.")
 
+    # ── inject ────────────────────────────────────────────────────────────────
+    p_inj = sub.add_parser(
+        "inject",
+        help="Inject collected statistics into a target database optimizer.",
+        description=(
+            "Load a stats.yaml produced by 'collect' and push the column statistics\n"
+            "directly into the target database's optimizer catalog.\n\n"
+            "The target table must already exist (run 'statschema ddl | psql …' first).\n"
+            "After injection, EXPLAIN plans reflect production-scale distributions\n"
+            "before a single production row is loaded.\n\n"
+            "Examples\n"
+            "--------\n"
+            "  # Inject into PostgreSQL\n"
+            "  statschema inject --dialect postgres --stats stats.yaml \\\n"
+            '      --dsn "host=target-db dbname=myapp user=me password=s3cr3t"\n\n'
+            "  # Inject into MySQL\n"
+            "  statschema inject --dialect mysql --stats stats.yaml \\\n"
+            '      --dsn "host=localhost user=root password=s3cr3t database=myapp"\n\n'
+            "  # Inject only specific tables\n"
+            "  statschema inject --dialect postgres --stats stats.yaml \\\n"
+            '      --dsn "host=target-db dbname=myapp user=me password=s3cr3t" \\\n'
+            "      --tables orders,order_details"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_inj.add_argument("--dialect", required=True, choices=list(_INJECT_FN),
+                       help="Target database dialect.")
+    p_inj.add_argument("--dsn",     required=True,
+                       help="Connection string for the target database (same format as 'load').")
+    p_inj.add_argument("--stats",   required=True, metavar="FILE",
+                       help="Path to the stats YAML produced by 'collect' (e.g. stats.yaml).")
+    p_inj.add_argument("--schema",  dest="schema_name", metavar="SCHEMA",
+                       help="Target schema (PostgreSQL default: public; SQL Server default: dbo).")
+    p_inj.add_argument("--tables",  default=None, metavar="TABLE[,TABLE…]",
+                       help="Comma-separated list of table names to inject (default: all).")
+    p_inj.add_argument("--show-sql", action="store_true",
+                       help="Print each injection operation as it runs.")
+    p_inj.add_argument("-v", "--verbose", action="store_true",
+                       help="Enable debug logging.")
+
     return root
 
 
@@ -1180,6 +1289,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_load(args)
     elif args.cmd == "collect":
         _cmd_collect(args)
+    elif args.cmd == "inject":
+        _cmd_inject(args)
 
 
 if __name__ == "__main__":

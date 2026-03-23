@@ -39,19 +39,20 @@ print(emit_ddl(tables[0], "mysql"))       # round-trip: AUTO_INCREMENT, TINYINT(
 print(emit_ddl(tables[0], "db2"))         # GENERATED ALWAYS AS IDENTITY, TIMESTAMP
 ```
 
-**Collect statistics from MySQL, inject into PostgreSQL — optimizer works before any rows are loaded:**
-```python
-from statschema import collect_table_stats, dump_stats, load_stats, inject_stats_postgres
+**Collect DDL and statistics from the source database — no Python required:**
+```bash
+# On the source (read-only — no production data leaves the database)
+statschema collect --dialect mysql --host prod-db --user readonly \
+    --catalog myapp --tables '%'
+#   → schema.yaml   (table structure, column types, FK constraints)
+#   → stats.yaml    (null rates, cardinality, MCVs, histogram bounds — kilobytes, no PII)
 
-# On the source — read-only, no production data leaves the database
-db_stats = collect_table_stats(mysql_conn, "orders", dialect="mysql")
-dump_stats(db_stats, "orders_stats.yaml")          # kilobytes, no PII, version-controllable
-
-# On the target — optimizer sees production distributions immediately
-db_stats = load_stats("orders_stats.yaml")
-inject_stats_postgres(pg_conn, db_stats.table_stats("orders"))
-# → pg_restore_attribute_stats sets null_frac, n_distinct, MCVs, histogram_bounds
-# → EXPLAIN plans match production shape before a single row is loaded
+# Inject optimizer statistics into the migration target before loading any data
+statschema inject --dialect postgres \
+    --dsn "host=target-db dbname=myapp user=me password=s3cr3t" \
+    --stats stats.yaml
+#   → pg_restore_attribute_stats: null_frac, n_distinct, MCVs, histogram_bounds
+#   → EXPLAIN plans match production shape before a single row is loaded
 ```
 
 **Generate referentially-correct synthetic data from YAML — with realistic skew and FK fan-out:**
