@@ -43,22 +43,6 @@ print(emit_ddl(tables[0], "mysql"))       # round-trip: AUTO_INCREMENT, TINYINT(
 print(emit_ddl(tables[0], "db2"))         # GENERATED ALWAYS AS IDENTITY, TIMESTAMP
 ```
 
-**Collect DDL and statistics from the source database — no Python required:**
-```bash
-# On the source (read-only — no production data leaves the database)
-statschema collect --dialect mysql --host prod-db --user readonly \
-    --catalog myapp --tables '%'
-#   → schema.yaml   (table structure, column types, FK constraints)
-#   → stats.yaml    (null rates, cardinality, MCVs, histogram bounds — kilobytes, no PII)
-
-# Inject optimizer statistics into the migration target before loading any data
-statschema inject --dialect postgres \
-    --dsn "host=target-db dbname=myapp user=me password=s3cr3t" \
-    --stats stats.yaml
-#   → pg_restore_attribute_stats: null_frac, n_distinct, MCVs, histogram_bounds
-#   → EXPLAIN plans match production shape before a single row is loaded
-```
-
 **Generate referentially-correct synthetic data from YAML — with realistic skew and FK fan-out:**
 
 `orders_schema.yaml`:
@@ -535,29 +519,7 @@ MySQL / PostgreSQL / SQL Server / Oracle DDL  (incl. COMMENT clauses)
 
 ### 1 — Transpile DDL across databases
 
-```python
-from src.statschema import parse_ddl, emit_ddl
-
-mysql_ddl = """
-CREATE TABLE orders (
-    order_id    INT           NOT NULL AUTO_INCREMENT,
-    customer_id INT           NOT NULL,
-    status      VARCHAR(20)   NOT NULL DEFAULT 'pending',
-    total       DECIMAL(10,2)     NULL,
-    is_paid     TINYINT(1)    NOT NULL DEFAULT 0,
-    created_at  DATETIME          NULL,
-    PRIMARY KEY (order_id)
-) ENGINE=InnoDB;
-"""
-
-tables = parse_ddl(mysql_ddl, dialect="mysql")
-schema = tables[0]
-
-print(emit_ddl(schema, "postgres"))     # PostgreSQL
-print(emit_ddl(schema, "sqlserver"))    # SQL Server
-print(emit_ddl(schema, "databricks"))   # Databricks / Delta
-print(emit_ddl(schema, "oracle"))       # Oracle
-```
+Same `parse_ddl` / `emit_ddl` call shown in the Quick-start above.
 
 Output (PostgreSQL):
 ```sql
@@ -666,13 +628,6 @@ The DDL parser and stats collector populate three independent fields that semant
 | 4 *(planned)* | Column statistics | `ColumnStats` | `stats.yaml` | MCV pattern matching |
 | 5 *(planned)* | LLM inference | — | — | Foundation model call |
 
-Resolution order inside `infer_format_pattern()`:
-1. **Name** — `col.name` vs name-pattern file (fastest, zero config)
-2. **Comment** — `col.comment` (from SQL `COMMENT 'text'` clause) vs comment-pattern file
-3. **Description** — `col.description` (human/LLM-written) used as fallback when `col.comment` is absent
-4. **Stats** — `ColumnStats.most_common_values` *(planned)*
-5. **LLM** — foundation model call *(planned)*
-
 **Option A — built-in name inference (zero config)**
 
 `infer_format_pattern()` matches a column name against a shipped YAML pattern file and returns a `format_pattern`.  Called automatically inside `build_dataframe_from_canonical()` and `to_v1_plan()`.
@@ -765,8 +720,6 @@ This is the full production workflow.  Generate an initial dataset using heurist
 defaults, load it into a real database, measure what the database actually contains,
 then feed those real measurements back as generation parameters.  Each iteration
 narrows the gap between the collected statistics and the target statistics.
-The loop can be repeated; convergence is not guaranteed but null fractions typically
-stabilise within ±15% and cardinality within ±5× after one or two rounds.
 
 ```python
 import pymysql
@@ -980,13 +933,6 @@ generation for PostgreSQL or Databricks without conversion.
 
 ## Exporting DDL and statistics from each database
 
-All examples read credentials from `.env` at the repo root.
-Copy `.env.example` to `.env` and fill in your values once:
-
-```bash
-cp .env.example .env   # fill in passwords, ports, etc.
-```
-
 For **MySQL**, **PostgreSQL**, **MariaDB**, **CockroachDB**, **Neon**, **Databricks**, and **Lakebase**, full DDL export and stats collection instructions live in the per-database setup pages:
 
 | Database | Setup + export guide |
@@ -996,8 +942,7 @@ For **MySQL**, **PostgreSQL**, **MariaDB**, **CockroachDB**, **Neon**, **Databri
 | MariaDB | [`docs/databases/mariadb.md`](docs/databases/mariadb.md) |
 | CockroachDB | [`docs/databases/cockroachdb.md`](docs/databases/cockroachdb.md) |
 | Neon | [`docs/databases/neon.md`](docs/databases/neon.md) |
-| Databricks | [`docs/databases/lakebase.md`](docs/databases/lakebase.md) |
-| Lakebase | [`docs/databases/lakebase.md`](docs/databases/lakebase.md) |
+| Databricks / Lakebase | [`docs/databases/lakebase.md`](docs/databases/lakebase.md) |
 
 The three sections below cover **SQL Server**, **Oracle**, and **Db2** — the databases where the DDL export tooling is least obvious.
 
@@ -1150,17 +1095,9 @@ df.to_sql(tables[0].name, engine, if_exists="replace", index=False)
 
 ## Stats transpiler — the database migration use case
 
-When you migrate a database, the query optimizer on the target knows nothing about
-your data.  Its statistics are either empty or based on a tiny test dataset.
-Bad statistics → bad query plans → slow queries → frustrated users on day one.
-
-The conventional fix is to load all production data, then run `ANALYZE` / `UPDATE STATISTICS`.
-That takes hours or days on large databases, and requires production data to be present.
-
-**The stats transpiler approach**: collect statistics from the source database *before*
-migration, store them as portable YAML, then inject them directly into the target
-database's statistics catalog.  The optimizer sees production-scale distributions
-immediately, with no data loaded.
+Collect statistics from the source before migration, store as portable YAML, inject
+into the target's statistics catalog — optimizer sees production-scale distributions
+immediately, before a single row is loaded.  See [Optimizer bootstrap](#optimizer-bootstrap--inject-statistics-before-migrating-data) for context.
 
 ```python
 import pymysql
@@ -1185,8 +1122,7 @@ pg_stats = load_stats("production_stats.yaml")
 > **Status**: statistics collection and portable YAML are production-ready.
 > Injecting into target optimizer statistics catalogs (`pg_restore_attribute_stats`,
 > `DBMS_STATS.SET_COLUMN_STATS`, `UPDATE STATISTICS WITH ROWCOUNT`) is on the roadmap —
-> see the TODO item.  PostgreSQL 18 independently validated this need by shipping
-> `pg_dump --statistics-only` for the same reason.
+> see the TODO item.
 
 ---
 
@@ -1329,18 +1265,7 @@ make test-live-lakebase   # Lakebase: spin up → run tests → disable endpoint
 
 **[`docs/adding-a-database.md`](docs/adding-a-database.md)** is the single contributor guide for integrating a new engine as a source or target for DDL transpilation, stats collection, and live testing.  It covers everything from pre-checks (sqlglot support, ARM64 availability, wire protocol) through dialect registration, optional custom DDL emitter, local container/VM setup, live test module, and Makefile wiring.
 
-Local database setup recipes live in **[`docs/local-databases.md`](docs/local-databases.md)** (index) and individual per-database pages under **[`docs/databases/`](docs/databases/)**:
-
-| Page | Method |
-|------|--------|
-| [postgres.md](docs/databases/postgres.md) | Podman, native ARM64 |
-| [neon.md](docs/databases/neon.md) | Podman + Neon Local cloud proxy |
-| [cockroachdb.md](docs/databases/cockroachdb.md) | Podman, native ARM64 (single-node + multi-region) |
-| [mysql.md](docs/databases/mysql.md) | Podman, native ARM64 |
-| [mariadb.md](docs/databases/mariadb.md) | Podman, native ARM64 |
-| [sqlserver.md](docs/databases/sqlserver.md) | Lima VM + QEMU (x86_64) |
-| [oracle.md](docs/databases/oracle.md) | Lima VM + Podman + QEMU (x86_64) |
-| [db2.md](docs/databases/db2.md) | Lima VM + Podman + QEMU (x86_64) |
+Local database setup recipes live in **[`docs/local-databases.md`](docs/local-databases.md)** (index) and individual per-database pages under **[`docs/databases/`](docs/databases/)** — see the [Database setup](#database-setup) table in the Documentation section below for the full list.
 
 ---
 
@@ -1484,7 +1409,7 @@ Where statschema does **not** help: stored procedure rewriting (T-SQL→PL/pgSQL
 | [`docs/testing.md`](docs/testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
 | [`docs/test_plan_ddl_roundtrip.md`](docs/test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
 | [`docs/learnings/README.md`](docs/learnings/README.md) | Learnings index: gotchas and decisions captured while building statschema |
-| [`docs/learnings/oltp-migration-analysis.md`](docs/learnings/oltp-migration-analysis.md) | **Real-world OLTP migration analysis** — five documented migrations (SQL Server → PostgreSQL, MySQL → PostgreSQL, Oracle → PostgreSQL, MySQL → Aurora, SQLite → Neon) with concrete evidence for where statschema eliminates or shortens each phase of the evaluation cycle, and where it does not help (stored procedures, network latency, CDC cutover, ETL correctness) |
+| [`docs/learnings/oltp-migration-analysis.md`](docs/learnings/oltp-migration-analysis.md) | **Real-world OLTP migration analysis** — five migrations, per-phase evidence. Summary in [Real-world migration evidence](#real-world-migration-evidence) above. |
 
 ### Database setup
 
