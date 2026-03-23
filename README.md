@@ -149,18 +149,31 @@ how much the target engine exposes:
 
 statschema is designed so that an AI agent can add a new dialect, a new stats field, or a new semantic pattern — and the test suite immediately confirms whether it is correct across all nine supported databases.
 
-**3,209 tests · 22 test files · 9 live dialects**
+**3,214 tests · 23 test files · 9 live dialects**
 
 | Category | Tests | What is covered |
 |---|---|---|
 | DDL round-trip (offline) | 1,830 | Same-dialect identity, cross-dialect emission, Oracle/Postgres/MySQL/SQLServer type mapping, decimal boundaries, string lengths, temporal types, defaults, migration edge cases, canonical YAML pipeline |
 | Semantic hints (offline) | 150 | Name inference, comment inference, locale (`en_US`, `de_DE`), custom hint files, `apply_hints` wiring, stats passthrough |
 | Stats model, schema parser, builder (offline) | 420 | `ColumnStats` / `TableStats` / `DatabaseStats` serialization, stats I/O, v1 bridge, dbldatagen builder, loader edge paths, override application |
+| **Migration round-trip (offline)** | **5** | **Parse real-world DDL → generate at SF=0.1 → load SQLite → run representative queries. Covers Northwind (SQL Server), Sakila (MySQL), Django Auth (PostgreSQL), WordPress (MySQL, no-FK DDL), Chinook (PostgreSQL)** |
 | Live — DDL round-trip | 430+ | Parse DDL on a real database, emit to every other dialect, verify column types survive |
 | Live — stats collection | 200+ | `collect_table_stats` on MySQL, PostgreSQL, SQL Server, Oracle, Db2, CockroachDB, MariaDB |
 | Live — real schemas | 170+ | Chinook music DB, AdventureWorks, Mautic CRM, Oracle HR — multi-table FK schemas |
 
-**2,402 tests run offline** (no database required) — any contributor or AI agent can run the full offline suite in under 60 seconds on a laptop with no setup. The 807 live tests run against real databases spun up locally with Podman using the per-dialect guides in [`docs/databases/`](docs/databases/).
+**2,407 tests run offline** (no database required) — any contributor or AI agent can run the full offline suite in under 60 seconds on a laptop with no setup. The 807 live tests run against real databases spun up locally with Podman using the per-dialect guides in [`docs/databases/`](docs/databases/).
+
+The migration round-trip tests (`tests/test_migration_roundtrip.py`) are the canonical example of how statschema handles real-world database migrations. Each test represents a migration story a DBA would actually encounter:
+
+| Test | Source | FK pattern | Story |
+|------|--------|------------|-------|
+| Northwind | SQL Server `NVARCHAR`/`MONEY`/`SMALLINT` | `ALTER TABLE ADD CONSTRAINT` | ERP systems (Dynamics 365, SAP) → PostgreSQL |
+| Sakila | MySQL `AUTO_INCREMENT`, `TINYINT UNSIGNED` | Inline `CONSTRAINT … FOREIGN KEY` | Content/media apps (MySQL 5.7 → Aurora) |
+| Django Auth | PostgreSQL `SERIAL` | Inline anonymous `REFERENCES` | Any Django web application |
+| WordPress | MySQL `BIGINT UNSIGNED`, `longtext` | No FK DDL — DBA-enriched | PHP CMS migration (WordPress, Drupal, Joomla) |
+| Chinook | PostgreSQL `INT` PKs | Named `ALTER TABLE` FKs | Analytics and BI platform migrations |
+
+The WordPress test specifically exercises the "no FK DDL" pattern that is pervasive in PHP applications: WordPress deliberately omits foreign key constraints from its schema. The DBA appends the FK definitions to the canonical YAML once, and statschema generates referentially consistent data from that point on — no application code changes, no custom Python.
 
 Every test file follows a single pattern — `pytest` classes with descriptive names — so an AI adding a new feature can read an existing test class, understand the contract, and generate a matching test class for the new feature without reading the full codebase.
 
