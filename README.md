@@ -13,6 +13,8 @@ pip install statschema
 
 > **Your query optimizer produces correct plans before you load a single row.**
 > Collect schema, column comments, and statistics from any source database into dialect-free YAML. Transpile DDL to any target dialect. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — without moving a single production row.
+>
+> **No Spark, no Java, no custom code required for core workflows.** The CLI (`statschema collect`, `inject`, `generate`, `load`) works out of the box. Spark is an optional extra only for large-scale distributed data generation on Databricks.
 
 ### Quick start
 
@@ -137,17 +139,23 @@ tables:
         parent_columns: [order_id]
 ```
 ```python
-from statschema import load_canonical, generate_rows, resolve_row_counts, resolve_load_order
+from statschema import (
+    load_canonical, build_rows_from_canonical,
+    resolve_row_counts, resolve_load_order,
+)
 
 tables  = load_canonical("orders_schema.yaml")
 counts  = resolve_row_counts(tables, scale_factor=1.0)
 ordered = resolve_load_order(tables)        # topological sort: orders before order_details
 
 for tbl in ordered:
-    rows = list(generate_rows(tbl, counts[tbl.name], parent_row_counts=counts))
-    print(f"{tbl.name}: {len(rows):,} rows generated")
+    df = build_rows_from_canonical(tbl, rows=counts[tbl.name], parent_row_counts=counts)
+    print(f"{tbl.name}: {len(df):,} rows  —  {list(df.columns)}")
 # orders:        100,000 rows
 # order_details: 350,000 rows  (Zipf FK: top 1% of orders absorb ~30% of line items)
+
+# Load into any database via pandas / SQLAlchemy — no Spark required
+df.to_sql("orders", engine, if_exists="replace", index=False)
 ```
 
 Three patterns most tools can't express without custom code: **Zipf FK fan-out** (a few hot orders accumulate most line items, matching real e-commerce data), **weighted status distribution** (50% delivered, 5% cancelled — not uniform), and **conditional nulls** (`discount_pct` NULL 65% of the time, non-zero only on promoted SKUs). All declared in YAML; no Python per table.
@@ -342,7 +350,7 @@ Four capabilities, each useful alone — more powerful together:
 |--------|-------------|---------------|
 | **Optimizer bootstrap** ⭐ | Collect column statistics (null rates, cardinality, MCVs, histograms) from any source database; store as dialect-free YAML; inject into any target so the optimizer is not blind during migration cutover. Native `ANALYZE` still runs post-load to replace the bootstrap with real statistics. | `collect_table_stats` / `dump_stats` / `load_stats` / `inject_stats_*` |
 | **DDL transpiler** | Parse `CREATE TABLE` from any dialect; emit correct DDL for any other — types, defaults, constraints, column comments all preserved per-dialect | `parse_ddl` / `emit_ddl` / `emit_column_comments` |
-| **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data | `build_dataframe_from_canonical` |
+| **Stats-driven tabular data** | Feed collected statistics into a data generator to produce synthetic rows whose distributions match real production data. **`build_rows_from_canonical`** (pure Python, no Spark) returns a `pd.DataFrame` — suitable for evaluation-scale workloads up to ~10 M rows. **`build_dataframe_from_canonical`** (requires `statschema[spark]`) returns a Spark DataFrame for Databricks-scale generation. | `build_rows_from_canonical` / `build_dataframe_from_canonical` |
 | **Semantic hints** | Infer realistic generators (SSN, email, phone, name, …) from column name, SQL COMMENT text, or description; extend or override via `hints.yaml`; locale-aware | `infer_format_pattern` / `load_hints` / `apply_hints` |
 
 **Supported dialects**: MySQL · MariaDB · PostgreSQL · CockroachDB · Neon · **Lakebase** · SQL Server · Oracle · IBM Db2 · Databricks
@@ -556,25 +564,27 @@ tables:
 ```python
 from src.statschema import (
     parse_ddl, make_default_stats,
-    collect_table_stats, build_dataframe_from_canonical,
+    collect_table_stats, build_rows_from_canonical,
 )
 
 # Parse schema
 schema = parse_ddl(open("schema.sql").read(), dialect="mysql")[0]
 
-# Option A: generate from heuristic defaults (no live DB needed)
+# Option A: generate from heuristic defaults (no live DB, no Spark)
 stats = make_default_stats([schema], row_count=100_000).tables[0]
-df = build_dataframe_from_canonical(spark, schema, rows=100_000, stats=stats)
-df.show(5)
+df = build_rows_from_canonical(schema, rows=100_000, stats=stats)
+df.to_sql("orders", engine, if_exists="replace", index=False)
 
 # Option B: collect REAL stats from a live database first
-#   → null fractions, distinct counts, min/max, most-common values
 import pymysql
 conn = pymysql.connect(host="127.0.0.1", port=3306, user="root", password="…")
 real_stats = collect_table_stats(conn, "orders", dialect="mysql")
+df = build_rows_from_canonical(schema, rows=100_000, stats=real_stats)
 
-# Generate data parameterized by the collected statistics
-df = build_dataframe_from_canonical(spark, schema, rows=1_000_000, stats=real_stats)
+# For Databricks-scale generation (100M+ rows on a cluster), use the Spark path:
+#   pip install 'statschema[spark]'
+#   from statschema import build_dataframe_from_canonical
+#   df = build_dataframe_from_canonical(spark, schema, rows=1_000_000, stats=real_stats)
 ```
 
 The generated DataFrame is parameterized by:
@@ -1402,16 +1412,20 @@ CanonicalTableSchema + CanonicalForeignKey
 ### Install
 
 ```bash
-# Runtime
-pip install pyyaml sqlglot python-dotenv
+# Core — CLI, DDL transpilation, stats collect/inject, and pandas-based synthetic data.
+# No Spark, no Java, no JVM required.
+pip install statschema
 
-# Data generation (requires Java; see docs/testing.md)
-pip install pyspark dbldatagen pyarrow
+# Large-scale Spark-based synthetic data (adds PySpark + dbldatagen; requires Java/JVM):
+pip install 'statschema[spark]'
 
-# Live database drivers (install only what you need)
-pip install pymysql psycopg2-binary pymssql sqlalchemy
+# Live database drivers — install only the ones you need:
+pip install 'statschema[postgres]'   # psycopg2-binary
+pip install 'statschema[mysql]'      # pymysql
+pip install 'statschema[mssql]'      # pymssql
+pip install 'statschema[oracle]'     # oracledb
 
-# Databricks Lakebase (OAuth token generation + Postgres driver)
+# Databricks Lakebase (OAuth token generation + Postgres driver):
 pip install 'statschema[lakebase]'   # databricks-sdk>=0.89.0 + psycopg2-binary
 ```
 
@@ -1427,9 +1441,9 @@ cp .env.example .env
 ### Run tests
 
 ```bash
-make venv-test            # create .venv_test (Python 3.11 + local Spark)
-make test-fast            # pure-Python tests only (no Spark, no live DB)
-make test                 # full suite including Spark data-generation tests
+make venv-test            # create .venv_test (Python 3.11; adds Spark for data-generation tests)
+make test-fast            # core tests only — no Spark, no live DB required
+make test                 # full suite including Spark-based data-generation tests
 make test-live-all        # + live MySQL, PostgreSQL, SQL Server round-trips
 make test-live-synth      # full generate → load → stats → regenerate → compare pipeline
 make test-live-lakebase   # Lakebase: spin up → run tests → disable endpoint
@@ -1528,9 +1542,11 @@ dump_stats(db_stats, "stats.yaml")
 db_stats = load_stats("stats.yaml")
 ```
 
-**All functions are pure-Python except `build_dataframe_from_canonical`** (requires
-PySpark + dbldatagen).  You can `parse_ddl` → `emit_ddl` without any database
-connection, Spark session, or Java installation.
+**All functions are pure-Python.** `parse_ddl`, `emit_ddl`, `collect`, `inject`, and
+pandas-based synthetic data generation all work with `pip install statschema` — no
+database connection, no Spark session, no Java installation required.
+`build_dataframe_from_canonical` additionally requires `statschema[spark]` (PySpark +
+dbldatagen) and is only needed when generating large datasets in a Databricks environment.
 
 ---
 

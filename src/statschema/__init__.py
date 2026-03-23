@@ -101,6 +101,7 @@ from .pipeline_parser import parse_pipeline_tables, parse_pipeline_config
 from .sdv_parser import parse_sdv_metadata, parse_sdv_file
 from .ddl_parser import parse_ddl, parse_ddl_file
 from .ddl_emitter import emit_ddl, emit_ddl_all, emit_column_comments, SUPPORTED_DIALECTS
+from .pandas_builder import build_rows_from_canonical
 try:
     from .dbldatagen_builder import to_dbldatagen_specs, build_dataframe_from_canonical
 except ImportError:
@@ -203,7 +204,8 @@ __all__ = [
     "emit_ddl_all",
     "emit_column_comments",
     "SUPPORTED_DIALECTS",
-    # Data generation (canonical → dbldatagen or pure-Python)
+    # Data generation (canonical → pure-Python pandas or Spark dbldatagen)
+    "build_rows_from_canonical",
     "to_dbldatagen_specs",
     "build_dataframe_from_canonical",
     "generate_rows",
