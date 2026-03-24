@@ -155,6 +155,10 @@ from .data_loader import (
     bulk_load_sqlserver,
     bulk_load_db2,
 )
+from .query_model import QueryEntry, QueryWorkload, ReplayResult, dump_queries, load_queries
+from .query_collector import collect_top_queries
+from .query_transpiler import transpile_query, transpile_workload
+from .query_replayer import replay_queries, print_replay_report
 
 __version__ = "0.1.1"
 
@@ -246,4 +250,15 @@ __all__ = [
     "bulk_load_sqlserver",
     "bulk_load_db2",
     "apply_overrides_all",
+    # Query workload (collect → transpile → replay)
+    "QueryEntry",
+    "QueryWorkload",
+    "ReplayResult",
+    "collect_top_queries",
+    "dump_queries",
+    "load_queries",
+    "transpile_query",
+    "transpile_workload",
+    "replay_queries",
+    "print_replay_report",
 ]

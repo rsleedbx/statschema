@@ -1033,9 +1033,79 @@ def _cmd_collect(args) -> None:
     total_rows = sum(ts.row_count or 0 for ts in table_stats_list)
     print(
         f"\n  Wrote {out_schema}  ({len(canonical_tables)} tables)\n"
-        f"  Wrote {out_stats}   ({len(table_stats_list)} tables, {total_rows:,} total rows)\n",
+        f"  Wrote {out_stats}   ({len(table_stats_list)} tables, {total_rows:,} total rows)",
         file=sys.stderr,
     )
+
+    # ── optional query collection ─────────────────────────────────────────────
+    top_n = getattr(args, "top_queries", 0)
+    if top_n:
+        from .query_collector import collect_top_queries
+        from .query_model import dump_queries
+        rank_by   = getattr(args, "rank_by", "total_time")
+        out_queries = Path(getattr(args, "out_queries", "queries.yaml"))
+
+        catalog_val = getattr(args, "catalog", None)
+        workload = collect_top_queries(conn, dialect, n=top_n, rank_by=rank_by, catalog=catalog_val)
+
+        if workload.queries:
+            dump_queries(workload, str(out_queries))
+            print(
+                f"  Wrote {out_queries}  ({len(workload.queries)} queries, ranked by {rank_by})\n",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"  ⚠  No queries collected — query statistics catalog may be unavailable "
+                f"or empty (dialect: {dialect}).\n",
+                file=sys.stderr,
+            )
+
+
+# ---------------------------------------------------------------------------
+# replay sub-command — transpile + EXPLAIN queries on a target database
+# ---------------------------------------------------------------------------
+
+def _cmd_replay(args) -> None:
+    """Transpile queries.yaml to the target dialect and run EXPLAIN on each."""
+    from .query_model import load_queries
+    from .query_replayer import print_replay_report, replay_queries
+
+    dialect     = args.dialect
+    queries_path = Path(args.queries)
+    skip_manual = getattr(args, "skip_manual_review", False)
+    show_plans  = getattr(args, "show_plans", False)
+
+    if not queries_path.exists():
+        _die(f"queries file not found: {queries_path}")
+
+    workload = load_queries(queries_path)
+    print(
+        f"\n  Loaded {len(workload.queries)} queries (source: {workload.source_dialect})\n"
+        f"  Target: {dialect}\n",
+        file=sys.stderr,
+    )
+
+    conn, host, port, user, catalog = _connect_interactive(args)
+    print(f"  Connected to {dialect} @ {host}:{port}/{catalog} as {user}\n", file=sys.stderr)
+
+    results = replay_queries(conn, workload, target_dialect=dialect, skip_manual_review=skip_manual)
+
+    if show_plans:
+        print_replay_report(results)
+    else:
+        ok   = sum(1 for r in results if r.success)
+        fail = len(results) - ok
+        skip = sum(1 for r in results if not r.success and r.error and "Skipped" in (r.error or ""))
+        print(
+            f"  Results: {ok} ok / {fail - skip} errors / {skip} skipped "
+            f"({len(results)} total)\n",
+            file=sys.stderr,
+        )
+        for r in results:
+            if not r.success:
+                status = "↷" if r.error and "Skipped" in r.error else "✗"
+                print(f"  {status}  {r.query_id}  {r.error}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1341,7 +1411,65 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Output path for the canonical schema YAML (default: schema.yaml).")
     p_col.add_argument("--out-stats",  default="stats.yaml",  metavar="FILE",
                        help="Output path for the statistics YAML (default: stats.yaml).")
+    p_col.add_argument(
+        "--top-queries", type=int, default=0, metavar="N",
+        help=(
+            "Also collect the top-N queries from the database's query statistics catalog "
+            "(pg_stat_statements, performance_schema, sys.dm_exec_query_stats, v$sql, "
+            "system.query.history).  Writes queries.yaml alongside schema.yaml.  "
+            "Default: 0 (disabled)."
+        ),
+    )
+    p_col.add_argument(
+        "--rank-by", default="total_time",
+        choices=["total_time", "calls", "mean_time"],
+        help=(
+            "Metric used to rank top queries (default: total_time). "
+            "total_time: highest cumulative cost; "
+            "calls: most frequently executed; "
+            "mean_time: slowest per-call latency."
+        ),
+    )
+    p_col.add_argument("--out-queries", default="queries.yaml", metavar="FILE",
+                       help="Output path for the query workload YAML (default: queries.yaml).")
     p_col.add_argument("-v", "--verbose", action="store_true",
+                       help="Enable debug logging.")
+
+    # ── replay ───────────────────────────────────────────────────────────────
+    p_rep = sub.add_parser(
+        "replay",
+        help="Transpile and EXPLAIN collected queries against a target database.",
+        description=(
+            "Load a queries.yaml produced by 'collect --top-queries N', transpile each\n"
+            "query to the target dialect, and run EXPLAIN on the target database.\n"
+            "No rows are read or written — only query plans are collected.\n\n"
+            "Examples\n"
+            "--------\n"
+            "  # Replay MySQL workload against PostgreSQL\n"
+            "  statschema replay --dialect postgres --queries queries.yaml \\\n"
+            '      --dsn "host=target-db dbname=myapp user=me password=s3cr3t"\n\n'
+            "  # Replay against Lakebase, skip queries flagged for manual review\n"
+            "  statschema replay --dialect lakebase --queries queries.yaml \\\n"
+            "      --endpoint projects/.../endpoints/... --skip-manual-review"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_rep.add_argument("--dialect", required=True, choices=_ALL_DIALECTS,
+                       help="Target database dialect.")
+    p_rep.add_argument("--queries", required=True, metavar="FILE",
+                       help="Path to the queries.yaml produced by 'collect --top-queries'.")
+    p_rep.add_argument("--dsn", help="Connection string for the target (same format as 'load').")
+    p_rep.add_argument(
+        "--endpoint", metavar="ENDPOINT_NAME",
+        help="Lakebase endpoint resource path (required when --dialect lakebase).",
+    )
+    p_rep.add_argument(
+        "--skip-manual-review", action="store_true",
+        help="Skip queries flagged as requiring manual review instead of attempting them.",
+    )
+    p_rep.add_argument("--show-plans", action="store_true",
+                       help="Print full EXPLAIN output for every successful query.")
+    p_rep.add_argument("-v", "--verbose", action="store_true",
                        help="Enable debug logging.")
 
     # ── inject ────────────────────────────────────────────────────────────────
@@ -1417,6 +1545,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_load(args)
     elif args.cmd == "collect":
         _cmd_collect(args)
+    elif args.cmd == "replay":
+        _cmd_replay(args)
     elif args.cmd == "inject":
         _cmd_inject(args)
 

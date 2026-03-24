@@ -1,4 +1,4 @@
-# statschema — Statistics and Synthetic Data Generator for DBAs and Data Migration Practitioners
+# statschema — migration-validation accelerator: portable schemas + stats + synthetic data, optimizer bootstrap, without moving prod rows
 
 [![CI](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml/badge.svg)](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/badge/pypi-coming%20soon-orange)](https://pypi.org/project/statschema/)
@@ -11,12 +11,13 @@ pip install statschema
 
 **Repository:** [github.com/rsleedbx/statschema](https://github.com/rsleedbx/statschema) · `git clone https://github.com/rsleedbx/statschema.git`
 
-> **Your query optimizer produces correct plans before you load a single row.**
-> Collect schema, column comments, and statistics from any source database into dialect-free YAML. Transpile DDL to any target dialect. Generate semantic-aware synthetic data with correct types, realistic values, and referential integrity. Inject production-scale optimizer statistics into the target database at migration time — without moving a single production row.
+> 1. `statschema collect` — pull DDL + column statistics from the source into `schema.yaml` / `stats.yaml`. No production rows leave the source.
+> 2. `statschema ddl --dialect <target>` — transpile schema to any target dialect. Type errors surface here, before any data load.
+> 3. `statschema generate` — produce referentially correct synthetic rows whose distributions match the collected statistics. Pure Python, no Spark required.
+> 4. `statschema inject` — load those statistics into the target's optimizer catalog. Query plans match production shape before a single real row arrives.
+> 5. `statschema collect --top-queries 50` — also capture the top-N queries by total cost into `queries.yaml`. `statschema replay --dialect <target>` transpiles each to the target dialect (via sqlglot) and runs `EXPLAIN`, closing the validation loop with real workload plans.
 >
-> **No Spark, no Java, no custom code required for core workflows.** The CLI (`statschema collect`, `inject`, `generate`, `load`) works out of the box. Spark is an optional extra only for large-scale distributed data generation on Databricks.
->
-> **The YAML is the living test artifact.** `statschema collect` produces `schema.yaml` and `stats.yaml` automatically from the source database — but the files are plain text and live in version control. After the first test run, developers edit them directly to tune distributions, tighten FK ranges, add missing constraints, or model a second test scenario. The next `statschema generate` call picks up the changes immediately. No code to rewrite, no data generator to redeploy — just edit YAML, regenerate, rerun.
+> Edit `schema.yaml`, `stats.yaml`, or `queries.yaml` between runs to tune distributions, add constraints, or model a second scenario — no code to rewrite.
 
 ### Quick start
 
@@ -240,7 +241,23 @@ statschema inject --dialect postgres \
 # EXPLAIN plans match production shape before a single production row is loaded
 ```
 
-After step 5 you can run application queries, benchmark suites, or migration regression tests against Lakebase with data that behaves like production. Edit `schema.yaml` to tune distributions between runs — change a weight, add a constraint, tighten a range — then re-run from step 4. See [`docs/databases/lakebase.md`](docs/databases/lakebase.md) and the [OLTP migration analysis](docs/learnings/oltp-migration-analysis.md) for the full story.
+**Optional step 6 — capture and replay the source workload**
+```bash
+# Collect top-50 queries by total cost from the source (requires pg_stat_statements)
+statschema collect --dialect postgres --host prod-db --user readonly \
+    --catalog myapp --top-queries 50 --rank-by total_time
+# → writes queries.yaml alongside schema.yaml and stats.yaml
+
+# Transpile to Lakebase dialect and run EXPLAIN on each query
+statschema replay --dialect lakebase --queries queries.yaml \
+    --endpoint "$STATSCHEMA_LAKEBASE_ENDPOINT" \
+    --host "$STATSCHEMA_LAKEBASE_HOST" \
+    --user "$STATSCHEMA_LAKEBASE_USER" \
+    --show-plans
+# → every query plan printed; manual_review=true flagged for non-portable constructs
+```
+
+After step 5 (or 6) you can run application queries, benchmark suites, or migration regression tests against Lakebase with data that behaves like production. Edit `schema.yaml` to tune distributions between runs — change a weight, add a constraint, tighten a range — then re-run from step 4. See [`docs/databases/lakebase.md`](docs/databases/lakebase.md) and the [OLTP migration analysis](docs/learnings/oltp-migration-analysis.md) for the full story.
 
 > **Teardown**: `make lakebase-down` disables the endpoint (zero compute cost, data preserved).
 
@@ -252,12 +269,12 @@ statschema is built for **DBAs and data engineers doing cross-dialect database m
 
 Other synthetic data tools solve a different problem:
 
-| Tool category | Primary user | Requires production data | Optimizer stats injection | Editable YAML tuning artifact | Live multi-dialect test methodology published |
-|---|---|---|---|---|---|
-| Faker · Mockaroo | App developer — unit test fixtures | No — generates random plausible values | No | No — code per table | No — tests against in-memory data only |
-| SDV · Gretel · Tonic | Data scientist / QA — privacy-safe production clone | Yes — trains on or anonymizes actual rows | No | No — black-box model | No — SaaS products; internal test infra not published |
-| AWS SCT · pgloader | DBA — schema and data migration | No — schema or data only, no generation | No | No | No — closed source |
-| **statschema** | **DBA — cross-dialect migration validation** | **No — works from statistics without the data** | **Yes** | **Yes — plain-text YAML, version-controlled, edit between runs** | **Yes — per-dialect Podman setup, live integration tests, contributor guide** |
+| Tool category | Primary user | Requires production data | Optimizer stats injection | Query workload replay | Editable YAML tuning artifact | Live multi-dialect test methodology published |
+|---|---|---|---|---|---|---|
+| Faker · Mockaroo | App developer — unit test fixtures | No — generates random plausible values | No | No | No — code per table | No — tests against in-memory data only |
+| SDV · Gretel · Tonic | Data scientist / QA — privacy-safe production clone | Yes — trains on or anonymizes actual rows | No | No | No — black-box model | No — SaaS products; internal test infra not published |
+| AWS SCT · pgloader | DBA — schema and data migration | No — schema or data only, no generation | No | No | No | No — closed source |
+| **statschema** | **DBA — cross-dialect migration validation** | **No — works from statistics without the data** | **Yes** | **Yes — transpile + EXPLAIN top-N source queries on target** | **Yes — plain-text YAML, version-controlled, edit between runs** | **Yes — per-dialect Podman setup, live integration tests, contributor guide** |
 
 The "no production data required" row is the key difference for DBAs. Moving production data to a test environment has two hard blockers:
 
@@ -1401,6 +1418,16 @@ Where statschema does **not** help: stored procedure rewriting (T-SQL→PL/pgSQL
 | Document | Contents |
 |----------|----------|
 | [`docs/stats_transpiler.md`](docs/stats_transpiler.md) | Full details, per-engine workarounds, and function reference |
+
+### Query workload
+
+| Document | Contents |
+|----------|----------|
+| `src/statschema/query_model.py` | `QueryEntry` + `QueryWorkload` dataclasses; `dump_queries` / `load_queries` YAML I/O |
+| `src/statschema/query_collector.py` | `collect_top_queries()` — reads `pg_stat_statements`, `performance_schema`, `sys.dm_exec_query_stats`, `v$sql`, `system.query.history` |
+| `src/statschema/query_transpiler.py` | `transpile_query()` via sqlglot; flags `manual_review=True` for non-portable constructs (`FOR XML`, `CONNECT BY`, `PIVOT`, etc.) |
+| `src/statschema/query_replayer.py` | `replay_queries()` — runs `EXPLAIN` on the target; `print_replay_report()` for plan summaries |
+| [`docs/learnings/query-yaml-research.md`](docs/learnings/query-yaml-research.md) | Prior art survey: Substrait, Ibis, sqlglot AST, LookML, dbt, SQL Server Query Store, Oracle AWR — open questions before the format stabilizes |
 
 ### Testing
 

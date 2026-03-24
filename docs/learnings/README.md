@@ -4,6 +4,10 @@ Research and analysis captured while building and evaluating statschema.
 
 ## Documents
 
+### [`query-yaml-research.md`](query-yaml-research.md) — queries.yaml format: prior art and open questions
+
+Prior art survey for the `queries.yaml` workload capture format. Covers workload capture tools (pg_stat_statements, SQL Server Query Store, Oracle AWR), SQL-as-config formats (dbt, LookML, Cube.dev), structured query IRs (Substrait, sqlglot AST, Ibis, Apache Calcite), and the Spark SQL / PySpark angle. Poses six open questions for external review before the format stabilizes.
+
 ### [`oltp-migration-analysis.md`](oltp-migration-analysis.md) — Real-world OLTP migration analysis
 
 **The most important document in this directory.** Analyzes five documented migrations (SQL Server → PostgreSQL, MySQL → PostgreSQL, Oracle → PostgreSQL, MySQL → Aurora, SQLite → Neon) drawn from Hacker News, Reddit, AWS blogs, and migration consultants (2023–2026).
