@@ -114,26 +114,54 @@ def collect_table_stats(  # pragma: no cover
 def _needs_qmark(conn) -> bool:
     """Return True when the connection requires ? placeholders instead of %s.
 
-    mssql_python declares paramstyle='pyformat' but only binds ? at the TDS
-    layer — %s is forwarded literally to SQL Server and causes a syntax error.
+    * mssql_python declares paramstyle='pyformat' but only binds ? at the TDS
+      layer — %s is forwarded literally to SQL Server as a syntax error.
+    * ibm_db_dbi uses qmark style (?); %s is not a valid SQL placeholder for DB2.
     """
-    return type(conn).__module__.split(".")[0] == "mssql_python"
+    mod = type(conn).__module__.split(".")[0]
+    return mod in ("mssql_python", "ibm_db_dbi")
+
+
+def _needs_numeric(conn) -> bool:
+    """Return True when the connection requires :1 :2 ... placeholders (oracledb).
+
+    oracledb thin mode does not recognise %s as a bind-variable marker.
+    Convert each %s to :1, :2, ... before execution.
+    """
+    return type(conn).__module__.split(".")[0] == "oracledb"
+
+
+def _bind_sql(conn, sql: str) -> str:
+    """Rewrite %s placeholders to the dialect-appropriate marker."""
+    if _needs_qmark(conn):
+        return sql.replace("%s", "?")
+    if _needs_numeric(conn):
+        import re, itertools
+        counter = itertools.count(1)
+        return re.sub(r"%s", lambda _: f":{next(counter)}", sql)
+    return sql
 
 
 def _fetchone(conn, sql: str, params=None):  # pragma: no cover
     cur = conn.cursor()
-    if params and _needs_qmark(conn):
-        sql = sql.replace("%s", "?")
-    cur.execute(sql, params or ())
-    return cur.fetchone()
+    cur.execute(_bind_sql(conn, sql), params or ())
+    row = cur.fetchone()
+    try:
+        cur.close()
+    except Exception:
+        pass
+    return row
 
 
 def _fetchall(conn, sql: str, params=None) -> list[tuple]:  # pragma: no cover
     cur = conn.cursor()
-    if params and _needs_qmark(conn):
-        sql = sql.replace("%s", "?")
-    cur.execute(sql, params or ())
-    return cur.fetchall() or []
+    cur.execute(_bind_sql(conn, sql), params or ())
+    rows = cur.fetchall() or []
+    try:
+        cur.close()
+    except Exception:
+        pass
+    return rows
 
 
 def _safe_rollback(conn) -> None:  # pragma: no cover
@@ -180,6 +208,41 @@ def _introspect_columns(conn, table: str, dialect: str, schema: str | None) -> l
             WHERE table_name = %s {where_schema}
             ORDER BY ordinal_position
         """
+    elif dialect == "oracle":
+        # Oracle stores unquoted identifiers as uppercase; ALL_TAB_COLUMNS is the
+        # native catalog (information_schema is a thin compatibility stub that does
+        # not accept bind variables, causing DPY-4009 with oracledb thin mode).
+        if schema:
+            params = (table.upper(), schema.upper())
+            sql = """
+                SELECT column_name FROM all_tab_columns
+                WHERE table_name = :1 AND owner = :2
+                ORDER BY column_id
+            """
+        else:
+            params = (table.upper(),)
+            sql = """
+                SELECT column_name FROM user_tab_columns
+                WHERE table_name = :1
+                ORDER BY column_id
+            """
+    elif dialect == "db2":
+        # DB2 LUW uses SYSCAT.COLUMNS — information_schema is not always accessible.
+        # Column names are stored uppercase (matching quoted-uppercase DDL identifiers).
+        if schema:
+            params = (table, schema.upper())
+            sql = """
+                SELECT COLNAME FROM syscat.columns
+                WHERE TABNAME = ? AND TABSCHEMA = ?
+                ORDER BY COLNO
+            """
+        else:
+            params = (table,)
+            sql = """
+                SELECT COLNAME FROM syscat.columns
+                WHERE TABNAME = ? AND TABSCHEMA = CURRENT SCHEMA
+                ORDER BY COLNO
+            """
     else:  # sqlserver
         where_schema = "AND TABLE_SCHEMA = %s" if schema else ""
         params = (table, schema) if schema else (table,)
@@ -303,6 +366,26 @@ def _indexed_columns(  # pragma: no cover
                 FROM   all_ind_columns ic
                 WHERE  ic.table_name = UPPER(%s) {where_owner}
             """, params)
+        elif dialect == "db2":
+            # Use SYSCAT.INDEXCOLUSE to find indexed columns.
+            if schema:
+                params = (table, schema.upper())
+                rows = _fetchall(conn, """
+                    SELECT DISTINCT ic.COLNAME
+                    FROM   syscat.indexcoluse ic
+                    JOIN   syscat.indexes     i
+                           ON i.INDSCHEMA = ic.INDSCHEMA AND i.INDNAME = ic.INDNAME
+                    WHERE  i.TABNAME = ? AND i.TABSCHEMA = ?
+                """, params)
+            else:
+                params = (table,)
+                rows = _fetchall(conn, """
+                    SELECT DISTINCT ic.COLNAME
+                    FROM   syscat.indexcoluse ic
+                    JOIN   syscat.indexes     i
+                           ON i.INDSCHEMA = ic.INDSCHEMA AND i.INDNAME = ic.INDNAME
+                    WHERE  i.TABNAME = ? AND i.TABSCHEMA = CURRENT SCHEMA
+                """, params)
         else:
             return set()
         return {r[0] for r in rows}

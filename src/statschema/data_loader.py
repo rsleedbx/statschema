@@ -543,6 +543,81 @@ def bulk_load_sqlserver(  # pragma: no cover
     return count
 
 
+def _db2_container_copy(host_path: str, container_path: str, container_spec: str) -> bool:
+    """Copy a file from the host to the filesystem that the Db2 server can see.
+
+    ``container_spec`` is the value of the ``DB2_CONTAINER_NAME`` env var.  It
+    supports three formats:
+
+    * ``lima:<vm>:<container>``  — host file → Lima VM → podman container inside
+      the VM.  Example: ``lima:db2:db2ce``.  This is the correct topology for the
+      standard statschema test environment where Db2 runs inside a container that
+      is itself managed by Lima.
+    * ``<container>``            — direct docker/podman cp on the host.  Works when
+      Db2 runs in a local container with no VM wrapper.
+    * ``<vm>``                   — Lima copy only (no inner container).  Works when
+      Db2 runs natively inside the Lima VM.
+
+    Returns True if the copy succeeded, False otherwise.
+    """
+    import subprocess  # stdlib — deferred to avoid startup overhead
+
+    parts = container_spec.split(":")
+    if parts[0] == "lima" and len(parts) == 3:
+        # Lima VM + inner container: host → VM → container
+        _, lima_vm, inner_container = parts
+        try:
+            # Step 1: host → Lima VM /tmp
+            r1 = subprocess.run(
+                ["limactl", "copy", host_path, f"{lima_vm}:{container_path}"],
+                capture_output=True, timeout=300,
+            )
+            if r1.returncode != 0:
+                return False
+            # Step 2: Lima VM → inner container (one ssh+podman round-trip)
+            r2 = subprocess.run(
+                [
+                    "limactl", "shell", lima_vm, "bash", "-c",
+                    f"sudo podman --root /var/lib/containers/storage cp "
+                    f"{container_path} {inner_container}:{container_path}",
+                ],
+                capture_output=True, timeout=300,
+            )
+            return r2.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "bulk_load_db2: Lima container copy timed out or failed (%s)", e
+            )
+            return False
+
+    if parts[0] == "lima" and len(parts) == 2:
+        # Lima VM only (no inner container)
+        _, lima_vm = parts
+        try:
+            r = subprocess.run(
+                ["limactl", "copy", host_path, f"{lima_vm}:{container_path}"],
+                capture_output=True, timeout=60,
+            )
+            return r.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    # Direct docker/podman copy (container on the host)
+    container_name = container_spec
+    for runtime in ("podman", "docker"):
+        try:
+            result = subprocess.run(
+                [runtime, "cp", host_path, f"{container_name}:{container_path}"],
+                capture_output=True, timeout=30,
+            )
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
 def bulk_load_db2(  # pragma: no cover
     conn: Any,
     df: Any,
@@ -554,12 +629,22 @@ def bulk_load_db2(  # pragma: no cover
     """
     Load df into IBM Db2 LUW.
 
-    Tries SYSPROC.ADMIN_CMD('LOAD FROM … OF DEL …') first.  This is fast but
-    requires the staging file to be visible to the Db2 server process — it will
-    silently load 0 rows when the server runs in a container that cannot reach the
-    client's /tmp.  After the ADMIN_CMD call we verify the actual row count; if it
-    is less than expected we fall back to parameterised MULTI_ROW inserts.
+    Strategy (tried in order):
+    1. Container copy + ADMIN_CMD: if the env var ``DB2_CONTAINER_NAME`` is set,
+       copy the staging CSV into the container with ``podman/docker cp`` and run
+       ``SYSPROC.ADMIN_CMD('LOAD FROM …')``.  Fast; works with any containerised
+       Db2 instance.
+    2. Direct ADMIN_CMD: try with the host-side path.  Works when Db2 runs natively
+       or the staging directory is shared with the server (e.g. via a bind mount).
+       Silently loads 0 rows when the server cannot see the file — detected and
+       retried below.
+    3. MULTI_ROW fallback: parameterised batch INSERTs.  Works everywhere but is
+       slow for tables with many columns or millions of rows.
     """
+    import os as _os  # already imported at module level; kept for clarity
+
+    container_name = _os.environ.get("DB2_CONTAINER_NAME", "").strip()
+
     cur = conn.cursor()
     if schema is None:
         cur.execute("VALUES CURRENT SCHEMA")
@@ -569,18 +654,42 @@ def bulk_load_db2(  # pragma: no cover
     full  = f'"{schema}"."{table.upper()}"'
     rows  = list(_iter_rows(df))
     count = len(rows)
-    path  = os.path.join(
+    host_path = os.path.join(
         staging_dir or tempfile.gettempdir(), f"statschema_{table}.del"
     )
 
-    with open(path, "w", newline="", encoding="utf-8") as f:
+    def _db2_csv_val(v: Any) -> Any:
+        """Coerce a Python value to a DB2 DEL-format-compatible CSV cell.
+
+        DB2 LOAD DEL format requires:
+        - BOOLEAN columns: 1 or 0 (Python bool → str 'True'/'False' is rejected)
+        - DATE/DATETIME: ISO string ('2010-01-01') via str()
+        - None → empty string (NULL)
+        """
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return 1 if v else 0
+        return v
+
+    with open(host_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         for row in rows:
-            writer.writerow(["" if v is None else v for v in row])
+            writer.writerow([_db2_csv_val(v) for v in row])
+
+    # Determine which path to pass to ADMIN_CMD (host path or container path)
+    admin_cmd_path = host_path
+    if container_name:
+        container_path = f"/tmp/statschema_{table}.del"
+        if _db2_container_copy(host_path, container_path, container_name):
+            admin_cmd_path = container_path
+            logger.debug("bulk_load_db2: copied staging file to container %s:%s", container_name, container_path)
+        else:
+            logger.warning("bulk_load_db2: container copy to %s failed; will attempt ADMIN_CMD with host path", container_name)
 
     try:
         cur.execute(
-            f"CALL SYSPROC.ADMIN_CMD('LOAD FROM {path} OF DEL INSERT INTO {full} NONRECOVERABLE')"
+            f"CALL SYSPROC.ADMIN_CMD('LOAD FROM {admin_cmd_path} OF DEL INSERT INTO {full} NONRECOVERABLE')"
         )
         conn.commit()
         # Verify: ADMIN_CMD silently loads 0 rows when the server cannot find the
@@ -591,7 +700,10 @@ def bulk_load_db2(  # pragma: no cover
         logger.warning("bulk_load_db2 ADMIN_CMD failed (%s); falling back to MULTI_ROW", e)
         actual = 0
     finally:
-        os.unlink(path)
+        try:
+            os.unlink(host_path)
+        except OSError:
+            pass
 
     if actual >= count:
         logger.info("bulk_load_db2[ADMIN_CMD]: loaded %d rows into %s", count, full)

@@ -151,7 +151,13 @@ class IdentityTestResult:
     threshold_within_2x: float = 0.50
     passed: bool = False
     failure_reason: str = ""
-    # Stats injection mode: "injected" | "analyze_fallback" | "none"
+    # Stats injection mode:
+    #   "injected"       — source histograms transplanted directly via
+    #                      pg_restore_attribute_stats (PG 18+, full injection)
+    #   "stats_analyze"  — stats-driven synthetic data loaded, then native
+    #                      ANALYZE run on it; used by all non-PG engines and
+    #                      by PG-wire engines that lack pg_restore_attribute_stats
+    #   "none"           — no stats update attempted
     stats_injection_mode: str = "none"
 
     def summary(self) -> str:
@@ -1199,8 +1205,12 @@ def collect_stats(
         print(f"  [C] collecting stats {table.name}…", end=" ", flush=True)
         try:
             _safe_rb()  # ensure clean state before each table
+            # DB2 stores identifiers as uppercase in the system catalog (SYSCAT).
+            # Pass uppercase names so catalog lookups match the quoted-uppercase DDL.
+            _tbl_name  = table.name.upper()          if dialect == "db2" else table.name
+            _sch_name  = _stats_schema.upper()       if dialect == "db2" else _stats_schema
             ts = collect_table_stats(
-                conn, table.name, dialect=dialect, schema=_stats_schema
+                conn, _tbl_name, dialect=dialect, schema=_sch_name
             )
             _safe_rb()  # stats queries are read-only; release any open txn
             all_stats[table.name] = ts
@@ -1483,7 +1493,16 @@ def build_target(
             )
             _cols = ([c.upper() for c in df.columns] if dialect == "oracle"
                      else None)
-        except Exception:
+        except Exception as _gen_exc:
+            logger.warning(
+                "build_rows_from_canonical failed for %s (%s); "
+                "falling back to simple generate_rows — stats-driven "
+                "generation was NOT used for this table",
+                table.name, _gen_exc,
+            )
+            print(f"\n    WARN {table.name}: stats-driven generator failed, "
+                  f"using simple generator ({type(_gen_exc).__name__})",
+                  end="", flush=True)
             df = generate_rows(table, n, seed=seed, parent_row_counts=row_counts)
         load_dataframe(
             df, conn, _tname, dialect,
@@ -1527,16 +1546,17 @@ def build_target(
                     try:
                         cur.execute(f'ANALYZE "{target_schema}"."{t.name}"')
                     except Exception as ae:
-                        logger.warning("ANALYZE fallback failed for %s: %s", t.name, ae)
+                        logger.warning("ANALYZE failed for %s: %s", t.name, ae)
                         conn.rollback()
             conn.commit()
-            print("done (ANALYZE fallback)")
-            injection_mode = "analyze_fallback"
+            print("done")
+            injection_mode = "stats_analyze"
     else:
-        # Non-PG dialects: use native stats-update mechanism
+        # Non-PG dialects: run the engine's native ANALYZE equivalent on the
+        # stats-driven synthetic data loaded above.
         _analyze_tables(conn, ordered, target_schema, dialect)
         print("done (native ANALYZE)")
-        injection_mode = "analyze_fallback"
+        injection_mode = "stats_analyze"
 
     actual = {}
     with conn.cursor() as cur:
