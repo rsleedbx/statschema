@@ -2,11 +2,13 @@
 
 ← [All databases](../local-databases.md)
 
-**Method:** Podman, native ARM64 · **Ports:** 5414 (PG 14), 5416 (PG 16) · **Driver:** `psycopg2-binary`
+**Method:** Podman, native ARM64 · **Ports:** 5414 (PG 14), 5416 (PG 16), 5418 (PG 18) · **Driver:** `psycopg2-binary`
 
-The live test suite (`tests/test_live_pg.py`) runs the same test classes against both PostgreSQL 14 and 16 in one `pytest` run.
+The live test suite (`tests/test_live_pg.py`) runs the same test classes against both PostgreSQL 14 and 16.
+PostgreSQL 18 is used for the [identity test](../../benchmarks/results/identity_results.md) because it provides
+`pg_restore_attribute_stats()` and `pg_restore_relation_stats()`, required for stats injection.
 
-## Start both versions
+## Start containers
 
 ```bash
 # PostgreSQL 14 (older LTS) — native ARM64
@@ -22,6 +24,12 @@ podman run -d --name pg16 \
   -e POSTGRES_DB=testdb \
   -p 5416:5432 \
   docker.io/library/postgres:16
+
+# PostgreSQL 18 (stats injection / identity test) — native ARM64
+podman run -d --name pg18 \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5418:5432 \
+  docker.io/library/postgres:18
 ```
 
 ## Run the live tests
@@ -46,13 +54,16 @@ PGPASSWORD=testpass psql -h 127.0.0.1 -p 5414 -U postgres -d testdb
 
 # PostgreSQL 16
 PGPASSWORD=testpass psql -h 127.0.0.1 -p 5416 -U postgres -d testdb
+
+# PostgreSQL 18
+PGPASSWORD=postgres psql -h 127.0.0.1 -p 5418 -U postgres -d postgres
 ```
 
 ## Stop / remove
 
 ```bash
-podman stop pg14 pg16
-podman rm   pg14 pg16
+podman stop pg14 pg16 pg18
+podman rm   pg14 pg16 pg18
 ```
 
 ## Known type normalizations

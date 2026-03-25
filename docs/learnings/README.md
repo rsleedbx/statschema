@@ -4,6 +4,10 @@ Research and analysis captured while building and evaluating statschema.
 
 ## Documents
 
+### [`query-testing-research.md`](query-testing-research.md) — TPC benchmark query execution in Python
+
+Survey of portable TPC query execution options. Key finding: DuckDB's `tpch` and `tpcds` extensions expose all 22 TPC-H and 99 TPC-DS queries as pre-filled plain SQL strings via `tpch_queries()` / `tpcds_queries()` — extractable into `queries.yaml` format and replayable against any target via `statschema replay`. TPC-C requires a transactional driver (`cockroach workload tpcc` for Postgres-wire targets); no Python reference implementation is actively maintained. TPC-B uses pgbench. TPC-E has no full Python implementation; the project uses SELECT-frame approximations.
+
 ### [`query-yaml-research.md`](query-yaml-research.md) — queries.yaml format: prior art and open questions
 
 Prior art survey for the `queries.yaml` workload capture format. Covers workload capture tools (pg_stat_statements, SQL Server Query Store, Oracle AWR), SQL-as-config formats (dbt, LookML, Cube.dev), structured query IRs (Substrait, sqlglot AST, Ibis, Apache Calcite), and the Spark SQL / PySpark angle. Poses six open questions for external review before the format stabilizes.

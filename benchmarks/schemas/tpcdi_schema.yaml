@@ -1,0 +1,1557 @@
+# TPC-DI Canonical Schema (Target DW) — statschema interchange format
+#
+# This models the DESTINATION (data warehouse) tables from the TPC-DI v1.1.0
+# benchmark, not the ETL source flat files produced by DIGen.JAR.  Using this
+# schema with statschema replaces DIGen.JAR for evaluation purposes: generate
+# synthetic DW data directly in any target dialect without running the ETL
+# pipeline and without any Java dependency.
+#
+# Scale factor (SF) ≈ size of raw DIGen.JAR input data in GB.
+#   row_count       — fixed regardless of SF (lookup tables, DimDate, DimTime)
+#   row_count_per_sf — multiplied by SF at generation time
+#
+# Row counts per SF are approximate, derived from TPC-DI v1.1.0 spec §5.3.
+# Exact values depend on the number of historical batches processed; these
+# values give the correct order of magnitude for evaluation workloads.
+#
+# Load order (FK dependency):
+#   StatusType / TaxRate / TradeType / Industry (no deps)
+#   → DimDate / DimTime (no deps)
+#   → DimCompany / DimBroker (no deps)
+#   → DimSecurity / DimCustomer / Financial (→ DimCompany / DimBroker)
+#   → DimAccount (→ DimBroker, DimCustomer)
+#   → DimTrade (→ DimDate, DimTime, DimSecurity, DimCompany, DimCustomer, DimAccount, DimBroker)
+#   → FactMarketHistory / FactWatches / FactHoldings / FactCashBalances (→ various dims)
+#   → DimMessage (no deps)
+#
+# Note: DimDate / DimTime calendar metadata columns (DayOfWeekDesc, etc.) are
+# generated as plausible-looking values from distributions.  Use the Python
+# generator tpcdi_rows('DimDate') / tpcdi_rows('DimTime') in
+# benchmarks/tpc_generators.py for accurate calendar and clock arithmetic.
+#
+# TPC-DI spec reference: https://www.tpc.org/tpcdi/
+# TPC Benchmark™ DI is copyright © TPC, all rights reserved.
+# This schema is used for evaluation and development purposes only.
+# statschema does not publish TPC-certified benchmark results.
+
+version: "1.0"
+tables:
+
+  # ── StatusType ────────────────────────────────────────────────────────────────
+  # Fixed 5 rows (spec appendix §10: ACTV, CMPL, CNCL, PNDG, SBMT).
+  - name: StatusType
+    description: "TPC-DI lookup — 5 status codes, fixed (spec appendix §10)"
+    row_count: 5
+    columns:
+      - name: ST_ID
+        type: string
+        length: 4
+        not_null: true
+        primary_key: true
+        generation:
+          values: ["ACTV", "CMPL", "CNCL", "PNDG", "SBMT"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+          unique: true
+      - name: ST_NAME
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["Active", "Completed", "Canceled", "Pending", "Submitted"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+
+  # ── TaxRate ───────────────────────────────────────────────────────────────────
+  # Fixed ~320 rows — one entry per tax jurisdiction (spec appendix §10).
+  - name: TaxRate
+    description: "TPC-DI lookup — ~320 tax jurisdictions, fixed"
+    row_count: 320
+    columns:
+      - name: TX_ID
+        type: string
+        length: 4
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: TX_NAME
+        type: string
+        length: 50
+        not_null: true
+      - name: TX_RATE
+        type: decimal
+        precision: 6
+        scale: 5
+        not_null: true
+        generation:
+          min_value: 0.00100
+          max_value: 0.12000
+          distribution: uniform
+
+  # ── TradeType ─────────────────────────────────────────────────────────────────
+  # Fixed 5 rows (TMB, TMS, TSL, TLB, TLS per spec).
+  - name: TradeType
+    description: "TPC-DI lookup — 5 trade type codes, fixed"
+    row_count: 5
+    columns:
+      - name: TT_ID
+        type: string
+        length: 3
+        not_null: true
+        primary_key: true
+        generation:
+          values: ["TMB", "TMS", "TSL", "TLB", "TLS"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+          unique: true
+      - name: TT_NAME
+        type: string
+        length: 12
+        not_null: true
+        generation:
+          values: ["Market Buy", "Market Sell", "Stop Loss", "Limit Buy", "Limit Sell"]
+          weights: [0.2, 0.2, 0.2, 0.2, 0.2]
+      - name: TT_IS_SELL
+        type: integer
+        not_null: true
+        generation:
+          values: [0, 1]
+          weights: [0.6, 0.4]
+      - name: TT_IS_MRKT
+        type: integer
+        not_null: true
+        generation:
+          values: [0, 1]
+          weights: [0.4, 0.6]
+
+  # ── Industry ──────────────────────────────────────────────────────────────────
+  # Fixed 102 rows (GICS-style industry codes, per spec appendix §10).
+  - name: Industry
+    description: "TPC-DI lookup — 102 industry codes, fixed (spec appendix §10)"
+    row_count: 102
+    columns:
+      - name: IN_ID
+        type: string
+        length: 3
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: IN_NAME
+        type: string
+        length: 50
+        not_null: true
+      - name: IN_SC_ID
+        type: string
+        length: 4
+        not_null: true
+        generation:
+          values: ["EC", "EN", "MS", "IS", "HC", "FN", "CD", "CS", "TL", "UT", "RE"]
+          weights: [0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.10]
+
+  # ── DimDate ───────────────────────────────────────────────────────────────────
+  # Fixed 3652 rows — one per calendar day (10 years: 2010-01-01 to 2019-12-31).
+  # 3652 = 365×10 + 2 leap days (2012, 2016).
+  # Distribution-based generation approximates calendar metadata; see
+  # tpcdi_rows('DimDate') in tpc_generators.py for accurate arithmetic values.
+  - name: DimDate
+    description: "TPC-DI date dimension — 3652 rows, fixed (one per calendar day, 2010-2019)"
+    row_count: 3652
+    columns:
+      - name: SK_DateID
+        type: bigint
+        not_null: true
+        primary_key: true
+        description: "Surrogate key (1–3650)"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: DateValue
+        type: date
+        not_null: true
+        description: "Calendar date (2010-01-01 to 2019-12-31)"
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2019-12-31"
+      - name: DayDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: CalendarYearID
+        type: smallint
+        not_null: true
+        generation:
+          min_value: 2010
+          max_value: 2019
+          distribution: uniform
+      - name: CalendarYearDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: CalendarQtrID
+        type: integer
+        not_null: true
+        generation:
+          min_value: 20101
+          max_value: 20194
+          distribution: uniform
+      - name: CalendarQtrDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: CalendarMonthID
+        type: integer
+        not_null: true
+        generation:
+          min_value: 201001
+          max_value: 201912
+          distribution: uniform
+      - name: CalendarMonthDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: CalendarWeekID
+        type: integer
+        not_null: true
+        generation:
+          min_value: 1
+          max_value: 522
+          distribution: uniform
+      - name: CalendarWeekDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: DayOfWeekNum
+        type: smallint
+        not_null: true
+        generation:
+          min_value: 1
+          max_value: 7
+          distribution: uniform
+      - name: DayOfWeekDesc
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+          weights: [0.143, 0.143, 0.143, 0.143, 0.143, 0.143, 0.142]
+      - name: FiscalYearID
+        type: smallint
+        not_null: true
+        generation:
+          min_value: 2010
+          max_value: 2019
+          distribution: uniform
+      - name: FiscalYearDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: FiscalQtrID
+        type: integer
+        not_null: true
+        generation:
+          min_value: 20101
+          max_value: 20194
+          distribution: uniform
+      - name: FiscalQtrDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: HolidayFlag
+        type: boolean
+        not_null: true
+        generation:
+          values: [false, true]
+          weights: [0.97, 0.03]
+      - name: WeekendFlag
+        type: boolean
+        not_null: true
+        generation:
+          values: [false, true]
+          weights: [0.71, 0.29]
+
+  # ── DimTime ───────────────────────────────────────────────────────────────────
+  # Fixed 86400 rows — one per second of the day (00:00:00 to 23:59:59).
+  # Distribution-based generation approximates clock metadata; see
+  # tpcdi_rows('DimTime') in tpc_generators.py for accurate arithmetic values.
+  - name: DimTime
+    description: "TPC-DI time dimension — 86 400 rows, fixed (one per second of day)"
+    row_count: 86400
+    columns:
+      - name: SK_TimeID
+        type: bigint
+        not_null: true
+        primary_key: true
+        description: "Surrogate key (1–86400)"
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: TimeValue
+        type: time
+        not_null: true
+        description: "Time of day (00:00:00 to 23:59:59)"
+        generation:
+          min_value: "00:00:00"
+          max_value: "23:59:59"
+      - name: HourID
+        type: smallint
+        not_null: true
+        generation:
+          min_value: 0
+          max_value: 23
+          distribution: uniform
+      - name: HourDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: MinuteID
+        type: smallint
+        not_null: true
+        generation:
+          min_value: 0
+          max_value: 59
+          distribution: uniform
+      - name: MinuteDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: SecondID
+        type: smallint
+        not_null: true
+        generation:
+          min_value: 0
+          max_value: 59
+          distribution: uniform
+      - name: SecondDesc
+        type: string
+        length: 20
+        not_null: true
+      - name: MarketHoursFlag
+        type: boolean
+        not_null: true
+        description: "True if within NYSE trading hours (09:30–16:00)"
+        generation:
+          values: [false, true]
+          weights: [0.72, 0.28]
+      - name: OfficeHoursFlag
+        type: boolean
+        not_null: true
+        description: "True if within standard office hours (08:00–18:00)"
+        generation:
+          values: [false, true]
+          weights: [0.58, 0.42]
+
+  # ── DimCompany ────────────────────────────────────────────────────────────────
+  # ~400 per SF. SCD Type 2: ~1.1 rows per natural CompanyID on average.
+  - name: DimCompany
+    description: "TPC-DI company dimension (SCD2) — ~400 rows per SF"
+    row_count_per_sf: 400
+    columns:
+      - name: SK_CompanyID
+        type: bigint
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: CompanyID
+        type: bigint
+        not_null: true
+        description: "Natural key — shared across SCD2 versions"
+        generation:
+          distribution: sequential
+          min_value: 1
+      - name: Status
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["Active", "Inactive"]
+          weights: [0.92, 0.08]
+      - name: Name
+        type: string
+        length: 60
+        not_null: true
+      - name: Industry
+        type: string
+        length: 50
+        not_null: true
+      - name: SPrating
+        type: string
+        length: 4
+        description: "S&P credit rating; NULL for unrated companies"
+        generation:
+          values: ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-",
+                   "BB+", "BB", "B", "CCC", "D", null]
+          weights: [0.02, 0.03, 0.05, 0.05, 0.07, 0.10, 0.10, 0.09, 0.09, 0.09,
+                    0.08, 0.06, 0.05, 0.04, 0.02, 0.06]
+      - name: IsLowGrade
+        type: boolean
+        not_null: true
+        generation:
+          values: [false, true]
+          weights: [0.80, 0.20]
+      - name: CEO
+        type: string
+        length: 100
+        not_null: true
+      - name: AddressLine1
+        type: string
+        length: 80
+        not_null: true
+      - name: AddressLine2
+        type: string
+        length: 80
+      - name: PostalCode
+        type: string
+        length: 12
+        not_null: true
+      - name: City
+        type: string
+        length: 25
+        not_null: true
+      - name: StateProv
+        type: string
+        length: 20
+        not_null: true
+      - name: Country
+        type: string
+        length: 24
+        not_null: true
+        generation:
+          values: ["USA", "GBR", "CAN", "DEU", "FRA", "JPN", "AUS", "CHN", "IND", "BRA"]
+          weights: [0.40, 0.12, 0.10, 0.08, 0.08, 0.07, 0.05, 0.04, 0.03, 0.03]
+      - name: Description
+        type: string
+        length: 150
+        not_null: true
+      - name: FoundingDate
+        type: date
+        description: "Company founding date; nullable for missing data"
+        generation:
+          min_value: "1900-01-01"
+          max_value: "2009-12-31"
+      - name: IsCurrent
+        type: boolean
+        not_null: true
+        generation:
+          values: [true, false]
+          weights: [0.90, 0.10]
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+      - name: EffectiveDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2018-12-31"
+      - name: EndDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2019-01-01"
+          max_value: "9999-12-31"
+
+  # ── DimBroker ─────────────────────────────────────────────────────────────────
+  # ~100 per SF. SCD Type 2.
+  - name: DimBroker
+    description: "TPC-DI broker dimension (SCD2) — ~100 rows per SF"
+    row_count_per_sf: 100
+    columns:
+      - name: SK_BrokerID
+        type: bigint
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: BrokerID
+        type: bigint
+        not_null: true
+        generation:
+          distribution: sequential
+          min_value: 1
+      - name: ManagerID
+        type: bigint
+        description: "Manager's BrokerID; nullable for top-level brokers"
+      - name: FirstName
+        type: string
+        length: 50
+        not_null: true
+      - name: LastName
+        type: string
+        length: 50
+        not_null: true
+      - name: MiddleInitial
+        type: string
+        length: 1
+      - name: Branch
+        type: string
+        length: 50
+      - name: Office
+        type: string
+        length: 50
+      - name: Phone
+        type: string
+        length: 14
+      - name: IsCurrent
+        type: boolean
+        not_null: true
+        generation:
+          values: [true, false]
+          weights: [0.90, 0.10]
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+      - name: EffectiveDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2018-12-31"
+      - name: EndDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2019-01-01"
+          max_value: "9999-12-31"
+
+  # ── DimSecurity ───────────────────────────────────────────────────────────────
+  # ~685 per SF. SCD Type 2. FK: SK_CompanyID → DimCompany.
+  - name: DimSecurity
+    description: "TPC-DI security dimension (SCD2) — ~685 rows per SF"
+    row_count_per_sf: 685
+    load_after: [DimCompany]
+    fk_constraints:
+      - columns: [SK_CompanyID]
+        parent_table: DimCompany
+        parent_columns: [SK_CompanyID]
+        name: fk_dimsecurity_company
+        fk_distribution: uniform
+    columns:
+      - name: SK_SecurityID
+        type: bigint
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: Symbol
+        type: string
+        length: 15
+        not_null: true
+      - name: Issue
+        type: string
+        length: 6
+        not_null: true
+        generation:
+          values: ["COMMON", "PREF_A", "PREF_B"]
+          weights: [0.80, 0.12, 0.08]
+      - name: Status
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["Active", "Inactive"]
+          weights: [0.93, 0.07]
+      - name: Name
+        type: string
+        length: 70
+        not_null: true
+      - name: ExchangeID
+        type: string
+        length: 6
+        not_null: true
+        generation:
+          values: ["NYSE", "NASDAQ", "AMEX", "LSE", "TSX"]
+          weights: [0.35, 0.30, 0.10, 0.15, 0.10]
+      - name: SK_CompanyID
+        type: bigint
+        not_null: true
+      - name: SharesOutstanding
+        type: bigint
+        not_null: true
+        generation:
+          min_value: 1000000
+          max_value: 10000000000
+          distribution: uniform
+      - name: FirstTrade
+        type: date
+        not_null: true
+        generation:
+          min_value: "1990-01-01"
+          max_value: "2009-12-31"
+      - name: FirstTradeOnExchange
+        type: date
+        not_null: true
+        generation:
+          min_value: "1990-01-01"
+          max_value: "2009-12-31"
+      - name: Dividend
+        type: decimal
+        precision: 10
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.00
+          max_value: 10.00
+          distribution: uniform
+      - name: IsCurrent
+        type: boolean
+        not_null: true
+        generation:
+          values: [true, false]
+          weights: [0.93, 0.07]
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+      - name: EffectiveDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2018-12-31"
+      - name: EndDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2019-01-01"
+          max_value: "9999-12-31"
+
+  # ── DimCustomer ───────────────────────────────────────────────────────────────
+  # ~950 per SF. SCD Type 2; ~1.05 rows per natural CustomerID.
+  - name: DimCustomer
+    description: "TPC-DI customer dimension (SCD2) — ~950 rows per SF"
+    row_count_per_sf: 950
+    columns:
+      - name: SK_CustomerID
+        type: bigint
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: CustomerID
+        type: bigint
+        not_null: true
+        description: "Natural key — shared across SCD2 versions"
+        generation:
+          distribution: sequential
+          min_value: 1
+      - name: Status
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["Active", "Inactive"]
+          weights: [0.94, 0.06]
+      - name: LastName
+        type: string
+        length: 25
+        not_null: true
+      - name: FirstName
+        type: string
+        length: 20
+        not_null: true
+      - name: MiddleInitial
+        type: string
+        length: 1
+      - name: Gender
+        type: string
+        length: 1
+        generation:
+          values: ["M", "F", "U"]
+          weights: [0.49, 0.49, 0.02]
+      - name: Tier
+        type: smallint
+        description: "Customer tier: 1 (platinum), 2 (gold), 3 (standard)"
+        generation:
+          values: [1, 2, 3]
+          weights: [0.15, 0.35, 0.50]
+      - name: DOB
+        type: date
+        generation:
+          min_value: "1930-01-01"
+          max_value: "1999-12-31"
+      - name: AddressLine1
+        type: string
+        length: 80
+        not_null: true
+      - name: AddressLine2
+        type: string
+        length: 80
+      - name: PostalCode
+        type: string
+        length: 12
+        not_null: true
+      - name: City
+        type: string
+        length: 25
+        not_null: true
+      - name: StateProv
+        type: string
+        length: 20
+        not_null: true
+      - name: Country
+        type: string
+        length: 24
+        not_null: true
+        generation:
+          values: ["USA", "GBR", "CAN", "DEU", "FRA", "JPN", "AUS", "CHN", "IND", "BRA"]
+          weights: [0.40, 0.12, 0.10, 0.08, 0.08, 0.07, 0.05, 0.04, 0.03, 0.03]
+      - name: Phone1
+        type: string
+        length: 30
+      - name: Phone2
+        type: string
+        length: 30
+      - name: Phone3
+        type: string
+        length: 30
+      - name: Email1
+        type: string
+        length: 50
+      - name: Email2
+        type: string
+        length: 50
+      - name: NationalTaxRateDesc
+        type: string
+        length: 50
+      - name: NationalTaxRate
+        type: decimal
+        precision: 6
+        scale: 5
+        generation:
+          min_value: 0.01000
+          max_value: 0.10000
+          distribution: uniform
+      - name: LocalTaxRateDesc
+        type: string
+        length: 50
+      - name: LocalTaxRate
+        type: decimal
+        precision: 6
+        scale: 5
+        generation:
+          min_value: 0.00000
+          max_value: 0.08000
+          distribution: uniform
+      - name: AgencyID
+        type: string
+        length: 30
+      - name: CreditRating
+        type: integer
+        generation:
+          min_value: 300
+          max_value: 850
+          distribution: uniform
+      - name: NetWorth
+        type: decimal
+        precision: 10
+        scale: 2
+        generation:
+          min_value: -50000.00
+          max_value: 10000000.00
+          distribution: uniform
+      - name: MarketingNameplate
+        type: string
+        length: 100
+      - name: IsCurrent
+        type: boolean
+        not_null: true
+        generation:
+          values: [true, false]
+          weights: [0.94, 0.06]
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+      - name: EffectiveDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2018-12-31"
+      - name: EndDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2019-01-01"
+          max_value: "9999-12-31"
+
+  # ── DimAccount ────────────────────────────────────────────────────────────────
+  # ~1500 per SF. SCD Type 2. FK: SK_BrokerID → DimBroker, SK_CustomerID → DimCustomer.
+  - name: DimAccount
+    description: "TPC-DI account dimension (SCD2) — ~1500 rows per SF"
+    row_count_per_sf: 1500
+    load_after: [DimBroker, DimCustomer]
+    fk_constraints:
+      - columns: [SK_BrokerID]
+        parent_table: DimBroker
+        parent_columns: [SK_BrokerID]
+        name: fk_dimaccount_broker
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.5}
+      - columns: [SK_CustomerID]
+        parent_table: DimCustomer
+        parent_columns: [SK_CustomerID]
+        name: fk_dimaccount_customer
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+    columns:
+      - name: SK_AccountID
+        type: bigint
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: AccountID
+        type: bigint
+        not_null: true
+        description: "Natural key — shared across SCD2 versions"
+        generation:
+          distribution: sequential
+          min_value: 1
+      - name: SK_BrokerID
+        type: bigint
+        not_null: true
+      - name: SK_CustomerID
+        type: bigint
+        not_null: true
+      - name: Status
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["Active", "Inactive"]
+          weights: [0.94, 0.06]
+      - name: AccountDesc
+        type: string
+        length: 50
+        not_null: true
+      - name: TaxStatus
+        type: smallint
+        not_null: true
+        description: "0=non-taxable, 1=taxable, 2=tax-deferred"
+        generation:
+          values: [0, 1, 2]
+          weights: [0.50, 0.30, 0.20]
+      - name: IsCurrent
+        type: boolean
+        not_null: true
+        generation:
+          values: [true, false]
+          weights: [0.94, 0.06]
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+      - name: EffectiveDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2018-12-31"
+      - name: EndDate
+        type: date
+        not_null: true
+        generation:
+          min_value: "2019-01-01"
+          max_value: "9999-12-31"
+
+  # ── Financial ─────────────────────────────────────────────────────────────────
+  # ~3200 per SF (~8 quarters × 400 companies/SF). Composite PK.
+  - name: Financial
+    description: "TPC-DI quarterly financial data — ~3200 rows per SF"
+    row_count_per_sf: 3200
+    load_after: [DimCompany]
+    fk_constraints:
+      - columns: [SK_CompanyID]
+        parent_table: DimCompany
+        parent_columns: [SK_CompanyID]
+        name: fk_financial_company
+        fk_distribution: uniform
+        fk_children_min: 4
+        fk_children_max: 12
+    columns:
+      - name: SK_CompanyID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: FI_YEAR
+        type: smallint
+        not_null: true
+        primary_key: true
+        generation:
+          min_value: 2010
+          max_value: 2019
+          distribution: uniform
+      - name: FI_QTR
+        type: smallint
+        not_null: true
+        primary_key: true
+        generation:
+          values: [1, 2, 3, 4]
+          weights: [0.25, 0.25, 0.25, 0.25]
+      - name: FI_QTR_START_DATE
+        type: date
+        not_null: true
+        generation:
+          min_value: "2010-01-01"
+          max_value: "2019-10-01"
+      - name: FI_REVENUE
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 1000000.00
+          max_value: 50000000000.00
+          distribution: uniform
+      - name: FI_NET_EARN
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        generation:
+          min_value: -500000000.00
+          max_value: 10000000000.00
+          distribution: uniform
+      - name: FI_BASIC_EPS
+        type: decimal
+        precision: 10
+        scale: 2
+        not_null: true
+        generation:
+          min_value: -5.00
+          max_value: 50.00
+          distribution: uniform
+      - name: FI_DILUT_EPS
+        type: decimal
+        precision: 10
+        scale: 2
+        not_null: true
+        generation:
+          min_value: -5.00
+          max_value: 50.00
+          distribution: uniform
+      - name: FI_MARGIN
+        type: decimal
+        precision: 10
+        scale: 2
+        not_null: true
+        generation:
+          min_value: -0.50
+          max_value: 0.80
+          distribution: uniform
+      - name: FI_INVENTORY
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.00
+          max_value: 5000000000.00
+          distribution: uniform
+      - name: FI_ASSETS
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 1000000.00
+          max_value: 100000000000.00
+          distribution: uniform
+      - name: FI_LIABILITY
+        type: decimal
+        precision: 15
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.00
+          max_value: 80000000000.00
+          distribution: uniform
+      - name: FI_OUT_BASIC
+        type: decimal
+        precision: 12
+        scale: 0
+        not_null: true
+        generation:
+          min_value: 1000000.0
+          max_value: 10000000000.0
+          distribution: uniform
+      - name: FI_OUT_DILUT
+        type: decimal
+        precision: 12
+        scale: 0
+        not_null: true
+        generation:
+          min_value: 1000000.0
+          max_value: 10000000000.0
+          distribution: uniform
+
+  # ── DimTrade ──────────────────────────────────────────────────────────────────
+  # ~46000 per SF. Largest dimension table; fan-out from security and customer dims.
+  - name: DimTrade
+    description: "TPC-DI trade dimension — ~46 000 rows per SF"
+    row_count_per_sf: 46000
+    load_after: [DimDate, DimTime, DimSecurity, DimCompany, DimCustomer, DimAccount, DimBroker]
+    fk_constraints:
+      - columns: [SK_SecurityID]
+        parent_table: DimSecurity
+        parent_columns: [SK_SecurityID]
+        name: fk_dimtrade_security
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_CompanyID]
+        parent_table: DimCompany
+        parent_columns: [SK_CompanyID]
+        name: fk_dimtrade_company
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_CustomerID]
+        parent_table: DimCustomer
+        parent_columns: [SK_CustomerID]
+        name: fk_dimtrade_customer
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.3}
+      - columns: [SK_AccountID]
+        parent_table: DimAccount
+        parent_columns: [SK_AccountID]
+        name: fk_dimtrade_account
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_BrokerID]
+        parent_table: DimBroker
+        parent_columns: [SK_BrokerID]
+        name: fk_dimtrade_broker
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.5}
+      - columns: [SK_CreateDateID]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_dimtrade_createdate
+        fk_distribution: uniform
+      - columns: [SK_CreateTimeID]
+        parent_table: DimTime
+        parent_columns: [SK_TimeID]
+        name: fk_dimtrade_createtime
+        fk_distribution: uniform
+      - columns: [SK_CloseDateID]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_dimtrade_closedate
+        fk_distribution: uniform
+      - columns: [SK_CloseTimeID]
+        parent_table: DimTime
+        parent_columns: [SK_TimeID]
+        name: fk_dimtrade_closetime
+        fk_distribution: uniform
+    columns:
+      - name: TradeID
+        type: bigint
+        not_null: true
+        primary_key: true
+        generation:
+          distribution: sequential
+          min_value: 1
+          unique: true
+      - name: SK_BrokerID
+        type: bigint
+        not_null: true
+      - name: SK_CreateDateID
+        type: bigint
+        not_null: true
+      - name: SK_CreateTimeID
+        type: bigint
+        not_null: true
+      - name: SK_CloseDateID
+        type: bigint
+        description: "NULL for open / pending trades"
+      - name: SK_CloseTimeID
+        type: bigint
+        description: "NULL for open / pending trades"
+      - name: Status
+        type: string
+        length: 10
+        not_null: true
+        generation:
+          values: ["CMPL", "ACTV", "CNCL", "PNDG", "SBMT"]
+          weights: [0.85, 0.05, 0.05, 0.03, 0.02]
+      - name: Type
+        type: string
+        length: 12
+        not_null: true
+        generation:
+          values: ["Market Buy", "Market Sell", "Limit Buy", "Limit Sell", "Stop Loss"]
+          weights: [0.25, 0.30, 0.20, 0.20, 0.05]
+      - name: CashFlag
+        type: boolean
+        not_null: true
+        generation:
+          values: [false, true]
+          weights: [0.80, 0.20]
+      - name: SK_SecurityID
+        type: bigint
+        not_null: true
+      - name: SK_CompanyID
+        type: bigint
+        not_null: true
+      - name: Quantity
+        type: integer
+        not_null: true
+        generation:
+          min_value: 1
+          max_value: 10000
+          distribution: uniform
+      - name: BidPrice
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: SK_CustomerID
+        type: bigint
+        not_null: true
+      - name: SK_AccountID
+        type: bigint
+        not_null: true
+      - name: ExecutedBy
+        type: string
+        length: 64
+        not_null: true
+      - name: TradePrice
+        type: decimal
+        precision: 8
+        scale: 2
+        description: "NULL for open trades"
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: Fee
+        type: decimal
+        precision: 10
+        scale: 2
+        generation:
+          min_value: 0.00
+          max_value: 100.00
+          distribution: uniform
+      - name: Commission
+        type: decimal
+        precision: 10
+        scale: 2
+        generation:
+          min_value: 0.00
+          max_value: 250.00
+          distribution: uniform
+      - name: Tax
+        type: decimal
+        precision: 10
+        scale: 2
+        generation:
+          min_value: 0.00
+          max_value: 500.00
+          distribution: uniform
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+
+  # ── FactMarketHistory ─────────────────────────────────────────────────────────
+  # ~57000 per SF (≈685 securities × 83 trading days; composite PK).
+  # Largest table at scale: SF=10 → 570 000 rows; SF=100 → 5.7 M rows.
+  - name: FactMarketHistory
+    description: "TPC-DI daily market price history — ~57 000 rows per SF"
+    row_count_per_sf: 57000
+    load_after: [DimDate, DimSecurity, DimCompany]
+    fk_constraints:
+      - columns: [SK_SecurityID]
+        parent_table: DimSecurity
+        parent_columns: [SK_SecurityID]
+        name: fk_factmkt_security
+        fk_distribution: uniform
+      - columns: [SK_CompanyID]
+        parent_table: DimCompany
+        parent_columns: [SK_CompanyID]
+        name: fk_factmkt_company
+        fk_distribution: uniform
+      - columns: [SK_DateID]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factmkt_date
+        fk_distribution: uniform
+      - columns: [SK_FiftyTwoWeekHighDate]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factmkt_52wkhi_date
+        fk_distribution: uniform
+      - columns: [SK_FiftyTwoWeekLowDate]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factmkt_52wklo_date
+        fk_distribution: uniform
+    columns:
+      - name: SK_SecurityID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: SK_CompanyID
+        type: bigint
+        not_null: true
+      - name: SK_DateID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: PERatio
+        type: decimal
+        precision: 10
+        scale: 2
+        generation:
+          min_value: -100.00
+          max_value: 500.00
+          distribution: uniform
+      - name: Yield
+        type: decimal
+        precision: 5
+        scale: 2
+        generation:
+          min_value: 0.00
+          max_value: 20.00
+          distribution: uniform
+      - name: FiftyTwoWeekHigh
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: SK_FiftyTwoWeekHighDate
+        type: bigint
+        not_null: true
+      - name: FiftyTwoWeekLow
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: SK_FiftyTwoWeekLowDate
+        type: bigint
+        not_null: true
+      - name: ClosePrice
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: DayHigh
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: DayLow
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: Volume
+        type: integer
+        not_null: true
+        generation:
+          min_value: 0
+          max_value: 50000000
+          distribution: uniform
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+
+  # ── FactWatches ───────────────────────────────────────────────────────────────
+  # ~5000 per SF. Composite PK: SK_CustomerID + SK_SecurityID.
+  - name: FactWatches
+    description: "TPC-DI watch list fact — ~5 000 rows per SF"
+    row_count_per_sf: 5000
+    load_after: [DimCustomer, DimSecurity, DimDate]
+    fk_constraints:
+      - columns: [SK_CustomerID]
+        parent_table: DimCustomer
+        parent_columns: [SK_CustomerID]
+        name: fk_factwatches_customer
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_SecurityID]
+        parent_table: DimSecurity
+        parent_columns: [SK_SecurityID]
+        name: fk_factwatches_security
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_DateID_DatePlaced]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factwatches_dateplaced
+        fk_distribution: uniform
+      - columns: [SK_DateID_DateRemoved]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factwatches_dateremoved
+        fk_distribution: uniform
+    columns:
+      - name: SK_CustomerID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: SK_SecurityID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: SK_DateID_DatePlaced
+        type: bigint
+        not_null: true
+      - name: SK_DateID_DateRemoved
+        type: bigint
+        description: "NULL if watch is still active"
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+
+  # ── FactHoldings ──────────────────────────────────────────────────────────────
+  # ~3000 per SF. FK: TradeID → DimTrade (must load after DimTrade).
+  - name: FactHoldings
+    description: "TPC-DI holdings fact — ~3 000 rows per SF"
+    row_count_per_sf: 3000
+    load_after: [DimTrade, DimCustomer, DimAccount, DimSecurity, DimCompany, DimDate, DimTime]
+    fk_constraints:
+      - columns: [TradeID]
+        parent_table: DimTrade
+        parent_columns: [TradeID]
+        name: fk_factholdings_trade
+        fk_distribution: uniform
+      - columns: [CurrentTradeID]
+        parent_table: DimTrade
+        parent_columns: [TradeID]
+        name: fk_factholdings_currenttrade
+        fk_distribution: uniform
+      - columns: [SK_CustomerID]
+        parent_table: DimCustomer
+        parent_columns: [SK_CustomerID]
+        name: fk_factholdings_customer
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_AccountID]
+        parent_table: DimAccount
+        parent_columns: [SK_AccountID]
+        name: fk_factholdings_account
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_SecurityID]
+        parent_table: DimSecurity
+        parent_columns: [SK_SecurityID]
+        name: fk_factholdings_security
+        fk_distribution: uniform
+      - columns: [SK_CompanyID]
+        parent_table: DimCompany
+        parent_columns: [SK_CompanyID]
+        name: fk_factholdings_company
+        fk_distribution: uniform
+      - columns: [SK_DateID]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factholdings_date
+        fk_distribution: uniform
+      - columns: [SK_TimeID]
+        parent_table: DimTime
+        parent_columns: [SK_TimeID]
+        name: fk_factholdings_time
+        fk_distribution: uniform
+    columns:
+      - name: TradeID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: CurrentTradeID
+        type: bigint
+        not_null: true
+      - name: SK_CustomerID
+        type: bigint
+        not_null: true
+      - name: SK_AccountID
+        type: bigint
+        not_null: true
+      - name: SK_SecurityID
+        type: bigint
+        not_null: true
+      - name: SK_CompanyID
+        type: bigint
+        not_null: true
+      - name: SK_DateID
+        type: bigint
+        not_null: true
+      - name: SK_TimeID
+        type: bigint
+        not_null: true
+      - name: CurrentPrice
+        type: decimal
+        precision: 8
+        scale: 2
+        not_null: true
+        generation:
+          min_value: 0.01
+          max_value: 9999.00
+          distribution: uniform
+      - name: CurrentHolding
+        type: smallint
+        not_null: true
+        generation:
+          min_value: -1000
+          max_value: 10000
+          distribution: uniform
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+
+  # ── FactCashBalances ──────────────────────────────────────────────────────────
+  # ~2500 per SF. Composite PK.
+  - name: FactCashBalances
+    description: "TPC-DI daily cash balance fact — ~2 500 rows per SF"
+    row_count_per_sf: 2500
+    load_after: [DimCustomer, DimAccount, DimDate]
+    fk_constraints:
+      - columns: [SK_CustomerID]
+        parent_table: DimCustomer
+        parent_columns: [SK_CustomerID]
+        name: fk_factcash_customer
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_AccountID]
+        parent_table: DimAccount
+        parent_columns: [SK_AccountID]
+        name: fk_factcash_account
+        fk_distribution: zipf
+        fk_distribution_params: {exponent: 1.2}
+      - columns: [SK_DateID]
+        parent_table: DimDate
+        parent_columns: [SK_DateID]
+        name: fk_factcash_date
+        fk_distribution: uniform
+    columns:
+      - name: SK_CustomerID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: SK_AccountID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: SK_DateID
+        type: bigint
+        not_null: true
+        primary_key: true
+      - name: Cash
+        type: decimal
+        precision: 10
+        scale: 2
+        not_null: true
+        generation:
+          min_value: -50000.00
+          max_value: 1000000.00
+          distribution: uniform
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+
+  # ── DimMessage ────────────────────────────────────────────────────────────────
+  # ~500 per SF. Audit trail from the ETL pipeline (simulated here as DW rows).
+  - name: DimMessage
+    description: "TPC-DI audit message log — ~500 rows per SF"
+    row_count_per_sf: 500
+    columns:
+      - name: MessageDateAndTime
+        type: timestamp
+        not_null: true
+        generation:
+          min_value: "2010-01-01 00:00:00"
+          max_value: "2019-12-31 23:59:59"
+      - name: BatchID
+        type: smallint
+        not_null: true
+        generation:
+          values: [1, 2, 3]
+          weights: [0.6, 0.3, 0.1]
+      - name: MessageSource
+        type: string
+        length: 30
+        not_null: true
+        generation:
+          values: ["Customer", "Account", "Trade", "Market", "Prospect", "System"]
+          weights: [0.20, 0.20, 0.30, 0.15, 0.10, 0.05]
+      - name: MessageText
+        type: string
+        length: 50
+        not_null: true
+      - name: MessageType
+        type: string
+        length: 12
+        not_null: true
+        generation:
+          values: ["Validation", "Warning", "Error", "Info"]
+          weights: [0.50, 0.30, 0.10, 0.10]
+      - name: MessageData
+        type: string
+        length: 100
+        not_null: true

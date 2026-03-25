@@ -1,0 +1,182 @@
+{
+  "schema": "tpcdi",
+  "dialect": "cockroachdb",
+  "sf": 5.0,
+  "source_schema": "tpch_src",
+  "target_schema": "tpch_tgt",
+  "source_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 2000,
+    "DimBroker": 500,
+    "DimCustomer": 4750,
+    "DimMessage": 2500,
+    "DimSecurity": 3425,
+    "Financial": 16000,
+    "DimAccount": 7500,
+    "FactMarketHistory": 285000,
+    "FactWatches": 25000,
+    "DimTrade": 230000,
+    "FactCashBalances": 12500,
+    "FactHoldings": 15000
+  },
+  "target_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 2000,
+    "DimBroker": 500,
+    "DimCustomer": 4750,
+    "DimMessage": 2500,
+    "DimSecurity": 3425,
+    "Financial": 16000,
+    "DimAccount": 7500,
+    "FactMarketHistory": 285000,
+    "FactWatches": 25000,
+    "DimTrade": 230000,
+    "FactCashBalances": 12500,
+    "FactHoldings": 15000
+  },
+  "query_metrics": {
+    "tpcdi-q01": {
+      "query_id": "tpcdi-q01",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Result",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Result",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        460.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 0.8333333333333334,
+      "within_10x": 0.8333333333333334,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpcdi-q02": {
+      "query_id": "tpcdi-q02",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        82.89703315881326,
+        1.0
+      ],
+      "within_2x": 0.6666666666666666,
+      "within_10x": 0.6666666666666666,
+      "source_plan_depth": 2,
+      "target_plan_depth": 2
+    },
+    "tpcdi-q03": {
+      "query_id": "tpcdi-q03",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Result",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Result",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.2557442557442557,
+        1.0,
+        54.02189012839402,
+        1.0,
+        1.5786150284150706,
+        1.0,
+        1.0
+      ],
+      "within_2x": 0.875,
+      "within_10x": 0.875,
+      "source_plan_depth": 7,
+      "target_plan_depth": 7
+    },
+    "tpcdi-q04": {
+      "query_id": "tpcdi-q04",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        7.963945918878317,
+        1.0
+      ],
+      "within_2x": 0.6666666666666666,
+      "within_10x": 1.0,
+      "source_plan_depth": 2,
+      "target_plan_depth": 2
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 0.7604166666666666,
+  "mean_within_10x": 0.84375,
+  "phase_times": {
+    "A_load_source": 41.59085333405528,
+    "A5_source_extended_stats": 1.0624993592500687e-05,
+    "A6_fk_range_inference": 0.022729875054210424,
+    "B_baseline_explain": 0.020472415955737233,
+    "C_collect_stats": 33.28539512492716,
+    "D_build_target": 29.202893082983792,
+    "E_replay_explain": 0.01974162505939603
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

@@ -1,0 +1,87 @@
+{
+  "schema": "tpcb",
+  "dialect": "mysql",
+  "sf": 1.0,
+  "source_schema": "tpcb_src",
+  "target_schema": "tpcb_tgt",
+  "source_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "target_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "query_metrics": {
+    "tpcb-q01": {
+      "query_id": "tpcb-q01",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcb-q02": {
+      "query_id": "tpcb-q02",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcb-q03": {
+      "query_id": "tpcb-q03",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 2.506234916043468,
+    "B_baseline_explain": 0.028495040955021977,
+    "C_collect_stats": 1.3649585830280557,
+    "D_build_target": 2.1051440000301227,
+    "E_replay_explain": 0.022379125002771616
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

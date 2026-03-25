@@ -22,6 +22,13 @@ try:
 except ImportError:
     pass  # python-dotenv not installed; env vars must be set in the shell
 
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "slow: marks tests that require a live database and take >30s to complete",
+    )
+
 _CANDIDATE_JAVA_HOMES = [
     "/opt/homebrew/opt/openjdk@17",
     "/opt/homebrew/opt/openjdk@21",

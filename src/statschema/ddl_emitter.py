@@ -121,7 +121,8 @@ _SQLSERVER_DEFAULTS: dict[str, str] = {
 _ORACLE_DEFAULTS: dict[str, str] = {
     "integer":     "NUMBER(10)",
     "long":        "NUMBER(19)",
-    "string":      "CLOB",           # no-length string → CLOB; VARCHAR2(n) used when length set
+    "string":      "VARCHAR2(4000)",  # no-length string; VARCHAR2(n) used when length set
+    # CLOB avoided here: Oracle forbids CLOB in GROUP BY/ORDER BY/JOIN predicates
     "uuid":        "CHAR(36)",      # Oracle has no UUID type; store as fixed-length string
     "float":       "FLOAT",
     "double":      "FLOAT(53)",

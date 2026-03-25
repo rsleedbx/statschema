@@ -1,0 +1,179 @@
+{
+  "schema": "tpch",
+  "dialect": "postgres",
+  "sf": 0.1,
+  "source_schema": "tpch_src_sf01",
+  "target_schema": "tpch_tgt_sf01",
+  "source_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "target_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        6.0,
+        7.0,
+        6.0,
+        6.0,
+        1.7013540486594378
+      ],
+      "within_2x": 0.2,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Hash Join",
+        "Merge Join",
+        "Sort",
+        "Seq Scan",
+        "Sort",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.6666666666666666,
+      "row_estimate_ratios": [
+        1.0,
+        66.05132192846034,
+        66.05132192846034,
+        66.05132192846034,
+        93.22014925373135,
+        93.22014925373135,
+        5.837498364516551,
+        130.57093821510298,
+        130.57093821510298,
+        3.8861448711716093,
+        3.5428866689631415,
+        141.23114019979332
+      ],
+      "within_2x": 0.08333333333333333,
+      "within_10x": 0.3333333333333333,
+      "source_plan_depth": 9,
+      "target_plan_depth": 8
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.75,
+      "row_estimate_ratios": [
+        1.0,
+        2.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 2
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.8571428571428571,
+      "row_estimate_ratios": [
+        1.0,
+        2.0,
+        76262.0,
+        152.0,
+        2922.0,
+        20000.0
+      ],
+      "within_2x": 0.3333333333333333,
+      "within_10x": 0.3333333333333333,
+      "source_plan_depth": 5,
+      "target_plan_depth": 4
+    }
+  },
+  "mean_node_jaccard": 0.8184523809523809,
+  "mean_within_2x": 0.4041666666666666,
+  "mean_within_10x": 0.6666666666666666,
+  "phase_times": {
+    "B_baseline_explain": 0.00972995802294463,
+    "C_collect_stats": 0.6406323750270531,
+    "D_build_target": 13.391366666997783,
+    "E_replay_explain": 0.010753749986179173
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": false,
+  "failure_reason": "mean_within_2x 0.404 < threshold 0.5"
+}

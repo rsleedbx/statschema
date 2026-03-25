@@ -1,0 +1,182 @@
+{
+  "benchmark_id": "20260324-190904-tpce-sf0.1-postgres",
+  "timestamp": "2026-03-24T19:09:04.906760+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "e4afb8a",
+  "schema": "tpce",
+  "scale_factor": 0.1,
+  "append": false,
+  "dialect": "postgres",
+  "driver": "psycopg2",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0674,
+  "tables": {
+    "exchange": {
+      "rows": 4,
+      "load_s": 0.0016,
+      "row_offset": 0
+    },
+    "sector": {
+      "rows": 12,
+      "load_s": 0.0012,
+      "row_offset": 0
+    },
+    "status_type": {
+      "rows": 5,
+      "load_s": 0.0011,
+      "row_offset": 0
+    },
+    "trade_type": {
+      "rows": 5,
+      "load_s": 0.0013,
+      "row_offset": 0
+    },
+    "taxrate": {
+      "rows": 320,
+      "load_s": 0.0037,
+      "row_offset": 0
+    },
+    "charge": {
+      "rows": 15,
+      "load_s": 0.0015,
+      "row_offset": 0
+    },
+    "commission_rate": {
+      "rows": 240,
+      "load_s": 0.0032,
+      "row_offset": 0
+    },
+    "zip_code": {
+      "rows": 14741,
+      "load_s": 0.0359,
+      "row_offset": 0
+    },
+    "address": {
+      "rows": 133333,
+      "load_s": 2.8338,
+      "row_offset": 0
+    },
+    "news_item": {
+      "rows": 2000,
+      "load_s": 0.09,
+      "row_offset": 0
+    },
+    "industry": {
+      "rows": 102,
+      "load_s": 0.0025,
+      "row_offset": 0
+    },
+    "broker": {
+      "rows": 100,
+      "load_s": 0.0038,
+      "row_offset": 0
+    },
+    "customer": {
+      "rows": 100000,
+      "load_s": 4.5773,
+      "row_offset": 0
+    },
+    "company": {
+      "rows": 500,
+      "load_s": 0.0169,
+      "row_offset": 0
+    },
+    "customer_taxrate": {
+      "rows": 300000,
+      "load_s": 1.2315,
+      "row_offset": 0
+    },
+    "customer_account": {
+      "rows": 500000,
+      "load_s": 5.8781,
+      "row_offset": 0
+    },
+    "watch_list": {
+      "rows": 100000,
+      "load_s": 0.4499,
+      "row_offset": 0
+    },
+    "company_competitor": {
+      "rows": 1500,
+      "load_s": 0.0105,
+      "row_offset": 0
+    },
+    "security": {
+      "rows": 685,
+      "load_s": 0.0238,
+      "row_offset": 0
+    },
+    "financial": {
+      "rows": 10000,
+      "load_s": 0.2094,
+      "row_offset": 0
+    },
+    "news_xref": {
+      "rows": 6000,
+      "load_s": 0.0197,
+      "row_offset": 0
+    },
+    "account_permission": {
+      "rows": 750000,
+      "load_s": 10.3112,
+      "row_offset": 0
+    },
+    "watch_item": {
+      "rows": 1500000,
+      "load_s": 6.9429,
+      "row_offset": 0
+    },
+    "daily_market": {
+      "rows": 1250275,
+      "load_s": 10.7729,
+      "row_offset": 0
+    },
+    "last_trade": {
+      "rows": 685,
+      "load_s": 0.0088,
+      "row_offset": 0
+    },
+    "trade": {
+      "rows": 333876,
+      "load_s": 7.3825,
+      "row_offset": 0
+    },
+    "holding_summary": {
+      "rows": 380000,
+      "load_s": 1.3608,
+      "row_offset": 0
+    },
+    "trade_history": {
+      "rows": 1000000,
+      "load_s": 5.5477,
+      "row_offset": 0
+    },
+    "trade_request": {
+      "rows": 10000,
+      "load_s": 0.0646,
+      "row_offset": 0
+    },
+    "holding": {
+      "rows": 500000,
+      "load_s": 4.8,
+      "row_offset": 0
+    },
+    "cash_transaction": {
+      "rows": 333876,
+      "load_s": 4.7851,
+      "row_offset": 0
+    },
+    "holding_history": {
+      "rows": 1000000,
+      "load_s": 4.137,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 8228274,
+    "load_s": 71.5101,
+    "rows_per_s": 115064.0
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "tpcb",
+  "dialect": "oracle",
+  "sf": 1.0,
+  "source_schema": "oractest",
+  "target_schema": "oractgt",
+  "source_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "target_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "query_metrics": {},
+  "mean_node_jaccard": 0.0,
+  "mean_within_2x": 0.0,
+  "mean_within_10x": 0.0,
+  "phase_times": {
+    "A_load_source": 60.51301454100758,
+    "B_baseline_explain": 0.08964075008407235,
+    "C_collect_stats": 0.008685208042152226,
+    "D_build_target": 49.10145316703711,
+    "E_replay_explain": 0.16498795803636312
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": false,
+  "failure_reason": "mean_node_jaccard 0.000 < threshold 0.7",
+  "stats_injection_mode": "analyze_fallback"
+}

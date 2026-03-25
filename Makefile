@@ -21,7 +21,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase lakebase-up lakebase-down lakebase-destroy lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase test-live-identity lakebase-up lakebase-down lakebase-destroy lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -206,6 +206,21 @@ test-live-mautic:
 	MAUTIC_MYSQL_PASS=$(or $(MAUTIC_MYSQL_PASS),mauticpass) \
 	MAUTIC_MYSQL_DB=$(or $(MAUTIC_MYSQL_DB),mautic) \
 	$(PYTEST_LIVE) tests/test_live_mautic.py -v
+
+## Run identity tests — validates statschema plan fidelity on TPC-H via pg16
+## Usage: make test-live-identity
+## Override port:  make test-live-identity PG16_PORT=5416
+## Quick smoke (SF=0.1, ~1 min):
+##   make test-live-identity PYTEST_FLAGS="-k quick"
+## Full SF=1 (3-5 min):
+##   make test-live-identity PYTEST_FLAGS="-k sf1"
+test-live-identity:
+	PG_HOST=$(or $(PG_HOST),127.0.0.1) \
+	PG_USER=$(or $(PG_USER),postgres) \
+	PG_PASSWORD=$(or $(PG_PASSWORD),testpass) \
+	PG_DB=$(or $(PG_DB),testdb) \
+	PG16_PORT=$(or $(PG16_PORT),5416) \
+	$(PYTEST_LIVE) tests/test_live_identity.py -v -m slow $(or $(PYTEST_FLAGS),)
 
 ## Run live stats transpiler tests (proves stats injection works on PG18, Oracle, SQL Server)
 ## Prerequisites: pg18 Podman container, Oracle XE Lima VM, SQL Server 22 Lima VM

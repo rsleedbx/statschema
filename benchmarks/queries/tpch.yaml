@@ -1,0 +1,131 @@
+# TPC-H representative query workload — 4 queries for identity testing
+#
+# These four queries cover the key optimizer evaluation dimensions:
+#   Q1  — full lineitem table scan + GROUP BY
+#          tests: row-count estimation, sequential scan vs index decision
+#   Q3  — 3-table join with date predicates (customer × orders × lineitem)
+#          tests: join cardinality estimation, join order selection
+#   Q6  — highly selective range scan + single aggregate
+#          tests: predicate selectivity estimation, whether index is chosen
+#   Q14 — 2-table join + CASE expression (lineitem × part)
+#          tests: expression cardinality, join method for small-side part table
+#
+# Together these four queries expose the most common sources of plan divergence:
+# bad row-count estimates → wrong join order → wrong join method → slow queries.
+#
+# Run benchmarks/scripts/extract_tpch_queries.py (requires: pip install duckdb)
+# to generate a full 22-query tpch_full.yaml from the DuckDB tpch extension.
+#
+# SQL is written in ANSI SQL compatible with PostgreSQL, MySQL, SQL Server,
+# and Oracle (minor date syntax differences handled by sqlglot on replay).
+#
+# TPC Benchmark™ H is copyright © TPC, all rights reserved.
+# These queries express the TPC-H business logic in ANSI SQL.
+# statschema does not publish TPC-certified benchmark results.
+
+source_dialect: ansi
+queries:
+
+  # ── Q1: Pricing Summary Report ───────────────────────────────────────────────
+  # Scans most of the lineitem table (all rows shipped before 1998-09-02).
+  # Exercises the planner's row-count estimate for the lineitem table itself
+  # and for the GROUP BY aggregation.  If stats say lineitem has N rows but the
+  # table actually has M, the aggregation cost estimate will be proportionally
+  # wrong, which causes downstream plan changes in queries that join lineitem.
+  - id: tpch-q01
+    source_dialect: ansi
+    description: "Pricing Summary — full lineitem aggregate by return flag and line status"
+    sql: |
+      SELECT
+          l_returnflag,
+          l_linestatus,
+          sum(l_quantity)                                        AS sum_qty,
+          sum(l_extendedprice)                                   AS sum_base_price,
+          sum(l_extendedprice * (1 - l_discount))                AS sum_disc_price,
+          sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge,
+          avg(l_quantity)                                        AS avg_qty,
+          avg(l_extendedprice)                                   AS avg_price,
+          avg(l_discount)                                        AS avg_disc,
+          count(*)                                               AS count_order
+      FROM lineitem
+      WHERE l_shipdate <= CAST('1998-09-02' AS DATE)
+      GROUP BY l_returnflag, l_linestatus
+      ORDER BY l_returnflag, l_linestatus
+    tables: [lineitem]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q3: Shipping Priority Query ───────────────────────────────────────────────
+  # Joins customer, orders, and lineitem with date cut-off predicates.
+  # The correct plan on most databases is to filter customer to 'BUILDING'
+  # segment first, then join to orders (filtered by date), then join to
+  # lineitem.  Wrong join order here is a direct symptom of bad cardinality
+  # estimates on one of the three tables.
+  - id: tpch-q03
+    source_dialect: ansi
+    description: "Shipping Priority — 3-table join, top unshipped orders ranked by revenue"
+    sql: |
+      SELECT
+          l_orderkey,
+          sum(l_extendedprice * (1 - l_discount)) AS revenue,
+          o_orderdate,
+          o_shippriority
+      FROM customer
+      JOIN orders   ON c_custkey  = o_custkey
+      JOIN lineitem ON l_orderkey = o_orderkey
+      WHERE c_mktsegment = 'BUILDING'
+        AND o_orderdate   < CAST('1995-03-15' AS DATE)
+        AND l_shipdate    > CAST('1995-03-15' AS DATE)
+      GROUP BY l_orderkey, o_orderdate, o_shippriority
+      ORDER BY revenue DESC, o_orderdate
+      LIMIT 10
+    tables: [customer, orders, lineitem]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q6: Forecasting Revenue Change ───────────────────────────────────────────
+  # Four-predicate range scan on lineitem: shipdate range + discount range + qty.
+  # Returns a single row.  On a real dataset the predicate selectivity is about
+  # 1–2%.  If stats are wrong the planner may choose a full sequential scan
+  # instead of an index; conversely, bad stats may cause it to over-use an index
+  # on a hot-path table.  This is the most discriminating query for stats quality.
+  - id: tpch-q06
+    source_dialect: ansi
+    description: "Revenue Change — selective range scan, tests multi-predicate selectivity"
+    sql: |
+      SELECT sum(l_extendedprice * l_discount) AS revenue
+      FROM lineitem
+      WHERE l_shipdate >= CAST('1994-01-01' AS DATE)
+        AND l_shipdate  < CAST('1995-01-01' AS DATE)
+        AND l_discount BETWEEN 0.05 AND 0.07
+        AND l_quantity  < 24
+    tables: [lineitem]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q14: Promotion Effect Query ───────────────────────────────────────────────
+  # Inner join between lineitem (large) and part (medium) with a date filter and
+  # a CASE expression.  The correct plan chooses a hash join with the part table
+  # as the build side.  Wrong cardinality on part flips the hash join sides or
+  # switches to a nested loop, both of which are significantly slower.
+  - id: tpch-q14
+    source_dialect: ansi
+    description: "Promotion Effect — lineitem × part join with CASE, tests join side selection"
+    sql: |
+      SELECT
+          100.00
+          * sum(CASE WHEN p_type LIKE 'PROMO%'
+                     THEN l_extendedprice * (1 - l_discount)
+                     ELSE 0 END)
+          / sum(l_extendedprice * (1 - l_discount)) AS promo_revenue
+      FROM lineitem
+      JOIN part ON l_partkey = p_partkey
+      WHERE l_shipdate >= CAST('1995-09-01' AS DATE)
+        AND l_shipdate  < CAST('1995-10-01' AS DATE)
+    tables: [lineitem, part]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0

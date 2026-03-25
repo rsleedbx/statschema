@@ -1,0 +1,112 @@
+{
+  "schema": "tpch",
+  "dialect": "db2",
+  "sf": 0.1,
+  "source_schema": "db2tpch_src",
+  "target_schema": "db2tpch_tgt",
+  "source_row_counts": {
+    "region": 0,
+    "part": 0,
+    "nation": 0,
+    "supplier": 0,
+    "customer": 0,
+    "partsupp": 0,
+    "orders": 0,
+    "lineitem": 0
+  },
+  "target_row_counts": {
+    "region": 0,
+    "part": 0,
+    "nation": 0,
+    "supplier": 0,
+    "customer": 0,
+    "partsupp": 0,
+    "orders": 0,
+    "lineitem": 0
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 29.509683541953564,
+    "B_baseline_explain": 0.19428358296863735,
+    "C_collect_stats": 0.15263570798560977,
+    "D_build_target": 22.427782875020057,
+    "E_replay_explain": 0.1583716250024736
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

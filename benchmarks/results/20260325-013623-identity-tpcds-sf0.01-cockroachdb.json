@@ -1,0 +1,193 @@
+{
+  "schema": "tpcds",
+  "dialect": "cockroachdb",
+  "sf": 0.01,
+  "source_schema": "tpch_src",
+  "target_schema": "tpch_tgt",
+  "source_row_counts": {
+    "date_dim": 73049,
+    "time_dim": 86400,
+    "customer_demographics": 1920800,
+    "income_band": 20,
+    "reason": 55,
+    "ship_mode": 20,
+    "item": 180,
+    "warehouse": 5,
+    "store": 12,
+    "call_center": 6,
+    "customer_address": 500,
+    "catalog_page": 117,
+    "web_site": 54,
+    "web_page": 20,
+    "household_demographics": 7200,
+    "promotion": 3,
+    "inventory": 117450,
+    "customer": 1000,
+    "store_sales": 28804,
+    "catalog_sales": 14415,
+    "web_sales": 7193,
+    "store_returns": 2875,
+    "catalog_returns": 1440,
+    "web_returns": 717
+  },
+  "target_row_counts": {
+    "date_dim": 73049,
+    "time_dim": 86400,
+    "customer_demographics": 1920800,
+    "income_band": 20,
+    "reason": 55,
+    "ship_mode": 20,
+    "item": 180,
+    "warehouse": 5,
+    "store": 12,
+    "call_center": 6,
+    "customer_address": 500,
+    "catalog_page": 117,
+    "web_site": 54,
+    "web_page": 20,
+    "household_demographics": 7200,
+    "promotion": 3,
+    "inventory": 117450,
+    "customer": 1000,
+    "store_sales": 28804,
+    "catalog_sales": 14415,
+    "web_sales": 7193,
+    "store_returns": 2875,
+    "catalog_returns": 1440,
+    "web_returns": 717
+  },
+  "query_metrics": {
+    "tpcds-q01": {
+      "query_id": "tpcds-q01",
+      "source_node_types": [
+        "Sort",
+        "Group",
+        "Hash Join",
+        "Seq Scan",
+        "Filter",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Group",
+        "Hash Join",
+        "Seq Scan",
+        "Filter",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpcds-q02": {
+      "query_id": "tpcds-q02",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 2,
+      "target_plan_depth": 2
+    },
+    "tpcds-q03": {
+      "query_id": "tpcds-q03",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0526315789473684,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpcds-q04": {
+      "query_id": "tpcds-q04",
+      "source_node_types": [
+        "Top-K",
+        "Group",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Top-K",
+        "Group",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        14.330348258706467,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 0.8571428571428571,
+      "within_10x": 0.8571428571428571,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 0.9642857142857143,
+  "mean_within_10x": 0.9642857142857143,
+  "phase_times": {
+    "A_load_source": 125.01526408398058,
+    "A5_source_extended_stats": 1.0833959095180035e-05,
+    "A6_fk_range_inference": 0.047813665936701,
+    "B_baseline_explain": 0.02220379200298339,
+    "C_collect_stats": 39.5969188750023,
+    "D_build_target": 137.8165027499199,
+    "E_replay_explain": 0.020821791025809944
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

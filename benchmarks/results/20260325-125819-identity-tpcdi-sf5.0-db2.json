@@ -1,0 +1,132 @@
+{
+  "schema": "tpcdi",
+  "dialect": "db2",
+  "sf": 5.0,
+  "source_schema": "db2tpcdi_src",
+  "target_schema": "db2tpcdi_tgt",
+  "source_row_counts": {
+    "StatusType": 0,
+    "TaxRate": 0,
+    "TradeType": 0,
+    "Industry": 0,
+    "DimDate": 0,
+    "DimTime": 0,
+    "DimCompany": 0,
+    "DimBroker": 0,
+    "DimCustomer": 0,
+    "DimMessage": 0,
+    "DimSecurity": 0,
+    "Financial": 0,
+    "DimAccount": 0,
+    "FactMarketHistory": 0,
+    "FactWatches": 0,
+    "DimTrade": 0,
+    "FactCashBalances": 0,
+    "FactHoldings": 0
+  },
+  "target_row_counts": {
+    "StatusType": 0,
+    "TaxRate": 0,
+    "TradeType": 0,
+    "Industry": 0,
+    "DimDate": 0,
+    "DimTime": 0,
+    "DimCompany": 0,
+    "DimBroker": 0,
+    "DimCustomer": 0,
+    "DimMessage": 0,
+    "DimSecurity": 0,
+    "Financial": 0,
+    "DimAccount": 0,
+    "FactMarketHistory": 0,
+    "FactWatches": 0,
+    "DimTrade": 0,
+    "FactCashBalances": 0,
+    "FactHoldings": 0
+  },
+  "query_metrics": {
+    "tpcdi-q01": {
+      "query_id": "tpcdi-q01",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcdi-q02": {
+      "query_id": "tpcdi-q02",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcdi-q03": {
+      "query_id": "tpcdi-q03",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcdi-q04": {
+      "query_id": "tpcdi-q04",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 42.5550203329185,
+    "B_baseline_explain": 0.166325791971758,
+    "C_collect_stats": 0.3147650830214843,
+    "D_build_target": 33.00392395898234,
+    "E_replay_explain": 0.14236170903313905
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

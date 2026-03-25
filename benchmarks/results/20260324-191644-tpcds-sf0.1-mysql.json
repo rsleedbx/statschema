@@ -1,0 +1,142 @@
+{
+  "benchmark_id": "20260324-191644-tpcds-sf0.1-mysql",
+  "timestamp": "2026-03-24T19:16:44.720567+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "e4afb8a",
+  "schema": "tpcds",
+  "scale_factor": 0.1,
+  "append": false,
+  "dialect": "mysql",
+  "driver": "pymysql",
+  "strategy": "multi_row",
+  "ddl_s": 0.252,
+  "tables": {
+    "date_dim": {
+      "rows": 73049,
+      "load_s": 2.556,
+      "row_offset": 0
+    },
+    "time_dim": {
+      "rows": 86400,
+      "load_s": 1.1637,
+      "row_offset": 0
+    },
+    "customer_demographics": {
+      "rows": 1920800,
+      "load_s": 22.6454,
+      "row_offset": 0
+    },
+    "income_band": {
+      "rows": 20,
+      "load_s": 0.0032,
+      "row_offset": 0
+    },
+    "reason": {
+      "rows": 55,
+      "load_s": 0.0024,
+      "row_offset": 0
+    },
+    "ship_mode": {
+      "rows": 20,
+      "load_s": 0.0026,
+      "row_offset": 0
+    },
+    "item": {
+      "rows": 1800,
+      "load_s": 0.1595,
+      "row_offset": 0
+    },
+    "warehouse": {
+      "rows": 5,
+      "load_s": 0.0044,
+      "row_offset": 0
+    },
+    "store": {
+      "rows": 12,
+      "load_s": 0.0056,
+      "row_offset": 0
+    },
+    "call_center": {
+      "rows": 6,
+      "load_s": 0.004,
+      "row_offset": 0
+    },
+    "customer_address": {
+      "rows": 5000,
+      "load_s": 0.233,
+      "row_offset": 0
+    },
+    "catalog_page": {
+      "rows": 1171,
+      "load_s": 0.0425,
+      "row_offset": 0
+    },
+    "web_site": {
+      "rows": 54,
+      "load_s": 0.019,
+      "row_offset": 0
+    },
+    "web_page": {
+      "rows": 204,
+      "load_s": 0.0119,
+      "row_offset": 0
+    },
+    "household_demographics": {
+      "rows": 7200,
+      "load_s": 0.064,
+      "row_offset": 0
+    },
+    "promotion": {
+      "rows": 30,
+      "load_s": 0.0044,
+      "row_offset": 0
+    },
+    "inventory": {
+      "rows": 1174500,
+      "load_s": 11.1338,
+      "row_offset": 0
+    },
+    "customer": {
+      "rows": 10000,
+      "load_s": 0.4981,
+      "row_offset": 0
+    },
+    "store_sales": {
+      "rows": 288040,
+      "load_s": 14.6263,
+      "row_offset": 0
+    },
+    "catalog_sales": {
+      "rows": 144154,
+      "load_s": 10.5602,
+      "row_offset": 0
+    },
+    "web_sales": {
+      "rows": 71938,
+      "load_s": 5.5861,
+      "row_offset": 0
+    },
+    "store_returns": {
+      "rows": 28751,
+      "load_s": 1.2652,
+      "row_offset": 0
+    },
+    "catalog_returns": {
+      "rows": 14406,
+      "load_s": 0.9524,
+      "row_offset": 0
+    },
+    "web_returns": {
+      "rows": 7176,
+      "load_s": 0.4519,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 3834791,
+    "load_s": 71.9955,
+    "rows_per_s": 53264.0
+  }
+}

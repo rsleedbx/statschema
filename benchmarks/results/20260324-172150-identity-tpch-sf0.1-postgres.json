@@ -1,0 +1,181 @@
+{
+  "schema": "tpch",
+  "dialect": "postgres",
+  "sf": 0.1,
+  "source_schema": "tpch_src_sf01",
+  "target_schema": "tpch_tgt_sf01",
+  "source_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "target_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Aggregate",
+        "Sort",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        6666.666666666667,
+        6857.142857142857,
+        6666.666666666667,
+        68332.33333333333,
+        1.6978242684754972
+      ],
+      "within_2x": 0.2,
+      "within_10x": 0.2,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Merge Join",
+        "Gather Merge",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Materialize",
+        "Gather Merge",
+        "Sort",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.625,
+      "row_estimate_ratios": [
+        1.0,
+        6265.360501567398,
+        6265.360501567398,
+        1276415.934169279,
+        622.2612781954887,
+        366.0357142857143,
+        1.4449671650651132,
+        140.18027210884352,
+        2.8,
+        128.0222222222222,
+        338.95452979676196,
+        338.95452979676196
+      ],
+      "within_2x": 0.16666666666666666,
+      "within_10x": 0.25,
+      "source_plan_depth": 9,
+      "target_plan_depth": 8
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.75,
+      "row_estimate_ratios": [
+        1.0,
+        2.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 2
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.8571428571428571,
+      "row_estimate_ratios": [
+        1.0,
+        190.5,
+        76262.0,
+        154.0,
+        2914.0,
+        20000.0
+      ],
+      "within_2x": 0.16666666666666666,
+      "within_10x": 0.16666666666666666,
+      "source_plan_depth": 5,
+      "target_plan_depth": 4
+    }
+  },
+  "mean_node_jaccard": 0.8080357142857143,
+  "mean_within_2x": 0.38333333333333336,
+  "mean_within_10x": 0.4041666666666667,
+  "phase_times": {
+    "A_load_source": 21.030813083052635,
+    "B_baseline_explain": 0.01907958392985165,
+    "C_collect_stats": 0.6051431660307571,
+    "D_build_target": 13.71580287499819,
+    "E_replay_explain": 0.1731453329557553
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": false,
+  "failure_reason": "mean_within_2x 0.383 < threshold 0.5"
+}

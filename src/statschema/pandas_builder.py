@@ -260,9 +260,32 @@ def _generate_column(
     values: Optional[list[Any]] = g.values if g else None
     weights: Optional[list[float]] = g.weights if g else None
 
-    # MCV from stats (when no explicit values list is set)
+    # Detect near-unique columns from stats (n_distinct ≥ 95 % of rows).
+    # These are effective PKs: force a sequential unique sequence regardless
+    # of whether the schema has an explicit unique/sequential rule.
+    _is_unique_col = (
+        (g is not None and (g.unique or g.distribution == "sequential"))
+        or (
+            col_stats is not None
+            and col_stats.n_distinct is not None
+            and col_stats.n_distinct >= n * 0.95
+        )
+    )
+
+    # MCV from stats (when no explicit values list is set).
+    # Skip MCVs for unique/sequential columns — their whole purpose is to
+    # produce distinct values, and MCVs from a GROUP-BY on a PK column only
+    # capture an arbitrary 10-element subset which would make every generated
+    # row collide with one of those 10 values.
+    # Also skip MCVs for FK-constrained columns: the target must sample from the
+    # full FK range [1, fk_max] to produce the same distinct-value count as the
+    # source.  Using MCVs would limit the target to at most len(MCVs) distinct
+    # values, causing autovacuum ANALYZE to record the wrong n_distinct and
+    # producing divergent join-cardinality estimates in Phase E.
     if (
         values is None
+        and fk_max is None
+        and not _is_unique_col
         and col_stats is not None
         and col_stats.most_common_values
         and ctype != "boolean"
@@ -308,8 +331,13 @@ def _generate_column(
         chosen = rng.choice(values, size=n, p=probs)
         return _apply_nulls(chosen, col, g, col_stats, n, rng)
 
-    # ── Sequential ────────────────────────────────────────────────────────
-    if dist == "sequential":
+    # ── Sequential (explicit rule, or stats-inferred unique column) ───────
+    if dist == "sequential" or (
+        _is_unique_col
+        and ctype in ("integer", "long")
+        and dist == "auto"
+        and values is None
+    ):
         start = int(min_val) if min_val is not None else 1
         arr = np.arange(start, start + n, dtype=np.int64)
         return _apply_nulls(arr, col, g, col_stats, n, rng)
@@ -353,7 +381,7 @@ def _generate_column(
         return _generate_temporal(ctype, n, rng, g, min_val, max_val, col, col_stats)
 
     # ── String ────────────────────────────────────────────────────────────
-    if ctype == "string":
+    if ctype in ("string", "varchar", "char", "text", "clob", "nvarchar", "nchar"):
         return _generate_string(col, n, rng, g, col_stats)
 
     # ── Binary ────────────────────────────────────────────────────────────
@@ -447,7 +475,6 @@ def _generate_string(
     if fp:
         result: list[str | None] = _generate_pattern(fp, n, rng)
     elif max_len:
-        # Fill to length with random lowercase alpha
         chars = np.array(list("abcdefghijklmnopqrstuvwxyz"))
         result = [
             "".join(chars[rng.integers(0, 26, size=min(max_len, 32))].tolist())
@@ -460,6 +487,29 @@ def _generate_string(
 
     if max_len:
         result = [s[:max_len] if s else s for s in result]
+
+    # Adjust string lengths to match the source's avg_width_bytes (from pg_stats).
+    # Postgres reports avg_width as storage bytes = 1 (varlena header) + char length
+    # for strings < 127 bytes, so we subtract 1 to get the target character length.
+    # This ensures physical page density (relpages) matches the source, which keeps
+    # the query planner's join-order cost model consistent between source and target.
+    if col_stats and col_stats.avg_width_bytes:
+        target_str_len = max(1, int(col_stats.avg_width_bytes) - 1)
+        if max_len:
+            target_str_len = min(target_str_len, max_len)
+        chars_arr = np.array(list("abcdefghijklmnopqrstuvwxyz"))
+        adjusted: list[str | None] = []
+        for s in result:
+            if s is None:
+                adjusted.append(None)
+            elif len(s) < target_str_len:
+                pad = "".join(
+                    chars_arr[rng.integers(0, 26, size=target_str_len - len(s))].tolist()
+                )
+                adjusted.append(s + pad)
+            else:
+                adjusted.append(s[:target_str_len])
+        result = adjusted
 
     return _apply_nulls(result, col, g, col_stats, n, rng)
 
@@ -663,6 +713,7 @@ def build_rows_from_canonical(
     stats: Any | None = None,       # Optional[TableStats]
     seed: int | None = None,
     parent_row_counts: dict[str, int] | None = None,
+    fk_range_overrides: dict[str, tuple[int, int]] | None = None,
 ) -> pd.DataFrame:
     """
     Generate a ``pd.DataFrame`` of synthetic rows for a canonical table.
@@ -683,27 +734,19 @@ def build_rows_from_canonical(
         ``{table_name: row_count}`` for all parent tables.  FK integer
         columns are constrained to ``[1, parent_row_count]`` so generated
         child keys always reference valid parent rows.
+    fk_range_overrides
+        ``{col_name: (min_val, max_val)}`` — override the generation range
+        for specific FK columns.  Derived from query predicates via
+        ``resolve_fk_generation_ranges``; constrains synthetic fact-table
+        FK values to the same data window as the real workload.
 
     Returns
     -------
     pd.DataFrame with one column per canonical column.
-
-    Example
-    -------
-    ::
-
-        from statschema import parse_ddl, load_stats
-        from statschema import build_rows_from_canonical
-
-        tables = parse_ddl(open("schema.yaml").read(), dialect="yaml")
-        stats  = load_stats("stats.yaml")
-
-        df = build_rows_from_canonical(
-            tables[0], rows=100_000,
-            stats=stats.table_stats(tables[0].name),
-        )
-        df.to_sql("orders", conn, if_exists="replace", index=False)
     """
+    from dataclasses import replace as _dc_replace
+    from .model import GenerationRule
+
     rng = np.random.default_rng(seed)
     fk_ranges = _build_fk_ranges(table, parent_row_counts)
 
@@ -711,7 +754,21 @@ def build_rows_from_canonical(
     for col in table.columns:
         col_stats = stats.column_stats(col.name) if stats else None
         fk_max    = fk_ranges.get(col.name)
-        data[col.name] = _generate_column(col, rows, rng, col_stats=col_stats, fk_max=fk_max)
+
+        # Apply predicate-derived FK range override when present.
+        effective_col = col
+        effective_fk_max = fk_max
+        if fk_range_overrides and col.name in fk_range_overrides:
+            ov_min, ov_max = fk_range_overrides[col.name]
+            old_gen = col.generation
+            if old_gen is not None:
+                new_gen = _dc_replace(old_gen, min_value=ov_min, max_value=ov_max)
+            else:
+                new_gen = GenerationRule(min_value=ov_min, max_value=ov_max)
+            effective_col = _dc_replace(col, generation=new_gen)
+            effective_fk_max = None  # generation rule takes precedence
+
+        data[col.name] = _generate_column(effective_col, rows, rng, col_stats=col_stats, fk_max=effective_fk_max)
 
     df = pd.DataFrame(data)
 

@@ -12,7 +12,7 @@ All container commands use **Podman**.
 
 | Database | Page | Method | Arch | Ports |
 |----------|------|--------|------|-------|
-| **PostgreSQL** | [postgres.md](databases/postgres.md) | Podman (native ARM64) | arm64 | 5414 / 5416 |
+| **PostgreSQL** | [postgres.md](databases/postgres.md) | Podman (native ARM64) | arm64 | 5414 / 5416 / 5418 |
 | **Neon** | [neon.md](databases/neon.md) | Podman + Neon Local (cloud proxy) | any | 55433 |
 | **CockroachDB** | [cockroachdb.md](databases/cockroachdb.md) | Podman (native ARM64) | arm64 | 26257 (single) / 26267–26269 (multi-region) |
 | **MySQL** | [mysql.md](databases/mysql.md) | Podman (native ARM64 for 8.x) | arm64 / x86_64 | 3357 / 3384 |

@@ -1,0 +1,141 @@
+# TPC-C representative query workload — 4 analytical queries for identity testing
+#
+# TPC-C is a multi-user OLTP benchmark.  Its primary workload is 5 transaction types
+# that are all point lookups — not interesting for plan divergence testing.  These 4
+# queries are analytical READ queries designed to stress the optimizer's ability to
+# handle TPC-C's defining characteristic: composite three-column FK keys.
+#
+# At SF = 1:
+#   item        — 100,000 rows  (fixed catalogue)
+#   warehouse   —      1 row    (tiny dimension)
+#   district    —     10 rows   (tiny dimension)
+#   customer    — 30,000 rows   (medium, composite FK target)
+#   orders      — 30,000 rows   (composite FK: w_id + d_id + c_id)
+#   new_order   —  9,000 rows   (subset of orders)
+#   order_line  — 300,000 rows  (composite FK: w_id + d_id + o_id)
+#   stock       — 100,000 rows  (composite FK: w_id + i_id)
+#   history     — 30,000 rows   (composite FK: w_id + d_id + c_id)
+#
+# These four queries expose the key estimation challenges in TPC-C:
+#   Q1 (order_summary)      — GROUP BY composite FK key; GROUP output should have 10 rows
+#                              tests: n_distinct accuracy on a composite FK pair (w_id, d_id)
+#   Q2 (customer_balance)   — district × customer join via composite FK, GROUP to 10 groups
+#                              tests: join cardinality when the composite key has 10 distinct combos
+#   Q3 (stock_report)       — range predicate on s_quantity + GROUP BY s_w_id (1 value)
+#                              tests: range selectivity on a hot integer column
+#   Q4 (order_line_detail)  — 3-table join: customer × orders × order_line (composite FKs each)
+#                              tests: compounding composite-key cardinality estimation
+#
+# SQL is written in ANSI SQL compatible with PostgreSQL.
+# TPC Benchmark™ C is copyright © TPC, all rights reserved.
+# statschema does not publish TPC-certified benchmark results.
+
+source_dialect: ansi
+queries:
+
+  # ── Q1: Order Summary per District ────────────────────────────────────────
+  # Scans the full orders table (30 K rows) and groups by the composite FK
+  # (o_w_id, o_d_id).  At SF=1 the output should have exactly 10 rows (1 warehouse
+  # × 10 districts).  If stats do not correctly capture n_distinct on the
+  # composite pair the planner mis-estimates GROUP BY output cardinality —
+  # the same failure mode as Q3 in TPC-B but driven by a two-column key.
+  - id: tpcc-q01
+    source_dialect: ansi
+    description: "Order summary per district — GROUP BY composite FK, tests 2-column group cardinality"
+    sql: |
+      SELECT o_w_id,
+             o_d_id,
+             COUNT(*)             AS order_count,
+             SUM(o_ol_cnt)        AS total_line_items,
+             MAX(o_entry_d)       AS latest_order_ts
+      FROM orders
+      GROUP BY o_w_id, o_d_id
+      ORDER BY o_w_id, o_d_id
+    tables: [orders]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q2: Customer Balance by District ──────────────────────────────────────
+  # Hash join between district (10 rows, build) and customer (30 K rows, probe)
+  # via the composite key (w_id, d_id).  The plan must use district as the build
+  # side; swapping sides would be ~3,000× more expensive.
+  # The GROUP BY output has 10 rows (one per district), each aggregating 3,000
+  # customers.  If the FK join cardinality is wrong, the planner may overestimate
+  # the aggregate input and pick a sort-based aggregate over a hash aggregate.
+  - id: tpcc-q02
+    source_dialect: ansi
+    description: "Customer balance by district — composite-key join, tests join side and aggregate cost"
+    sql: |
+      SELECT d.d_w_id,
+             d.d_id,
+             d.d_name,
+             COUNT(c.c_id)        AS customer_count,
+             AVG(c.c_balance)     AS avg_balance,
+             SUM(c.c_ytd_payment) AS total_ytd_payment
+      FROM district d
+      JOIN customer c
+        ON d.d_w_id = c.c_w_id
+       AND d.d_id   = c.c_d_id
+      GROUP BY d.d_w_id, d.d_id, d.d_name
+      ORDER BY d.d_w_id, d.d_id
+    tables: [district, customer]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q3: Stock Level Report ─────────────────────────────────────────────────
+  # Scans the full stock table (100 K rows) with a range predicate on s_quantity,
+  # then groups by s_w_id (1 distinct value at SF=1 → 1 output row).
+  # Tests two distinct things:
+  #   (a) Range selectivity on s_quantity (uniform in [1, 100] → ~19% below 20).
+  #   (b) n_distinct on s_w_id — at SF=1 there is exactly 1 warehouse; the planner
+  #       must know the GROUP BY collapses to 1 row to avoid over-costing aggregation.
+  - id: tpcc-q03
+    source_dialect: ansi
+    description: "Stock level by warehouse — range + GROUP BY, tests range selectivity and FK n_distinct"
+    sql: |
+      SELECT s_w_id,
+             COUNT(CASE WHEN s_quantity < 20 THEN 1 END)  AS low_stock_count,
+             COUNT(CASE WHEN s_quantity >= 20 THEN 1 END) AS ok_stock_count,
+             AVG(s_quantity)                              AS avg_quantity
+      FROM stock
+      GROUP BY s_w_id
+      ORDER BY s_w_id
+    tables: [stock]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q4: Order Line Detail (3-table chain) ─────────────────────────────────
+  # Joins customer (30 K), orders (30 K), and order_line (300 K) through two
+  # levels of composite FK.  This is the TPC-C equivalent of TPC-H Q03: a three-
+  # table join where correct join ordering requires accurate intermediate-result
+  # cardinality estimates at each step.
+  # Expected result: 10 rows (one per warehouse × district combination).
+  # An estimator that misses the composite-key constraint will over-estimate
+  # intermediate rows and may choose an incorrect join order.
+  - id: tpcc-q04
+    source_dialect: ansi
+    description: "Order line detail — customer × orders × order_line 3-table composite-FK chain"
+    sql: |
+      SELECT c.c_w_id,
+             c.c_d_id,
+             COUNT(ol.ol_o_id)    AS line_count,
+             SUM(ol.ol_amount)    AS total_revenue,
+             AVG(ol.ol_quantity)  AS avg_qty
+      FROM customer c
+      JOIN orders o
+        ON c.c_w_id = o.o_w_id
+       AND c.c_d_id = o.o_d_id
+       AND c.c_id   = o.o_c_id
+      JOIN order_line ol
+        ON o.o_w_id = ol.ol_w_id
+       AND o.o_d_id = ol.ol_d_id
+       AND o.o_id   = ol.ol_o_id
+      GROUP BY c.c_w_id, c.c_d_id
+      ORDER BY c.c_w_id, c.c_d_id
+    tables: [customer, orders, order_line]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0

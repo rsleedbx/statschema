@@ -1,0 +1,182 @@
+{
+  "schema": "tpch",
+  "dialect": "postgres",
+  "sf": 0.1,
+  "source_schema": "tpch_src",
+  "target_schema": "tpch_tgt",
+  "source_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "target_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.1040521269424943
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.1621893213639714,
+        1.1621893213639714,
+        1.1621893213639714,
+        1.1622316906503738,
+        1.1726276093874601,
+        1.0090045639570742,
+        1.0090045639570742,
+        1.0090329965659683,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 8,
+      "target_plan_depth": 8
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.4617332583005065
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.8571428571428571,
+      "row_estimate_ratios": [
+        1.0,
+        2.0,
+        20000.0,
+        852.0,
+        3050.0,
+        20000.0
+      ],
+      "within_2x": 0.3333333333333333,
+      "within_10x": 0.3333333333333333,
+      "source_plan_depth": 5,
+      "target_plan_depth": 4
+    }
+  },
+  "mean_node_jaccard": 0.9642857142857143,
+  "mean_within_2x": 0.8333333333333334,
+  "mean_within_10x": 0.8333333333333334,
+  "phase_times": {
+    "A_load_source": 21.893170457915403,
+    "A5_source_extended_stats": 0.5434198749717325,
+    "A6_fk_range_inference": 0.005664375028572977,
+    "B_baseline_explain": 0.01334341592155397,
+    "C_collect_stats": 7.516377165913582,
+    "D_build_target": 26.589362292084843,
+    "D5_target_extended_stats": 0.4246720419032499,
+    "E_replay_explain": 0.032801041030324996
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "injected"
+}

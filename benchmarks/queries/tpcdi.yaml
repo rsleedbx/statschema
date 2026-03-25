@@ -1,0 +1,142 @@
+# TPC-DI representative query workload — 4 analytical queries for identity testing
+#
+# TPC-DI is a data-integration benchmark (ETL pipeline), but its destination is a
+# fully normalised data warehouse with star-schema fact tables.  These 4 queries
+# target the DW read side: aggregations and joins over the fact tables
+# (DimTrade, FactMarketHistory) and their dimensions (DimBroker, DimCustomer,
+# DimAccount, Financial).
+#
+# At SF = 5 (recommended run size for a ~40 s test):
+#   DimDate           —  3,652 rows  (fixed calendar)
+#   DimTime           — 86,400 rows  (fixed: one row per second)
+#   DimBroker         —    500 rows
+#   DimCustomer       —  4,750 rows
+#   DimAccount        —  7,500 rows
+#   DimCompany        —  2,000 rows
+#   DimSecurity       —  3,425 rows
+#   Financial         — 16,000 rows
+#   DimTrade          — 230,000 rows  (largest scaling table)
+#   FactMarketHistory — 285,000 rows
+#   FactWatches       — 25,000 rows
+#   FactHoldings      — 15,000 rows
+#   FactCashBalances  — 12,500 rows
+#
+# These four queries expose the key estimation challenges in TPC-DI:
+#   Q1 (broker_volume)       — DimTrade × DimBroker; tests 460× FK fan-out (500 brokers, 230K trades)
+#   Q2 (market_history)      — FactMarketHistory GROUP BY security; tests per-FK-group estimate
+#   Q3 (customer_portfolio)  — 3-table star join: DimCustomer → DimAccount → DimTrade
+#                              tests: compounding FK cardinality across a star schema
+#   Q4 (company_financials)  — Financial GROUP BY company; simple aggregate, tests baseline
+#
+# SQL is written in ANSI SQL compatible with PostgreSQL.
+# TPC Benchmark™ DI is copyright © TPC, all rights reserved.
+# statschema does not publish TPC-certified benchmark results.
+
+source_dialect: ansi
+queries:
+
+  # ── Q1: Trade Volume by Broker ────────────────────────────────────────────
+  # Hash join between DimBroker (build, 500 rows) and DimTrade (probe, 230 K rows).
+  # The planner should always use DimBroker as the build side; each broker handles
+  # roughly 460 trades on average at SF=5.  If stats overstate DimBroker rows or
+  # understate DimTrade rows the planner may swap join sides or use a nested-loop.
+  # The within_2x score here measures whether the join cardinality estimate for the
+  # 230K-row probe table is within 2× of the actual result.
+  - id: tpcdi-q01
+    source_dialect: ansi
+    description: "Trade volume by broker — DimBroker × DimTrade join, tests FK fan-out and join side"
+    sql: |
+      SELECT b."SK_BrokerID",
+             b."LastName",
+             b."FirstName",
+             COUNT(t."TradeID")                    AS trade_count,
+             SUM(t."TradePrice" * t."Quantity")    AS total_volume,
+             AVG(t."Commission")                   AS avg_commission
+      FROM "DimBroker" b
+      JOIN "DimTrade" t ON b."SK_BrokerID" = t."SK_BrokerID"
+      GROUP BY b."SK_BrokerID", b."LastName", b."FirstName"
+      ORDER BY total_volume DESC
+      LIMIT 20
+    tables: [DimBroker, DimTrade]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q2: Market History by Security ───────────────────────────────────────
+  # Full scan of FactMarketHistory (285 K rows at SF=5) grouped by SK_SecurityID
+  # (3,425 distinct securities).  Each security has ~83 price points on average.
+  # This tests the planner's estimate of GROUP BY output cardinality — similar
+  # to TPC-B Q1 but with thousands of groups instead of one.
+  # The histogram for SK_SecurityID drives the estimate; if the collector
+  # captures it correctly within_2x should be high for this query.
+  - id: tpcdi-q02
+    source_dialect: ansi
+    description: "Market history by security — aggregate over 285 K rows, tests multi-group FK cardinality"
+    sql: |
+      SELECT "SK_SecurityID",
+             COUNT(*)                            AS price_points,
+             MAX("ClosePrice")                   AS high,
+             MIN("ClosePrice")                   AS low,
+             AVG("ClosePrice")                   AS avg_close
+      FROM "FactMarketHistory"
+      GROUP BY "SK_SecurityID"
+      ORDER BY price_points DESC
+      LIMIT 20
+    tables: [FactMarketHistory]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q3: Customer Portfolio (3-table star join) ────────────────────────────
+  # Star join: DimCustomer (4,750) → DimAccount (7,500) → DimTrade (230,000).
+  # The FK chain is DimCustomer.SK_CustomerID → DimAccount.SK_CustomerID,
+  # then DimAccount.SK_AccountID → DimTrade.SK_AccountID.
+  # Expected result: one row per customer (up to 4,750 rows).
+  # This is the TPC-DI equivalent of TPC-H Q03 — a three-level FK join where
+  # correct join ordering requires accurate intermediate-cardinality estimates.
+  # The ratio of DimTrade (230K) to DimCustomer (4,750) is ~48×, so cardinality
+  # errors compound rapidly across the two join levels.
+  - id: tpcdi-q03
+    source_dialect: ansi
+    description: "Customer portfolio — DimCustomer × DimAccount × DimTrade star join, tests 3-level FK chain"
+    sql: |
+      SELECT dc."SK_CustomerID",
+             dc."LastName",
+             dc."FirstName",
+             COUNT(dt."TradeID")                 AS trade_count,
+             SUM(dt."TradePrice" * dt."Quantity") AS portfolio_value
+      FROM "DimCustomer" dc
+      JOIN "DimAccount" da  ON dc."SK_CustomerID" = da."SK_CustomerID"
+      JOIN "DimTrade"   dt  ON da."SK_AccountID"  = dt."SK_AccountID"
+      GROUP BY dc."SK_CustomerID", dc."LastName", dc."FirstName"
+      ORDER BY trade_count DESC
+      LIMIT 20
+    tables: [DimCustomer, DimAccount, DimTrade]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q4: Company Financial Summary ────────────────────────────────────────
+  # Aggregate Financial (16,000 rows at SF=5) by SK_CompanyID (2,000 distinct).
+  # Each company has ~8 quarterly reports.  This is the simplest of the four
+  # queries — a full table scan with GROUP BY on a FK column — and serves as the
+  # baseline: it should achieve within_2x = 1.0 if statistics are collected
+  # correctly, because the distribution is close to uniform (no skew, no
+  # multi-column correlations).
+  - id: tpcdi-q04
+    source_dialect: ansi
+    description: "Company financial summary — Financial GROUP BY company, baseline aggregate test"
+    sql: |
+      SELECT "SK_CompanyID",
+             COUNT(*)                            AS quarterly_reports,
+             AVG("FI_REVENUE")                   AS avg_revenue,
+             AVG("FI_NET_EARN")                  AS avg_earnings,
+             AVG("FI_MARGIN")                    AS avg_margin
+      FROM "Financial"
+      GROUP BY "SK_CompanyID"
+      ORDER BY avg_revenue DESC
+      LIMIT 20
+    tables: [Financial]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0

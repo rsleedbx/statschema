@@ -1,0 +1,144 @@
+{
+  "schema": "tpcds",
+  "dialect": "db2",
+  "sf": 0.01,
+  "source_schema": "db2tpcds_src",
+  "target_schema": "db2tpcds_tgt",
+  "source_row_counts": {
+    "date_dim": 0,
+    "time_dim": 0,
+    "customer_demographics": 0,
+    "income_band": 0,
+    "reason": 0,
+    "ship_mode": 0,
+    "item": 0,
+    "warehouse": 0,
+    "store": 0,
+    "call_center": 0,
+    "customer_address": 0,
+    "catalog_page": 0,
+    "web_site": 0,
+    "web_page": 0,
+    "household_demographics": 0,
+    "promotion": 0,
+    "inventory": 0,
+    "customer": 0,
+    "store_sales": 0,
+    "catalog_sales": 0,
+    "web_sales": 0,
+    "store_returns": 0,
+    "catalog_returns": 0,
+    "web_returns": 0
+  },
+  "target_row_counts": {
+    "date_dim": 0,
+    "time_dim": 0,
+    "customer_demographics": 0,
+    "income_band": 0,
+    "reason": 0,
+    "ship_mode": 0,
+    "item": 0,
+    "warehouse": 0,
+    "store": 0,
+    "call_center": 0,
+    "customer_address": 0,
+    "catalog_page": 0,
+    "web_site": 0,
+    "web_page": 0,
+    "household_demographics": 0,
+    "promotion": 0,
+    "inventory": 0,
+    "customer": 0,
+    "store_sales": 0,
+    "catalog_sales": 0,
+    "web_sales": 0,
+    "store_returns": 0,
+    "catalog_returns": 0,
+    "web_returns": 0
+  },
+  "query_metrics": {
+    "tpcds-q01": {
+      "query_id": "tpcds-q01",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcds-q02": {
+      "query_id": "tpcds-q02",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcds-q03": {
+      "query_id": "tpcds-q03",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    },
+    "tpcds-q04": {
+      "query_id": "tpcds-q04",
+      "source_node_types": [
+        "Unknown"
+      ],
+      "target_node_types": [
+        "Unknown"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 0,
+      "target_plan_depth": 0
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 43.064654457964934,
+    "B_baseline_explain": 0.1729217090178281,
+    "C_collect_stats": 0.39453412499278784,
+    "D_build_target": 93.37989524996374,
+    "E_replay_explain": 0.21433645801153034
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

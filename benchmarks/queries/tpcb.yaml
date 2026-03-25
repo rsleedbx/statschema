@@ -1,0 +1,127 @@
+# TPC-B representative query workload — 4 queries for identity testing
+#
+# TPC-B is an OLTP benchmark but its schema creates extreme FK fan-out ratios
+# that make it a good stress test for cardinality estimation with skewed table sizes.
+#
+# At SF = 1:
+#   branch   —      1 row    (tiny dimension)
+#   teller   —     10 rows   (tiny dimension)
+#   account  — 100,000 rows  (hot OLTP table)
+#   history  — 100,000 rows  (append-only audit)
+#
+# These four queries are not the TPC-B transaction (which is a point lookup).
+# They are analytical read queries that expose optimizer sensitivity to the
+# extreme size imbalance and FK cardinality:
+#
+#   Q1 (account_by_branch)  — full account scan + GROUP BY a FK column with 1–N distinct values
+#                              tests: whether planner knows there are only [SF] distinct bid values
+#   Q2 (teller_activity)    — history × teller hash join (10-row build side, 100K probe)
+#                              tests: join cardinality with tiny dimension; planner must not flip sides
+#   Q3 (account_history)    — account × history self-join on aid (100K × 100K)
+#                              tests: large symmetric join — the hardest cardinality problem for TPC-B
+#   Q4 (recent_activity)    — history time-range filter + GROUP BY bid
+#                              tests: timestamp range selectivity from collected histogram bounds
+#
+# SQL is written in ANSI SQL compatible with PostgreSQL.
+# TPC Benchmark™ B is copyright © TPC, all rights reserved.
+# statschema does not publish TPC-certified benchmark results.
+
+source_dialect: ansi
+queries:
+
+  # ── Q1: Account Balance by Branch ─────────────────────────────────────────
+  # Full scan of account (100 K rows) aggregated by bid.
+  # At SF=1 there is only 1 distinct bid value; the planner should estimate
+  # exactly 1 GROUP BY group.  If stats do not correctly capture n_distinct(bid)
+  # the planner will mis-estimate aggregate output cardinality, affecting
+  # downstream decisions in any pipeline that uses this result as a subquery.
+  - id: tpcb-q01
+    source_dialect: ansi
+    description: "Account balance summary per branch — tests n_distinct on FK column"
+    sql: |
+      SELECT bid,
+             COUNT(*)          AS num_accounts,
+             SUM(abalance)     AS total_balance,
+             AVG(abalance)     AS avg_balance
+      FROM account
+      GROUP BY bid
+      ORDER BY bid
+    tables: [account]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q2: Teller Activity Report ────────────────────────────────────────────
+  # Hash join between history (100 K rows, probe) and teller (10 rows, build).
+  # The correct plan always uses teller as the inner/build side.
+  # If stats overstate teller row count OR understate history rows, the planner
+  # may swap sides or choose a nested-loop join, producing a more expensive plan.
+  # This query exposes the hardest FK-estimation problem in TPC-B:
+  #   history.tid references teller.tid — there are only 10 tellers, but
+  #   100 K history rows.  Stats must correctly convey this 10,000× fan-out.
+  - id: tpcb-q02
+    source_dialect: ansi
+    description: "Teller activity — history × teller join, tests 10 000× FK fan-out estimation"
+    sql: |
+      SELECT t.tid,
+             t.bid,
+             COUNT(h.aid)      AS txn_count,
+             SUM(h.delta)      AS net_delta
+      FROM teller t
+      JOIN history h ON t.tid = h.tid
+      GROUP BY t.tid, t.bid
+      ORDER BY txn_count DESC
+    tables: [teller, history]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q3: Account Transaction Detail ────────────────────────────────────────
+  # Large symmetric join: account × history both have 100 K rows.
+  # After joining on aid, every account has ~1 history row on average
+  # (at SF=1, 100 K accounts, 100 K history → 1:1 join).
+  # The planner's cardinality estimate for the join output determines
+  # whether it picks a hash join or a merge join.
+  # This query is analogous to TPC-H Q03 — it is the single query where
+  # three-column join estimation is most likely to diverge between source and target.
+  - id: tpcb-q03
+    source_dialect: ansi
+    description: "Account transaction detail — 100 K × 100 K join, tests symmetric join cardinality"
+    sql: |
+      SELECT a.aid,
+             a.bid,
+             a.abalance,
+             COUNT(h.delta)    AS num_transactions,
+             SUM(h.delta)      AS total_delta
+      FROM account a
+      JOIN history h ON a.aid = h.aid
+      GROUP BY a.aid, a.bid, a.abalance
+      ORDER BY num_transactions DESC
+      LIMIT 20
+    tables: [account, history]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q4: Recent Transaction Activity ───────────────────────────────────────
+  # Filter history by mtime (timestamp range predicate), then GROUP BY bid.
+  # mtime is generated uniformly in [2020-01-01, 2025-12-31].
+  # Selecting 2024-01-01 onwards covers ~1/6 of the range ≈ 17% of rows.
+  # This tests whether the collected histogram for mtime correctly conveys
+  # the selectivity of a date-range predicate — the same diagnostic as TPC-H Q06
+  # (selective range scan).
+  - id: tpcb-q04
+    source_dialect: ansi
+    description: "Recent transaction activity — timestamp range + GROUP BY, tests date histogram selectivity"
+    sql: |
+      SELECT bid,
+             COUNT(*)          AS recent_txn_count,
+             SUM(ABS(delta))   AS total_volume
+      FROM history
+      WHERE mtime >= CAST('2024-01-01' AS TIMESTAMP)
+      GROUP BY bid
+      ORDER BY recent_txn_count DESC
+    tables: [history]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0

@@ -1123,16 +1123,20 @@ tables:
   columns:
     - name: ss_sold_date_sk
       type: integer
+      references: [date_dim, d_date_sk]
       generation: {min_value: 36530, max_value: 73049}
     - name: ss_sold_time_sk
       type: integer
+      references: [time_dim, t_time_sk]
       generation: {min_value: 0, max_value: 86399}
     - name: ss_item_sk
       type: integer
       not_null: true
       primary_key: true
+      references: [item, i_item_sk]
     - name: ss_customer_sk
       type: integer
+      references: [customer, c_customer_sk]
     - name: ss_cdemo_sk
       type: integer
       generation: {min_value: 1, max_value: 1920800}

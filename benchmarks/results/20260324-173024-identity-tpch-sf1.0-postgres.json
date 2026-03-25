@@ -1,0 +1,183 @@
+{
+  "schema": "tpch",
+  "dialect": "postgres",
+  "sf": 1.0,
+  "source_schema": "tpch_src_sf1",
+  "target_schema": "tpch_tgt_sf1",
+  "source_row_counts": {
+    "region": 5,
+    "part": 200000,
+    "nation": 25,
+    "supplier": 10000,
+    "customer": 150000,
+    "partsupp": 800000,
+    "orders": 1500000,
+    "lineitem": 6000000
+  },
+  "target_row_counts": {
+    "region": 5,
+    "part": 200000,
+    "nation": 25,
+    "supplier": 10000,
+    "customer": 150000,
+    "partsupp": 800000,
+    "orders": 1500000,
+    "lineitem": 6000000
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        6666.666666666667,
+        6857.142857142857,
+        6666.666666666667,
+        6666.666666666667,
+        1.6878638421063963
+      ],
+      "within_2x": 0.2,
+      "within_10x": 0.2,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Merge Join",
+        "Gather Merge",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Materialize",
+        "Gather Merge",
+        "Sort",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.625,
+      "row_estimate_ratios": [
+        1.0,
+        6.748960327414351,
+        6.748960327414351,
+        29828.871951944024,
+        1.463466413181242,
+        1.1616180205381132,
+        49.39762229011005,
+        4.083004490406858,
+        53.39059736018506,
+        2.7213914647764237,
+        776.9737134688692,
+        776.9737134688692
+      ],
+      "within_2x": 0.25,
+      "within_10x": 0.5833333333333334,
+      "source_plan_depth": 9,
+      "target_plan_depth": 8
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.75,
+      "row_estimate_ratios": [
+        1.0,
+        2.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 2
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        4.1143583227446,
+        3.7765471061884246,
+        30327.0,
+        30327.0
+      ],
+      "within_2x": 0.42857142857142855,
+      "within_10x": 0.7142857142857143,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    }
+  },
+  "mean_node_jaccard": 0.84375,
+  "mean_within_2x": 0.46964285714285714,
+  "mean_within_10x": 0.6244047619047619,
+  "phase_times": {
+    "A_load_source": 212.38139787490945,
+    "B_baseline_explain": 0.07656783296260983,
+    "C_collect_stats": 7.282544250017963,
+    "D_build_target": 137.63308033300564,
+    "E_replay_explain": 0.01587054191622883
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": false,
+  "failure_reason": "mean_within_2x 0.470 < threshold 0.5"
+}

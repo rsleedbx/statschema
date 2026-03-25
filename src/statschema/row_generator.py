@@ -302,6 +302,17 @@ def _gen_value(
             d    = _rand_date(base, end, rng)
             return datetime(d.year, d.month, d.day,
                             rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59))
+        if ctype in ("time", "timetz"):
+            def _time_to_s(v: Any) -> int:
+                p = str(v).split(":")
+                return int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2]) if len(p) == 3 else 0
+            lo_s = _time_to_s(g.min_value)
+            hi_s = _time_to_s(g.max_value)
+            s = rng.randint(max(0, lo_s), max(lo_s + 1, hi_s))
+            h, rem = divmod(s, 3600)
+            m, sec = divmod(rem, 60)
+            tz = "+00:00" if ctype == "timetz" else ""
+            return f"{h:02d}:{m:02d}:{sec:02d}{tz}"
 
     # ── 5b. format_pattern for strings ──────────────────────────────────────
     if g is not None and g.format_pattern and ctype == "string":
@@ -335,6 +346,12 @@ def _gen_value(
         d = base + timedelta(days=rng.randint(0, 8000))
         return datetime(d.year, d.month, d.day,
                         rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59))
+    if ctype in ("time", "timetz"):
+        s = rng.randint(0, 86399)
+        h, rem = divmod(s, 3600)
+        m, sec = divmod(rem, 60)
+        tz = "+00:00" if ctype == "timetz" else ""
+        return f"{h:02d}:{m:02d}:{sec:02d}{tz}"
     # string / binary / unknown — try format_pattern first, then random chars
     if g is not None and g.format_pattern:
         fn = _FORMAT_PATTERN_FN.get(g.format_pattern)

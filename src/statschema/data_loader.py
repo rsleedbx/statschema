@@ -161,12 +161,27 @@ def _effective_batch_size(config: BatchConfig, n_cols: int) -> int:
     return min(config.max_rows, param_limited)
 
 
+def _nan_to_none(val: Any) -> Any:
+    """Convert NaN/Infinity floats (pandas null sentinels) to None (SQL NULL).
+
+    Covers both Python float and numpy scalar subclasses (numpy.float32/64 etc.),
+    which may not be instances of Python's built-in float in NumPy ≥ 2.
+    """
+    try:
+        import math
+        if math.isnan(val) or math.isinf(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return val
+
+
 def _iter_rows(df: Any) -> Iterator[tuple]:
     """Yield rows as tuples from a pandas DataFrame, PySpark DataFrame, or iterable."""
     module = type(df).__module__.split(".")[0]
     if module == "pandas":
         for row in df.itertuples(index=False, name=None):
-            yield tuple(row)
+            yield tuple(_nan_to_none(v) for v in row)
     elif module == "pyspark":
         for row in df.toLocalIterator():
             yield tuple(row)
@@ -219,6 +234,30 @@ def _build_multi_row_sql(
     return f"INSERT INTO {qtable} ({qcols}) VALUES {', '.join(clauses)}", params
 
 
+_ORACLE_TIME_RE = __import__("re").compile(
+    r"^(\d{1,2}):(\d{2}):(\d{2})(\.\d+)?(\+\d{2}:\d{2}|Z)?$"
+)
+_ORACLE_ISO_DATE_RE = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _coerce_oracle_val(val: Any) -> Any:
+    """Convert Python values that oracledb cannot auto-bind to safe equivalents.
+
+    - "HH:MM:SS" strings → datetime.datetime (2000-01-01 anchor; Oracle TIME → TIMESTAMP)
+    - "YYYY-MM-DD" strings → datetime.date (NLS-safe)
+    """
+    if not isinstance(val, str):
+        return val
+    from datetime import date as _date, datetime as _dt
+    m = _ORACLE_TIME_RE.match(val)
+    if m:
+        h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return _dt(2000, 1, 1, h, mi, s)
+    if _ORACLE_ISO_DATE_RE.match(val):
+        return _date.fromisoformat(val)
+    return val
+
+
 def _build_oracle_all_sql(
     table: str,
     col_names: list[str],
@@ -234,7 +273,7 @@ def _build_oracle_all_sql(
         ph = ", ".join(f":v{r}_{c}" for c in range(n))
         into_parts.append(f"  INTO {qtable} ({qcols}) VALUES ({ph})")
         for c, val in enumerate(row):
-            params[f"v{r}_{c}"] = val
+            params[f"v{r}_{c}"] = _coerce_oracle_val(val)
     sql = "INSERT ALL\n" + "\n".join(into_parts) + "\nSELECT 1 FROM DUAL"
     return sql, params
 
@@ -513,10 +552,13 @@ def bulk_load_db2(  # pragma: no cover
     staging_dir: Optional[str] = None,
 ) -> int:
     """
-    Load df into IBM Db2 LUW via LOAD FROM … OF DEL FORMAT using ADMIN_CMD.
+    Load df into IBM Db2 LUW.
 
-    Requires SYSADM or DBADM authority to execute LOAD via ADMIN_CMD.
-    The staging file path must be accessible to the Db2 server process.
+    Tries SYSPROC.ADMIN_CMD('LOAD FROM … OF DEL …') first.  This is fast but
+    requires the staging file to be visible to the Db2 server process — it will
+    silently load 0 rows when the server runs in a container that cannot reach the
+    client's /tmp.  After the ADMIN_CMD call we verify the actual row count; if it
+    is less than expected we fall back to parameterised MULTI_ROW inserts.
     """
     cur = conn.cursor()
     if schema is None:
@@ -524,25 +566,59 @@ def bulk_load_db2(  # pragma: no cover
         row = cur.fetchone()
         schema = (row[0] if row else "").strip().upper()
 
-    full = f'"{schema}"."{table.upper()}"'
-    path = os.path.join(
+    full  = f'"{schema}"."{table.upper()}"'
+    rows  = list(_iter_rows(df))
+    count = len(rows)
+    path  = os.path.join(
         staging_dir or tempfile.gettempdir(), f"statschema_{table}.del"
     )
 
-    count = 0
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        for row in _iter_rows(df):
+        for row in rows:
             writer.writerow(["" if v is None else v for v in row])
-            count += 1
 
-    cur.execute(
-        f"CALL SYSPROC.ADMIN_CMD('LOAD FROM {path} OF DEL INSERT INTO {full} NONRECOVERABLE')"
+    try:
+        cur.execute(
+            f"CALL SYSPROC.ADMIN_CMD('LOAD FROM {path} OF DEL INSERT INTO {full} NONRECOVERABLE')"
+        )
+        conn.commit()
+        # Verify: ADMIN_CMD silently loads 0 rows when the server cannot find the
+        # file (e.g. running in a container with no host-filesystem mount).
+        cur.execute(f"SELECT COUNT(*) FROM {full}")
+        actual = cur.fetchone()[0]
+    except Exception as e:
+        logger.warning("bulk_load_db2 ADMIN_CMD failed (%s); falling back to MULTI_ROW", e)
+        actual = 0
+    finally:
+        os.unlink(path)
+
+    if actual >= count:
+        logger.info("bulk_load_db2[ADMIN_CMD]: loaded %d rows into %s", count, full)
+        return count
+
+    # Fallback: parameterised multi-row insert (works in all environments).
+    if actual > 0:
+        # Partial load — truncate before refilling so we don't double-count.
+        cur.execute(f"DELETE FROM {full}")
+        conn.commit()
+
+    logger.warning(
+        "bulk_load_db2: ADMIN_CMD loaded %d/%d rows (server cannot see client /tmp); "
+        "falling back to MULTI_ROW inserts",
+        actual, count,
+    )
+    paramstyle = _detect_paramstyle(conn)
+    cfg        = _DIALECT_BATCH_DEFAULTS.get("db2", BatchConfig())
+    batch_size = _effective_batch_size(cfg, len(col_names))
+    # DB2 DDL emitter creates tables with quoted uppercase names ("BRANCH").
+    # Pass the uppercased name so _build_multi_row_sql quotes it correctly.
+    inserted   = _insert_multi_row(
+        cur, table.upper(), col_names, iter(rows), "db2", paramstyle, batch_size
     )
     conn.commit()
-    os.unlink(path)
-    logger.info("bulk_load_db2: loaded %d rows into %s.%s", schema, table, count)
-    return count
+    logger.info("bulk_load_db2[MULTI_ROW]: loaded %d rows into %s", inserted, full)
+    return inserted
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +646,7 @@ def load_dataframe(
     conn        Live DBAPI2 connection to the target database.
     table       Target table name (must already exist).
     dialect     One of: "postgres", "mysql", "mariadb", "sqlserver", "oracle",
-                "db2", "sqlite", "cockroachdb", "neon", "databricks".
+                "db2", "sqlite", "cockroachdb", "neon", "lakebase", "databricks".
     strategy    LoadStrategy.SINGLETON / MULTI_ROW (default) / BULK_COPY.
     config      BatchConfig override.  None = use _DIALECT_BATCH_DEFAULTS[dialect].
     cols        Column names in insert order.  None = infer from df.
@@ -603,6 +679,94 @@ def load_dataframe(
             "df.write.format('delta').save(path) on the PySpark DataFrame directly."
         )
 
+    # oracledb connections expose connection.direct_path_load() — use it for Oracle.
+    # Direct path writes bypass the buffer cache and are ~10x faster than INSERT ALL.
+    # Data is implicitly committed; the same _coerce_oracle_val/_nan_to_none pipeline
+    # that feeds INSERT ALL is applied here to handle time strings, NaN, etc.
+    if type(conn).__module__.split(".")[0] == "oracledb":
+        _qcur = conn.cursor()
+        _qcur.execute(
+            "SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM dual"
+        )
+        schema_name = _qcur.fetchone()[0]
+
+        # direct_path_load is strict: Python int/float are rejected for VARCHAR2/CHAR
+        # columns.  Fetch column types and build a per-column coercion mask so
+        # non-string Python scalars are converted to str before the load.
+        _qcur.execute(
+            "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS "
+            "WHERE OWNER = :o AND TABLE_NAME = :t ORDER BY COLUMN_ID",
+            {"o": schema_name, "t": table.upper()},
+        )
+        _col_types = {row[0]: row[1] for row in _qcur.fetchall()}
+        _varchar_types = {"CHAR", "VARCHAR2", "NCHAR", "NVARCHAR2"}
+        _upper_cols = [c.upper() for c in col_names]
+        _is_varchar = [_col_types.get(c, "") in _varchar_types for c in _upper_cols]
+
+        def _coerce_oracle_dp(val: Any, varchar: bool) -> Any:
+            val = _coerce_oracle_val(_nan_to_none(val))
+            if varchar and val is not None and not isinstance(val, str):
+                return str(val)
+            return val
+
+        coerced = [
+            tuple(_coerce_oracle_dp(v, _is_varchar[i]) for i, v in enumerate(row))
+            for row in _iter_rows(df)
+        ]
+        conn.direct_path_load(
+            schema_name=schema_name,
+            table_name=table.upper(),
+            column_names=_upper_cols,
+            data=coerced,
+        )
+        inserted = len(coerced)
+        logger.info(
+            "load_dataframe: oracledb direct_path_load %d rows into %s",
+            inserted, table,
+        )
+        return inserted
+
+    # mssql-python connections expose cursor.bulkcopy() — use it unconditionally
+    # for SQL Server. This is 100x faster than parameterised MULTI_ROW inserts and
+    # doesn't require server-side file access (unlike BULK INSERT from CSV).
+    if type(conn).__module__.split(".")[0] == "mssql_python":
+        import mssql_python as _mssql  # type: ignore
+        # bulkcopy() creates its own internal connection using the stored
+        # connection_str, which still points to the original DATABASE (e.g. master).
+        # Query the current database and build a fresh connection string so the
+        # bulkcopy table lookup resolves to the correct schema.
+        _qcur = conn.cursor()
+        _qcur.execute("SELECT DB_NAME()")
+        current_db = _qcur.fetchone()[0]
+        tmpl = getattr(conn, "_mssql_conn_template", None)
+        if tmpl:
+            bc_conn_str = tmpl.format(db=current_db)
+        else:
+            # Fallback: replace Database= in the stored conn string, stripping
+            # reserved keywords (Driver=, APP=) that mssql_python.connect() rejects.
+            import re as _re
+            raw = conn.connection_str
+            raw = _re.sub(r"(?i)Driver=[^;]+;?", "", raw)
+            raw = _re.sub(r"(?i)APP=[^;]+;?", "", raw)
+            bc_conn_str = _re.sub(r"(?i)Database=[^;]+", f"Database={current_db}", raw)
+        bc_conn = _mssql.connect(bc_conn_str)
+        bc_conn.setautocommit(True)
+        bc_cur  = bc_conn.cursor()
+        bc_result = bc_cur.bulkcopy(
+            f"dbo.[{table}]",
+            _iter_rows(df),
+            column_mappings=col_names,
+            table_lock=True,
+            timeout=3600,
+        )
+        bc_conn.close()
+        inserted = bc_result.get("rows_copied", 0)
+        logger.info(
+            "load_dataframe: mssql-python bulkcopy %d rows into %s in %.2fs",
+            inserted, table, bc_result.get("elapsed_time", 0),
+        )
+        return inserted
+
     if strategy == LoadStrategy.SINGLETON:
         # Singleton streams: no materialisation — safe for any size table.
         inserted = _insert_singleton(
@@ -616,7 +780,7 @@ def load_dataframe(
         )
 
     elif strategy == LoadStrategy.BULK_COPY:
-        if dialect in ("postgres", "cockroachdb", "neon"):
+        if dialect in ("postgres", "cockroachdb", "neon", "lakebase"):
             inserted = bulk_load_postgres(conn, df, table, col_names)
         elif dialect in ("mysql", "mariadb"):
             inserted = bulk_load_mysql(conn, df, table, col_names, staging_dir=staging_dir)

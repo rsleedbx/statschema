@@ -1,0 +1,145 @@
+# TPC-E representative query workload — 4 queries for identity testing
+#
+# TPC-E models an online brokerage (EGen workload).  Its schema has ~35 tables
+# spanning reference data (exchange, sector, industry, trade_type), customer
+# hierarchy (customer → customer_account → trade), and market data
+# (security → daily_market, holding_summary).
+#
+# Two characteristics make TPC-E interesting for identity testing:
+#
+#   1. Extreme table size ratios: exchange has 4 rows, security has ~70 rows at
+#      SF=0.01, but daily_market has 125 K rows and trade has 33 K rows.
+#      The optimizer must correctly identify the tiny build side in every join.
+#
+#   2. The FK key for security uses a string symbol (s_symb) rather than an
+#      integer surrogate key.  MCV lists for string FK columns are harder to
+#      collect exhaustively; the planner may fall back to n_distinct estimation.
+#
+# At SF = 0.01:
+#   exchange         —       4  (fixed)
+#   security         —      68  (tiny dimension)
+#   trade_type       —       5  (fixed, tiny dimension)
+#   customer         —  10,000
+#   customer_account —  50,000
+#   holding_summary  —  38,000
+#   daily_market     — 125,027  (largest table)
+#   trade            —  33,387
+#   trade_history    — 100,000
+#
+# These four queries expose the key estimation challenges:
+#   Q1 (trade_by_type)      — trade × trade_type (5-row tiny dimension); tests tiny-dim join
+#   Q2 (holding_by_security)— holding_summary × security (68 rows); tests FK fan-out on string key
+#   Q3 (market_by_exchange) — daily_market × security × exchange; 3-table with two tiny dims
+#   Q4 (customer_trades)    — customer × customer_account × trade; 3-table customer hierarchy
+#
+# SQL is written in ANSI SQL compatible with PostgreSQL.
+# TPC Benchmark™ E is copyright © TPC, all rights reserved.
+# statschema does not publish TPC-certified benchmark results.
+
+source_dialect: ansi
+queries:
+
+  # ── Q1: Trade Volume by Type ──────────────────────────────────────────────
+  # Hash join between trade_type (5 rows, build side) and trade (33 K rows, probe).
+  # All 5 trade-type codes appear in every trade; the planner must know there are
+  # only 5 groups in the GROUP BY output.  If stats show n_distinct(t_tt_id) = 5
+  # the aggregate estimate is ~33K/5 = 6.7K rows per group.
+  # This is the TPC-E equivalent of TPC-B Q2 (teller × history, 10 tellers) but
+  # with an even smaller dimension (5 vs 10 rows).
+  - id: tpce-q01
+    source_dialect: ansi
+    description: "Trade volume by type — trade × trade_type (5-row dim), tests tiny-dimension join cardinality"
+    sql: |
+      SELECT t.t_tt_id,
+             tt.tt_name,
+             COUNT(*)                          AS trade_count,
+             SUM(t.t_qty * t.t_bid_price)      AS total_value,
+             AVG(t.t_comm)                     AS avg_commission
+      FROM trade t
+      JOIN trade_type tt ON t.t_tt_id = tt.tt_id
+      GROUP BY t.t_tt_id, tt.tt_name
+      ORDER BY trade_count DESC
+    tables: [trade, trade_type]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q2: Holding Summary by Security ──────────────────────────────────────
+  # Join holding_summary (38 K rows) to security (68 rows) on the string FK
+  # hs_s_symb = s_symb.  The result has at most 68 rows (one per security).
+  # String FK MCVs are harder to collect: each symbol appears ~558 times in
+  # holding_summary.  If the MCV list does not cover most of the 68 distinct
+  # symbols, the planner underestimates the GROUP BY output and may choose a
+  # sub-optimal aggregate strategy.
+  - id: tpce-q02
+    source_dialect: ansi
+    description: "Holdings by security — holding_summary × security (string FK), tests string-key MCV estimation"
+    sql: |
+      SELECT hs.hs_s_symb,
+             s.s_name,
+             s.s_ex_id,
+             COUNT(*)                          AS account_holders,
+             SUM(hs.hs_qty)                    AS total_held_shares
+      FROM holding_summary hs
+      JOIN security s ON hs.hs_s_symb = s.s_symb
+      GROUP BY hs.hs_s_symb, s.s_name, s.s_ex_id
+      ORDER BY total_held_shares DESC
+      LIMIT 20
+    tables: [holding_summary, security]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q3: Market Summary by Exchange ────────────────────────────────────────
+  # Three-table chain: daily_market (125 K rows) → security (68 rows) → exchange
+  # (4 rows).  Both upper joins are to tiny dimensions, so the planner should
+  # always hash-join security and exchange as build sides.  The tricky part is
+  # that the output cardinality of the intermediate join (daily_market × security)
+  # is ~125 K / 68 ≈ 1,838 per security — the planner must correctly estimate
+  # this from the string-symbol FK distribution.
+  # The final GROUP BY collapses to 4 rows (one per exchange): a wrong cardinality
+  # estimate for the intermediate result triggers a wrong aggregate cost model.
+  - id: tpce-q03
+    source_dialect: ansi
+    description: "Daily market by exchange — daily_market × security × exchange 3-table, tests string-FK chain"
+    sql: |
+      SELECT ex.ex_id,
+             ex.ex_name,
+             COUNT(dm.dm_s_symb)               AS quote_count,
+             AVG(dm.dm_close)                  AS avg_close_price,
+             MAX(dm.dm_high)                   AS all_time_high
+      FROM daily_market dm
+      JOIN security s  ON dm.dm_s_symb = s.s_symb
+      JOIN exchange ex ON s.s_ex_id    = ex.ex_id
+      GROUP BY ex.ex_id, ex.ex_name
+      ORDER BY avg_close_price DESC
+    tables: [daily_market, security, exchange]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q4: Customer Trade Summary ────────────────────────────────────────────
+  # Three-level FK chain: customer (10 K) → customer_account (50 K) → trade (33 K).
+  # Expected output: one row per customer with at least one trade.
+  # The join selectivity problem here differs from TPC-H Q03: both intermediate
+  # join sizes are well-defined (each customer has ~5 accounts, each account has
+  # ~0.67 trades at SF=0.01), but the planner must estimate the sparse join
+  # result (many customers have zero trades) without extended statistics.
+  - id: tpce-q04
+    source_dialect: ansi
+    description: "Customer trade summary — customer × customer_account × trade 3-table hierarchy"
+    sql: |
+      SELECT c.c_id,
+             c.c_l_name,
+             COUNT(t.t_id)                     AS trade_count,
+             SUM(t.t_qty * t.t_bid_price)      AS total_value
+      FROM customer c
+      JOIN customer_account ca ON c.c_id    = ca.ca_c_id
+      JOIN trade             t  ON ca.ca_id  = t.t_ca_id
+      GROUP BY c.c_id, c.c_l_name
+      ORDER BY trade_count DESC
+      LIMIT 20
+    tables: [customer, customer_account, trade]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0

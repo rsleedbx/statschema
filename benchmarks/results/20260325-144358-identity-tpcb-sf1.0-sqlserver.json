@@ -1,0 +1,173 @@
+{
+  "schema": "tpcb",
+  "dialect": "sqlserver",
+  "sf": 1.0,
+  "source_schema": "sqlb_src",
+  "target_schema": "sqlb_tgt",
+  "source_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "target_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "query_metrics": {
+    "tpcb-q01": {
+      "query_id": "tpcb-q01",
+      "source_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        2.0,
+        2.0,
+        2.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpcb-q02": {
+      "query_id": "tpcb-q02",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Sort",
+        "Seq Scan",
+        "Table Spool",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Sort",
+        "Seq Scan",
+        "Table Spool",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpcb-q03": {
+      "query_id": "tpcb-q03",
+      "source_node_types": [
+        "Limit",
+        "Gather",
+        "Sort",
+        "Hash Join",
+        "Gather",
+        "Hash Join",
+        "Gather",
+        "Seq Scan",
+        "Gather",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Gather",
+        "Sort",
+        "Hash Join",
+        "Gather",
+        "Hash Join",
+        "Gather",
+        "Seq Scan",
+        "Gather",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0020407194722605,
+        1.08118,
+        1.08118,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 7,
+      "target_plan_depth": 7
+    },
+    "tpcb-q04": {
+      "query_id": "tpcb-q04",
+      "source_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        2.0,
+        2.0,
+        2.0,
+        1.0106811890720906,
+        1.0106811890720906
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 15.633857666980475,
+    "B_baseline_explain": 8.847818415961228,
+    "C_collect_stats": 0.1350889588939026,
+    "D_build_target": 13.66479116701521,
+    "E_replay_explain": 9.479956541908905
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

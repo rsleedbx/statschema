@@ -349,8 +349,8 @@ def run_benchmark(
     if not yaml_path.exists():
         raise FileNotFoundError(
             f"Schema file not found: {yaml_path}.  "
-            "Expected benchmarks/schemas/tpcc_schema.yaml, tpch_schema.yaml, "
-            "or tpcb_schema.yaml."
+            "Expected one of: tpcc, tpch, tpcb, tpcds, tpce, tpcdi "
+            "(maps to benchmarks/schemas/<schema>_schema.yaml)."
         )
     tables = load_canonical(yaml_path)
 
@@ -488,7 +488,11 @@ def run_benchmark(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{result['benchmark_id']}.json"
     out_path.write_text(json.dumps(result, indent=2, default=str))
-    print(f"  Result saved → {out_path.relative_to(_REPO_ROOT)}\n")
+    try:
+        display = out_path.resolve().relative_to(_REPO_ROOT)
+    except ValueError:
+        display = out_path.resolve()
+    print(f"  Result saved → {display}\n")
 
     conn.close()
     return result
@@ -504,7 +508,8 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--schema",   choices=["tpcc", "tpch", "tpcb"], default="tpcc",
+    p.add_argument("--schema",   choices=["tpcc", "tpch", "tpcb", "tpcds", "tpce", "tpcdi"],
+                   default="tpcc",
                    help="TPC schema to benchmark (default: tpcc)")
     p.add_argument("--sf",       type=float, default=1.0,
                    help="Scale factor: warehouses for TPC-C, GB for TPC-H (default: 1)")

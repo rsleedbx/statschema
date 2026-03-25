@@ -378,6 +378,144 @@ def _tpch_lineitem(rng: random.Random, n_orders: int, n_parts: int,
             )
 
 
+# ---------------------------------------------------------------------------
+# TPC-DI generators (DimDate and DimTime only)
+# ---------------------------------------------------------------------------
+# The remaining TPC-DI tables are generated via the YAML-based pipeline
+# (generate_rows from statschema using benchmarks/schemas/tpcdi_schema.yaml).
+# DimDate and DimTime require accurate calendar/clock arithmetic that
+# distribution-based generation cannot provide.
+
+_TPCDI_MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+_TPCDI_DOW = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+# Simplified fixed-date US holidays (month, day).
+_TPCDI_HOLIDAYS: set[tuple[int, int]] = {(1, 1), (7, 4), (11, 11), (12, 25)}
+
+
+def tpcdi_dimdate_rows(
+    start: date = date(2010, 1, 1),
+    end: date = date(2019, 12, 31),
+) -> Iterator[tuple]:
+    """
+    Yield one tuple per calendar day from start to end (inclusive).
+
+    Column order matches DimDate in tpcdi_schema.yaml:
+      (SK_DateID, DateValue, DayDesc,
+       CalendarYearID, CalendarYearDesc,
+       CalendarQtrID, CalendarQtrDesc,
+       CalendarMonthID, CalendarMonthDesc,
+       CalendarWeekID, CalendarWeekDesc,
+       DayOfWeekNum, DayOfWeekDesc,
+       FiscalYearID, FiscalYearDesc,
+       FiscalQtrID, FiscalQtrDesc,
+       HolidayFlag, WeekendFlag)
+    """
+    sk = 1
+    week_id = 1
+    prev_iso_week: int | None = None
+    d = start
+    while d <= end:
+        y, m = d.year, d.month
+        iso_week = d.isocalendar()[1]
+        if prev_iso_week is None:
+            prev_iso_week = iso_week
+        elif iso_week != prev_iso_week:
+            week_id += 1
+            prev_iso_week = iso_week
+
+        qtr = (m - 1) // 3 + 1
+        dow = d.weekday()            # 0 = Monday
+        is_weekend = dow >= 5
+        is_holiday = (m, d.day) in _TPCDI_HOLIDAYS
+        month_name = _TPCDI_MONTHS[m - 1]
+        dow_name = _TPCDI_DOW[dow]
+
+        yield (
+            sk,                                 # SK_DateID
+            d,                                  # DateValue
+            d.strftime("%Y-%m-%d"),             # DayDesc
+            y,                                  # CalendarYearID
+            f"Year {y}",                        # CalendarYearDesc
+            y * 10 + qtr,                       # CalendarQtrID  (e.g. 20101 = 2010 Q1)
+            f"{y} Q{qtr}",                      # CalendarQtrDesc
+            y * 100 + m,                        # CalendarMonthID (e.g. 201001 = Jan 2010)
+            f"{y} {month_name}",                # CalendarMonthDesc
+            week_id,                            # CalendarWeekID
+            f"{y} Week {iso_week:02d}",         # CalendarWeekDesc
+            dow + 1,                            # DayOfWeekNum (1 = Monday)
+            dow_name,                           # DayOfWeekDesc
+            y,                                  # FiscalYearID  (= calendar year)
+            f"Year {y}",                        # FiscalYearDesc
+            y * 10 + qtr,                       # FiscalQtrID
+            f"{y} Q{qtr}",                      # FiscalQtrDesc
+            is_holiday,                         # HolidayFlag
+            is_weekend,                         # WeekendFlag
+        )
+        sk += 1
+        d += timedelta(days=1)
+
+
+def tpcdi_dimtime_rows() -> Iterator[tuple]:
+    """
+    Yield one tuple per second of the day (86 400 rows, 00:00:00–23:59:59).
+
+    Column order matches DimTime in tpcdi_schema.yaml:
+      (SK_TimeID, TimeValue,
+       HourID, HourDesc, MinuteID, MinuteDesc, SecondID, SecondDesc,
+       MarketHoursFlag, OfficeHoursFlag)
+    """
+    from datetime import time as dtime
+    for sk in range(1, 86_401):
+        s = sk - 1
+        hh, mm_rem = divmod(s, 3600)
+        mm, ss = divmod(mm_rem, 60)
+        t = dtime(hh, mm, ss)
+        # NYSE core trading hours: 09:30–16:00
+        total_min = hh * 60 + mm
+        market = 9 * 60 + 30 <= total_min < 16 * 60
+        # Standard office hours: 08:00–18:00
+        office = 8 * 60 <= total_min < 18 * 60
+        yield (
+            sk,
+            t,
+            hh,   f"Hour {hh:02d}",
+            mm,   f"Hour {hh:02d} Minute {mm:02d}",
+            ss,   f"Hour {hh:02d} Minute {mm:02d} Second {ss:02d}",
+            market,
+            office,
+        )
+
+
+def tpcdi_rows(table: str, sf: int | float = 1, seed: int = 42) -> Iterator[tuple]:
+    """
+    Return an iterator of row tuples for a TPC-DI target DW table.
+
+    DimDate and DimTime are generated with accurate calendar / clock
+    arithmetic.  All other tables should be generated via the YAML
+    pipeline:
+
+        from src.statschema.schema_io import load_canonical
+        from src.statschema.row_generator import generate_rows
+        tables = load_canonical('benchmarks/schemas/tpcdi_schema.yaml')
+        for table in tables:
+            for batch in generate_rows(table, row_count, seed=seed):
+                ...
+    """
+    if table == "DimDate":
+        return tpcdi_dimdate_rows()
+    if table == "DimTime":
+        return tpcdi_dimtime_rows()
+    raise ValueError(
+        f"tpcdi_rows() only provides generators for DimDate and DimTime. "
+        f"Use generate_rows(load_canonical('benchmarks/schemas/tpcdi_schema.yaml'), ...) "
+        f"for {table!r} and other TPC-DI tables."
+    )
+
+
 def tpch_rows(table: str, sf: int = 1, seed: int = 42) -> Iterator[tuple]:
     """
     Yield rows for the given TPC-H table at scale factor sf.

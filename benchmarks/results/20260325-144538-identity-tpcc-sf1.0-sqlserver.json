@@ -1,0 +1,192 @@
+{
+  "schema": "tpcc",
+  "dialect": "sqlserver",
+  "sf": 1.0,
+  "source_schema": "sqlc_src",
+  "target_schema": "sqlc_tgt",
+  "source_row_counts": {
+    "item": 100000,
+    "warehouse": 1,
+    "district": 10,
+    "stock": 100000,
+    "customer": 30000,
+    "history": 30000,
+    "orders": 30000,
+    "new_order": 9000,
+    "order_line": 300000
+  },
+  "target_row_counts": {
+    "item": 100000,
+    "warehouse": 1,
+    "district": 10,
+    "stock": 100000,
+    "customer": 30000,
+    "history": 30000,
+    "orders": 30000,
+    "new_order": 9000,
+    "order_line": 300000
+  },
+  "query_metrics": {
+    "tpcc-q01": {
+      "query_id": "tpcc-q01",
+      "source_node_types": [
+        "Sort",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 2,
+      "target_plan_depth": 2
+    },
+    "tpcc-q02": {
+      "query_id": "tpcc-q02",
+      "source_node_types": [
+        "Result",
+        "Aggregate",
+        "Nested Loop",
+        "Sort",
+        "Seq Scan",
+        "Table Spool",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Result",
+        "Aggregate",
+        "Nested Loop",
+        "Sort",
+        "Seq Scan",
+        "Table Spool",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    },
+    "tpcc-q03": {
+      "query_id": "tpcc-q03",
+      "source_node_types": [
+        "Result",
+        "Aggregate",
+        "Sort",
+        "Gather",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Result",
+        "Aggregate",
+        "Sort",
+        "Gather",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    },
+    "tpcc-q04": {
+      "query_id": "tpcc-q04",
+      "source_node_types": [
+        "Gather",
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Seq Scan",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Gather",
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Seq Scan",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.000333455600387,
+        1.000333455600387,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 8,
+      "target_plan_depth": 8
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 37.35385908407625,
+    "B_baseline_explain": 6.275901083019562,
+    "C_collect_stats": 0.2647735000355169,
+    "D_build_target": 40.87951158301439,
+    "E_replay_explain": 4.805456125061028
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

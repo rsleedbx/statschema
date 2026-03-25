@@ -1,0 +1,137 @@
+# TPC-DS representative query workload — 4 queries for identity testing
+#
+# TPC-DS is the decision-support successor to TPC-H with 25+ tables and a more
+# complex star schema.  Two characteristics make it harder for statschema than TPC-H:
+#
+#   1. Very large fixed dimension tables (date_dim: 73K, time_dim: 86K,
+#      customer_demographics: 1.92M) are loaded regardless of SF.  The 1.92M-row
+#      customer_demographics Cartesian product dominates Phase A at any SF.
+#
+#   2. Every fact table carries 5–8 FK columns (sold_date_sk, sold_time_sk,
+#      item_sk, customer_sk, cdemo_sk, hdemo_sk, addr_sk, store_sk, promo_sk).
+#      Single-column statistics cannot capture the cross-FK selectivity that
+#      TPC-DS queries rely on (e.g. "this customer segment in this date range
+#      buying from this store").
+#
+# At SF = 0.01 (recommended for a ~60 s test):
+#   date_dim              —  73,049  (fixed, builtin)
+#   time_dim              —  86,400  (fixed, builtin)
+#   customer_demographics — 1,920,800  (fixed, builtin — dominates load time)
+#   store_sales           —  28,804
+#   catalog_sales         —  14,415
+#   inventory             — 117,450
+#   customer              —   1,000
+#   item                  —     180
+#
+# These four queries expose the key estimation challenges:
+#   Q1 (sales_by_year)    — store_sales × date_dim range scan; tests temporal selectivity
+#   Q2 (item_revenue)     — store_sales GROUP BY item; tests FK n_distinct on fact table
+#   Q3 (customer_purchase)— customer × store_sales join; tests large × medium join cardinality
+#   Q4 (3table_sales)     — store_sales × date_dim × item; the hard 3-table TPC-DS probe
+#
+# SQL is written in ANSI SQL compatible with PostgreSQL.
+# TPC Benchmark™ DS is copyright © TPC, all rights reserved.
+# statschema does not publish TPC-certified benchmark results.
+
+source_dialect: ansi
+queries:
+
+  # ── Q1: Store Sales by Year ───────────────────────────────────────────────
+  # Joins store_sales (28 K rows at SF=0.01) to date_dim (73 K rows) and filters
+  # to a 10-year date range.  date_dim covers 1900–2100; the synthetic store_sales
+  # FK values are uniformly distributed across all 73 K date surrogate keys, so
+  # a 10-year filter is approximately 5% selective.
+  # This query is structurally analogous to TPC-H Q06 (selective range scan) but
+  # the date predicate works through a join instead of a direct column predicate.
+  - id: tpcds-q01
+    source_dialect: ansi
+    description: "Store sales by year — store_sales × date_dim join + year range, tests FK join selectivity"
+    sql: |
+      SELECT d.d_year,
+             d.d_moy,
+             COUNT(*)             AS sale_count,
+             SUM(ss.ss_net_paid)  AS net_revenue
+      FROM store_sales ss
+      JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+      WHERE d.d_year BETWEEN 1995 AND 2005
+      GROUP BY d.d_year, d.d_moy
+      ORDER BY d.d_year, d.d_moy
+    tables: [store_sales, date_dim]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q2: Item Revenue Report ───────────────────────────────────────────────
+  # Full scan of store_sales grouped by ss_item_sk (FK to item).
+  # At SF=0.01 there are 28 K store_sales rows and 180 items, giving ~156 sales
+  # per item on average.  The planner must estimate the GROUP BY output cardinality
+  # (roughly 180 groups) from the n_distinct of ss_item_sk.
+  # This query contains no join — it is the baseline aggregate test for TPC-DS,
+  # equivalent to TPC-B Q1 or TPC-DI Q4.
+  - id: tpcds-q02
+    source_dialect: ansi
+    description: "Item revenue — store_sales GROUP BY item FK, baseline aggregate test"
+    sql: |
+      SELECT ss_item_sk,
+             COUNT(*)             AS purchase_count,
+             SUM(ss_net_paid)     AS total_revenue,
+             AVG(ss_quantity)     AS avg_qty
+      FROM store_sales
+      GROUP BY ss_item_sk
+      ORDER BY total_revenue DESC
+      LIMIT 20
+    tables: [store_sales]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q3: Customer Purchase Summary ────────────────────────────────────────
+  # Hash join between customer (1 K rows at SF=0.01, build side) and store_sales
+  # (28 K rows, probe side) on c_customer_sk = ss_customer_sk.
+  # The correct plan uses customer as the build side; if stats overstate customer
+  # row count or understate store_sales rows the planner may swap sides.
+  # Expected output: one row per customer who made at least one purchase.
+  # Analogous to TPC-B Q2 (teller × history) and TPC-C Q2 (district × customer).
+  - id: tpcds-q03
+    source_dialect: ansi
+    description: "Customer purchase summary — customer × store_sales join, tests FK join cardinality"
+    sql: |
+      SELECT c.c_customer_sk,
+             COUNT(ss.ss_ticket_number) AS visit_count,
+             SUM(ss.ss_net_paid)         AS total_spent
+      FROM customer c
+      JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+      GROUP BY c.c_customer_sk
+      ORDER BY total_spent DESC
+      LIMIT 20
+    tables: [customer, store_sales]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0
+
+  # ── Q4: Three-table Sales Analysis ───────────────────────────────────────
+  # Star join: store_sales (28 K) × date_dim (73 K) × item (180).
+  # This is the TPC-DS equivalent of TPC-H Q03 and TPC-C Q4: a three-table join
+  # where each step requires accurate intermediate-row estimates.
+  # The plan is typically: hash-join item (tiny) to store_sales, then join to
+  # date_dim.  Cardinality errors on item or date_dim cardinalities can cause
+  # the planner to flip this order, which is the primary source of plan divergence
+  # in all multi-table identity test results.
+  - id: tpcds-q04
+    source_dialect: ansi
+    description: "Three-table sales analysis — store_sales × date_dim × item star join"
+    sql: |
+      SELECT d.d_year,
+             i.i_category,
+             COUNT(*)             AS sale_count,
+             SUM(ss.ss_net_paid)  AS total_revenue
+      FROM store_sales ss
+      JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+      JOIN item     i ON ss.ss_item_sk       = i.i_item_sk
+      GROUP BY d.d_year, i.i_category
+      ORDER BY total_revenue DESC
+      LIMIT 20
+    tables: [store_sales, date_dim, item]
+    calls: 1
+    total_elapsed_ms: 0.0
+    mean_elapsed_ms: 0.0

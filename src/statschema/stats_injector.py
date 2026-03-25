@@ -353,9 +353,35 @@ def inject_stats_postgres(  # pragma: no cover
     warnings: list[str] = []
 
     # ── 1. Table-level statistics ─────────────────────────────────────────
-    # Estimate avg row bytes heuristically if not available
-    avg_row_bytes = table_stats.avg_row_bytes or 44
-    pages = max(1, int(row_count * avg_row_bytes / 8192))
+    # Use the actual physical page count from pg_class.relpages when available.
+    # If we inject a page count that differs from the physical heap size, the
+    # planner applies a correction: estimated_rows = reltuples × (heap_pages /
+    # relpages).  A wrong relpages (e.g. estimated from avg_row_bytes) therefore
+    # multiplies all row estimates by a constant and makes every join and
+    # aggregate estimate diverge from the source plan.
+    # Query the actual physical size of the heap using pg_relation_size.
+    # pg_class.relpages is 0 on a newly loaded table (updated only by ANALYZE /
+    # VACUUM), but the planner computes estimated_rows = reltuples × (heap_pages
+    # / relpages) using the live block count from the buffer manager.  Injecting
+    # relpages = physical_pages therefore sets the correction factor to 1 and
+    # keeps row estimates consistent with the injected reltuples.
+    try:
+        cur.execute(
+            """
+            SELECT GREATEST(1, pg_relation_size(
+                (quote_ident(%s) || '.' || quote_ident(%s))::regclass
+            ) / current_setting('block_size')::integer)
+            """,
+            (schema, table),
+        )
+        size_row = cur.fetchone()
+        pages = int(size_row[0]) if size_row and size_row[0] else None
+    except Exception:
+        pages = None
+
+    if not pages:
+        avg_row_bytes = table_stats.avg_row_bytes or 44
+        pages = max(1, int(row_count * avg_row_bytes / 8192))
 
     cur.execute(
         """
@@ -372,13 +398,23 @@ def inject_stats_postgres(  # pragma: no cover
     logger.info("PG18 table stats injected: %s.%s rows=%d pages=%d", schema, table, row_count, pages)
 
     # ── 2. Column-level statistics ────────────────────────────────────────
+    # Use a savepoint per column so that a single column failure does not
+    # abort the entire transaction and roll back all successfully injected
+    # column statistics.  Without this, psycopg2 enters InFailedSqlTransaction
+    # after any error, and the final conn.commit() silently becomes ROLLBACK.
     cols_ok = cols_skip = 0
 
     for col in table_stats.columns:
         try:
+            cur.execute("SAVEPOINT _inj_col")
             _inject_pg_column(conn, schema, table, col, row_count, warnings)
+            cur.execute("RELEASE SAVEPOINT _inj_col")
             cols_ok += 1
         except Exception as exc:
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT _inj_col")
+            except Exception:
+                pass
             warnings.append(f"{col.name}: {exc}")
             cols_skip += 1
 
@@ -451,11 +487,19 @@ def _inject_pg_column(  # pragma: no cover
             )
 
     # Build the variadic call.
-    # pg_restore_attribute_stats expects specific Postgres types for some kwargs:
-    #   most_common_freqs → real[]   (Python list of floats maps to float8[], not real[])
-    #   most_common_vals  → text     (string array literal)
-    #   histogram_bounds  → text     (string array literal)
-    # We must emit explicit ::real[] casts so PG accepts the type.
+    # pg_restore_attribute_stats is strict about types: it silently ignores values
+    # of the wrong type rather than raising an error.  Python floats become float8
+    # in psycopg2, but PG expects real (float4) for null_frac/n_distinct.  We must
+    # emit explicit PostgreSQL type casts for every numeric parameter.
+    _PG_CASTS: dict[str, str] = {
+        "null_frac":        "::real",
+        "avg_width":        "::integer",
+        "n_distinct":       "::real",
+        "most_common_vals": "::text",       # text array literal
+        "histogram_bounds": "::text",       # text array literal
+        "correlation":      "::real",
+    }
+
     parts: list[str] = []
     params: list[Any] = []
 
@@ -463,10 +507,11 @@ def _inject_pg_column(  # pragma: no cover
         if k == "most_common_freqs" and isinstance(v, list):
             # Pass as a text literal with explicit ::real[] cast so PG accepts it
             freq_literal = "{" + ",".join(str(f) for f in v) + "}"
-            parts.append(f"%s, %s::real[]")
+            parts.append("%s, %s::real[]")
             params.extend([k, freq_literal])
         else:
-            parts.append("%s, %s")
+            cast = _PG_CASTS.get(k, "")
+            parts.append(f"%s, %s{cast}")
             params.extend([k, v])
 
     sql = f"SELECT pg_restore_attribute_stats({', '.join(parts)})"

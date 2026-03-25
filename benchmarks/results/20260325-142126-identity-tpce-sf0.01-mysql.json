@@ -1,0 +1,214 @@
+{
+  "schema": "tpce",
+  "dialect": "mysql",
+  "sf": 0.01,
+  "source_schema": "mysqltpce_src",
+  "target_schema": "mysqltpce_tgt",
+  "source_row_counts": {
+    "exchange": 4,
+    "sector": 12,
+    "status_type": 5,
+    "trade_type": 5,
+    "taxrate": 320,
+    "charge": 15,
+    "commission_rate": 240,
+    "zip_code": 14741,
+    "address": 13333,
+    "news_item": 200,
+    "industry": 102,
+    "broker": 10,
+    "customer": 10000,
+    "company": 50,
+    "customer_taxrate": 30000,
+    "customer_account": 50000,
+    "watch_list": 10000,
+    "company_competitor": 150,
+    "security": 68,
+    "financial": 1000,
+    "news_xref": 600,
+    "account_permission": 75000,
+    "watch_item": 150000,
+    "daily_market": 125027,
+    "last_trade": 68,
+    "trade": 33387,
+    "holding_summary": 38000,
+    "trade_history": 100000,
+    "trade_request": 1000,
+    "holding": 50000,
+    "cash_transaction": 33387,
+    "holding_history": 100000
+  },
+  "target_row_counts": {
+    "exchange": 4,
+    "sector": 12,
+    "status_type": 5,
+    "trade_type": 5,
+    "taxrate": 320,
+    "charge": 15,
+    "commission_rate": 240,
+    "zip_code": 14741,
+    "address": 13333,
+    "news_item": 200,
+    "industry": 102,
+    "broker": 10,
+    "customer": 10000,
+    "company": 50,
+    "customer_taxrate": 30000,
+    "customer_account": 50000,
+    "watch_list": 10000,
+    "company_competitor": 150,
+    "security": 68,
+    "financial": 1000,
+    "news_xref": 600,
+    "account_permission": 75000,
+    "watch_item": 150000,
+    "daily_market": 125027,
+    "last_trade": 68,
+    "trade": 33387,
+    "holding_summary": 38000,
+    "trade_history": 100000,
+    "trade_request": 1000,
+    "holding": 50000,
+    "cash_transaction": 33387,
+    "holding_history": 100000
+  },
+  "query_metrics": {
+    "tpce-q01": {
+      "query_id": "tpce-q01",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0242321345886711
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpce-q02": {
+      "query_id": "tpce-q02",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.037647447910925
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpce-q03": {
+      "query_id": "tpce-q03",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0019459459459459
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpce-q04": {
+      "query_id": "tpce-q04",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Nested Loop",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.000202922077922,
+        1.000202922077922,
+        1.000202922077922,
+        1.000202922077922,
+        1.0008437801350047,
+        1.0242321345886711
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 16.45514324994292,
+    "B_baseline_explain": 0.026216375059448183,
+    "C_collect_stats": 10.496683250064962,
+    "D_build_target": 18.500434041954577,
+    "E_replay_explain": 0.01654962496832013
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "analyze_fallback"
+}

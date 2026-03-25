@@ -1286,9 +1286,49 @@ Local database setup recipes live in **[`docs/local-databases.md`](docs/local-da
 
 ---
 
+## Identity test — how effective is statschema for your database?
+
+The identity test is a control experiment that quantifies statschema's fidelity on any target database. It answers: *"If I use statschema to prepare a migration target, will my queries behave the same before any production data arrives?"*
+
+**The pipeline:**
+1. Load TPC-H data into a source schema.
+2. Run `EXPLAIN` on 4 representative queries (Q1, Q3, Q6, Q14) → baseline plans.
+3. Use statschema's `collect → generate → inject` pipeline to create a copy in a target schema.
+4. Run the same `EXPLAIN` queries on the copy.
+5. Score: compare plan node types and row-count estimates between source and copy.
+
+**Pass criteria:**
+
+| Metric | Threshold | Meaning |
+|---|---|---|
+| `mean_node_jaccard` | ≥ 0.70 | Same join operators chosen on both databases |
+| `mean_within_2x` | ≥ 0.50 | Majority of row-count estimates within 2× of source |
+
+A passing identity test means the optimizer makes the same decisions on the copy as on the source — which means your application's query plans will be correct before a single production row arrives.
+
+**Running it:**
+```bash
+# Quick smoke test on PostgreSQL (~1 min, SF=0.1)
+make test-live-identity PYTEST_FLAGS="-k quick"
+
+# Full validation at SF=1 (~3 min)
+make test-live-identity PYTEST_FLAGS="-k sf1"
+
+# On your own database and queries (not TPC-H)
+python benchmarks/identity_test.py \
+    --schema tpch --sf 1 --dialect postgres \
+    --dsn "host=127.0.0.1 port=5416 dbname=testdb user=postgres password=testpass"
+```
+
+The identity test works for any database statschema supports — PostgreSQL, Lakebase, CockroachDB, MySQL, SQL Server, Oracle, Db2. Run it against your own schema by pointing `--dsn` at your source and providing a `queries.yaml` with your workload's top queries.
+
+See [`docs/learnings/query-testing-research.md`](docs/learnings/query-testing-research.md) for the full design, scoring details, and open questions.
+
+---
+
 ## Verified data generation
 
-All five TPC benchmark schemas ship as canonical YAML under `benchmarks/schemas/`. All five have been verified end-to-end: TPC-B/C/H against live client workloads (pgbench, CockroachDB), and TPC-DS/E against DuckDB using the official 99-query TPC-DS suite and representative queries for all 10 TPC-E transaction types.
+All six TPC benchmark schemas ship as canonical YAML under `benchmarks/schemas/`. All five OLTP/DSS schemas have been verified end-to-end: TPC-B/C/H against live client workloads (pgbench, CockroachDB), and TPC-DS/E against DuckDB using the official 99-query TPC-DS suite and representative queries for all 10 TPC-E transaction types.
 
 | Schema | Tables | SF=1 rows | Status |
 |--------|--------|-----------|--------|
@@ -1297,6 +1337,8 @@ All five TPC benchmark schemas ship as canonical YAML under `benchmarks/schemas/
 | `tpch_schema.yaml` | 8 | ~8,600,000 | Verified — `cockroach workload tpch` analytical queries |
 | `tpcds_schema.yaml` | 24 | ~19,500,000 | Verified — all 99 official TPC-DS queries execute against DuckDB with 0 SQL errors at SF=0.01; fixed dimension tables (date_dim, time_dim, customer_demographics) use deterministic built-in generators |
 | `tpce_schema.yaml` | 32 | ~82,000,000 | Verified — representative SELECT queries for all 10 TPC-E transaction types (Broker-Volume, Customer-Position, Market-Watch, Security-Detail, Trade-Lookup ×3, Trade-Order, Trade-Result, Trade-Status, Trade-Update) return rows against DuckDB at SF=0.01 |
+
+| `tpcdi_schema.yaml` | 18 | ~211,000 | Target DW schema — replaces TPC DIGen.JAR; DimDate/DimTime use accurate calendar/clock generators; all FK dependencies validated via `resolve_load_order` |
 
 Generation, DDL emission, and loading are all driven from the same YAML file — no custom Python per database engine. The YAML schema format is designed to be the declarative standard for synthetic data generation: the same role SQL plays for queries. Write the schema once; `statschema` generates correct, referentially-consistent data for any supported engine.
 

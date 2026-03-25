@@ -4,7 +4,7 @@ Measures raw load throughput using the `statschema` canonical pipeline:
 `generate_rows()` (canonical YAML schema) → `load_dataframe()` (bulk loader).
 
 All tables are created without PK/FK constraints (load benchmark, not constraint benchmark).
-Seed: 42 (reproducible). Run date: 2026-03-22 on macOS Apple Silicon (M-series).
+Seed: 42 (reproducible). Run dates: 2026-03-22 / 2026-03-24, macOS Apple Silicon (M-series).
 
 ---
 
@@ -67,7 +67,7 @@ and are expected to be 3–10× slower than native ARM64.
 
 ## TPC-H
 
-Scale factor **SF=0.1** = 866,030 rows across 8 tables (native ARM64).  
+Scale factor **SF=0.1** = 866,030 rows (native ARM64). **SF=1** = 8,660,030 rows.  
 QEMU databases use **SF=0.01** = 86,630 rows.
 
 | Database                | Strategy    |   SF | Rows loaded | Total (s) | Rows / s |
@@ -78,6 +78,9 @@ QEMU databases use **SF=0.01** = 86,630 rows.
 | MariaDB 10.11           | bulk_copy   |  0.1 |     866,030 |      18.6 |   46,526 |
 | MariaDB 11.4            | bulk_copy   |  0.1 |     866,030 |      18.9 |   45,792 |
 | MySQL 5.7               | bulk_copy   |  0.1 |     866,030 |      45.0 |   19,230 |
+| CockroachDB 23          | bulk_copy   |  0.1 |     866,030 |      21.2 |   40,843 |
+| MySQL 8.0               | multi_row   |  1.0 |   8,660,030 |     338.3 |   25,598 |
+| MariaDB 10.11           | multi_row   |  1.0 |   8,660,030 |     322.4 |   26,858 |
 | SQL Server 2022 *(QEMU)*| multi_row   | 0.01 |      86,630 |     182.7 |      474 |
 | Oracle XE 21c *(QEMU)*  | multi_row   | 0.01 |      86,630 |     145.3 |      596 |
 | IBM Db2 CE 11.5 *(QEMU)*| multi_row   | 0.01 |      86,630 |      65.0 |    1,332 |
@@ -152,13 +155,13 @@ Strategy: BULK_COPY for PostgreSQL / MySQL / MariaDB; MULTI_ROW for QEMU-hosted 
 
 | Database                 | TPC-B (initial load)                   |
 |:------------------------:|:--------------------------------------:|
+| SQLite (in-process)      | 1.6s · 127K r/s · 200,011 rows         |
 | PostgreSQL 14            | 2.1s · 94K r/s · 200,011 rows          |
 | PostgreSQL 16            | 2.2s · 91K r/s · 200,011 rows          |
-| PostgreSQL 18            | ERR: unreachable                       |
 | MySQL 5.7                | 6.6s · 30K r/s · 200,011 rows          |
-| MySQL 8.0                | ERR: unreachable                       |
 | MariaDB 10.11            | 2.0s · 98K r/s · 200,011 rows          |
 | MariaDB 11.4             | 2.0s · 100K r/s · 200,011 rows         |
+| CockroachDB 23           | 3.0s · 66K r/s · 200,011 rows          |
 | SQL Server 2022 *(QEMU)* | 16.8s · 1K r/s · 20,002 rows           |
 | Oracle XE 21c *(QEMU)*   | 6.3s · 3K r/s · 20,002 rows            |
 | IBM Db2 CE 11.5 *(QEMU)* | 5.1s · 3K r/s · 20,002 rows            |
@@ -172,9 +175,7 @@ so pgbench uses index seeks.  Run: `pgbench -c 4 -t 500 -n` (no vacuum).
 |:------------------------:|:----------------------------------:|
 | PostgreSQL 14            | 1084.5 tps  (clients=4 txns=500)   |
 | PostgreSQL 16            | 959.7 tps  (clients=4 txns=500)    |
-| PostgreSQL 18            | n/a (unreachable)                  |
 | MySQL 5.7                | n/a (pgbench only targets PostgreSQL) |
-| MySQL 8.0                | n/a (unreachable)                  |
 | MariaDB 10.11            | n/a (pgbench only targets PostgreSQL) |
 | MariaDB 11.4             | n/a (pgbench only targets PostgreSQL) |
 | SQL Server 2022          | n/a (pgbench only targets PostgreSQL) |
@@ -190,11 +191,41 @@ from the current row count; FK ranges span existing + new rows.
 |:------------------------:|:--------------------------------------:|
 | PostgreSQL 14            | 2.3s · 88K r/s · 200,011 rows          |
 | PostgreSQL 16            | 2.0s · 98K r/s · 200,011 rows          |
-| PostgreSQL 18            | ERR: unreachable                       |
 | MySQL 5.7                | 5.5s · 36K r/s · 200,011 rows          |
-| MySQL 8.0                | ERR: unreachable                       |
 | MariaDB 10.11            | 2.0s · 97K r/s · 200,011 rows          |
 | MariaDB 11.4             | 2.0s · 100K r/s · 200,011 rows         |
 | SQL Server 2022 *(QEMU)* | 17.0s · 1K r/s · 20,002 rows           |
 | Oracle XE 21c *(QEMU)*   | 3.1s · 6K r/s · 20,002 rows            |
 | IBM Db2 CE 11.5 *(QEMU)* | 4.9s · 4K r/s · 20,002 rows            |
+---
+
+## TPC-DS
+
+Scale factor **SF=0.1** = 3,834,791 rows across 24 tables (native ARM64).
+
+| Database                | Strategy    |   SF | Rows loaded | Total (s) | Rows / s |
+|:------------------------|:------------|-----:|------------:|----------:|---------:|
+| SQLite (in-process)     | multi_row   |  0.1 |   3,834,791 |      23.1 |  166,317 |
+| PostgreSQL 16           | bulk_copy   |  0.1 |   3,834,791 |      30.0 |  127,688 |
+| CockroachDB 23          | bulk_copy   |  0.1 |   3,834,791 |      39.8 |   96,434 |
+| MariaDB 10.11           | multi_row   |  0.1 |   3,834,791 |      65.1 |   58,924 |
+| MySQL 8.0               | multi_row   |  0.1 |   3,834,791 |      72.0 |   53,264 |
+
+`customer_demographics` (1.92M rows) dominates at SF=0.1; `date_dim` and `time_dim` are fixed-size.
+
+---
+
+## TPC-E
+
+Scale factor **SF=0.1** = 8,228,274 rows across 32 tables (native ARM64).
+
+| Database                | Strategy    |   SF | Rows loaded | Total (s) | Rows / s |
+|:------------------------|:------------|-----:|------------:|----------:|---------:|
+| SQLite (in-process)     | multi_row   |  0.1 |   8,228,274 |      56.7 |  145,126 |
+| PostgreSQL 16           | bulk_copy   |  0.1 |   8,228,274 |      71.5 |  115,064 |
+| CockroachDB 23          | bulk_copy   |  0.1 |   8,228,274 |      93.3 |   88,204 |
+| MariaDB 10.11           | multi_row   |  0.1 |   8,228,274 |     126.6 |   65,009 |
+| MySQL 8.0               | multi_row   |  0.1 |   8,228,274 |     135.4 |   60,780 |
+
+`watch_item` (150K), `account_permission` (75K), `customer_account` (50K), `holding` (50K),
+and `holding_history` (100K) dominate at SF=0.1.
