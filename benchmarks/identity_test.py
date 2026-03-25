@@ -1484,26 +1484,32 @@ def build_target(
         t0 = time.perf_counter()
         _cols = ([c.name.upper() for c in table.columns] if dialect == "oracle"
                  else [c.name for c in table.columns])
-        try:
-            tbl_fk_overrides = (fk_range_overrides or {}).get(table.name)
-            df = build_rows_from_canonical(
-                table, n, stats=stats, seed=seed,
-                parent_row_counts=row_counts,
-                fk_range_overrides=tbl_fk_overrides,
-            )
-            _cols = ([c.upper() for c in df.columns] if dialect == "oracle"
-                     else None)
-        except Exception as _gen_exc:
-            logger.warning(
-                "build_rows_from_canonical failed for %s (%s); "
-                "falling back to simple generate_rows — stats-driven "
-                "generation was NOT used for this table",
-                table.name, _gen_exc,
-            )
-            print(f"\n    WARN {table.name}: stats-driven generator failed, "
-                  f"using simple generator ({type(_gen_exc).__name__})",
-                  end="", flush=True)
+        if table.builtin_generator:
+            # Tables with a deterministic built-in generator (e.g. date_dim, time_dim)
+            # must use generate_rows — their rows are fully specified by the schema and
+            # have unique constraints that stats-driven synthetic data cannot satisfy.
             df = generate_rows(table, n, seed=seed, parent_row_counts=row_counts)
+        else:
+            try:
+                tbl_fk_overrides = (fk_range_overrides or {}).get(table.name)
+                df = build_rows_from_canonical(
+                    table, n, stats=stats, seed=seed,
+                    parent_row_counts=row_counts,
+                    fk_range_overrides=tbl_fk_overrides,
+                )
+                _cols = ([c.upper() for c in df.columns] if dialect == "oracle"
+                         else None)
+            except Exception as _gen_exc:
+                logger.warning(
+                    "build_rows_from_canonical failed for %s (%s); "
+                    "falling back to simple generate_rows — stats-driven "
+                    "generation was NOT used for this table",
+                    table.name, _gen_exc,
+                )
+                print(f"\n    WARN {table.name}: stats-driven generator failed, "
+                      f"using simple generator ({type(_gen_exc).__name__})",
+                      end="", flush=True)
+                df = generate_rows(table, n, seed=seed, parent_row_counts=row_counts)
         load_dataframe(
             df, conn, _tname, dialect,
             strategy=_strat,

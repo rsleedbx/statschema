@@ -1,0 +1,210 @@
+{
+  "schema": "tpcdi",
+  "dialect": "oracle",
+  "sf": 1.0,
+  "source_schema": "oradi3_src",
+  "target_schema": "oradi3_tgt",
+  "source_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 400,
+    "DimBroker": 100,
+    "DimCustomer": 950,
+    "DimMessage": 500,
+    "DimSecurity": 685,
+    "Financial": 3200,
+    "DimAccount": 1500,
+    "FactMarketHistory": 57000,
+    "FactWatches": 5000,
+    "DimTrade": 46000,
+    "FactCashBalances": 2500,
+    "FactHoldings": 3000
+  },
+  "target_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 400,
+    "DimBroker": 100,
+    "DimCustomer": 950,
+    "DimMessage": 500,
+    "DimSecurity": 685,
+    "Financial": 3200,
+    "DimAccount": 1500,
+    "FactMarketHistory": 57000,
+    "FactWatches": 5000,
+    "DimTrade": 46000,
+    "FactCashBalances": 2500,
+    "FactHoldings": 3000
+  },
+  "query_metrics": {
+    "tpcdi-q01": {
+      "query_id": "tpcdi-q01",
+      "source_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        46000.0,
+        46000.0,
+        46000.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 0.625,
+      "within_10x": 0.625,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    },
+    "tpcdi-q02": {
+      "query_id": "tpcdi-q02",
+      "source_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        82.64525547445255,
+        82.64525547445255,
+        1.0
+      ],
+      "within_2x": 0.6666666666666666,
+      "within_10x": 0.6666666666666666,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpcdi-q03": {
+      "query_id": "tpcdi-q03",
+      "source_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        46000.0,
+        46000.0,
+        46000.0,
+        1500.0,
+        1.5789473684210527,
+        1.5789473684210527,
+        1.0
+      ],
+      "within_2x": 0.6,
+      "within_10x": 0.6,
+      "source_plan_depth": 7,
+      "target_plan_depth": 7
+    },
+    "tpcdi-q04": {
+      "query_id": "tpcdi-q04",
+      "source_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Select Statement",
+        "Sort",
+        "Subquery Scan",
+        "Window",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        8.0,
+        8.0,
+        1.0
+      ],
+      "within_2x": 0.6666666666666666,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 0.6395833333333333,
+  "mean_within_10x": 0.7229166666666667,
+  "phase_times": {
+    "A_load_source": 44.67405891697854,
+    "B_baseline_explain": 0.7559923749649897,
+    "C_collect_stats": 1.6531251670094207,
+    "D_build_target": 23.124778083059937,
+    "E_replay_explain": 0.30621116689871997
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze"
+}
