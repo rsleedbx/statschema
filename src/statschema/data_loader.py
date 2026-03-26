@@ -258,6 +258,60 @@ def _coerce_oracle_val(val: Any) -> Any:
     return val
 
 
+def _coerce_db2_val(val: Any) -> Any:
+    """Convert Python values that ibm_db_dbi cannot auto-bind.
+
+    ibm_db_dbi rejects:
+    - pandas.Timestamp / numpy scalars / Python bool
+    - int values bound to CLOB/VARCHAR columns (ibm_db doesn't auto-coerce int→CLOB)
+
+    Any remaining int/float value bound to a VARCHAR-like column must be converted
+    to str before this function is called; see _coerce_db2_row_for_col().
+    """
+    if val is None:
+        return val
+    if isinstance(val, bool):
+        return int(val)
+    # pandas.Timestamp → datetime.date (ibm_db accepts datetime.date for DATE columns)
+    try:
+        import pandas as _pd
+        if isinstance(val, _pd.Timestamp):
+            return val.date() if val.hour == 0 and val.minute == 0 and val.second == 0 else val.to_pydatetime()
+        if isinstance(val, _pd.NA.__class__):
+            return None
+    except Exception:
+        pass
+    # numpy integer/float scalars → native Python types
+    try:
+        import numpy as _np
+        if isinstance(val, _np.integer):
+            return int(val)
+        if isinstance(val, _np.floating):
+            return float(val)
+        if isinstance(val, _np.bool_):
+            return int(val)
+    except Exception:
+        pass
+    return val
+
+
+# ibm_db_dbi cannot bind int/float/bool to CLOB or VARCHAR columns.
+_DB2_TEXT_TYPES = frozenset({"varchar", "char", "clob", "blob", "text", "nchar", "nvarchar"})
+
+
+def _coerce_db2_row(row: tuple, col_types: list[str]) -> tuple:
+    """Coerce a DB2 row: apply _coerce_db2_val then str-ify non-string scalars
+    destined for text columns (ibm_db_dbi cannot bind int → CLOB/VARCHAR)."""
+    result = []
+    for val, ctype in zip(row, col_types):
+        v = _coerce_db2_val(val)
+        # ibm_db_dbi rejects int/float bound to CLOB/VARCHAR: coerce to str.
+        if v is not None and not isinstance(v, str) and ctype.lower() in _DB2_TEXT_TYPES:
+            v = str(v)
+        result.append(v)
+    return tuple(result)
+
+
 def _build_oracle_all_sql(
     table: str,
     col_names: list[str],
@@ -625,6 +679,7 @@ def bulk_load_db2(  # pragma: no cover
     col_names: list[str],
     schema: Optional[str] = None,
     staging_dir: Optional[str] = None,
+    col_types: Optional[list[str]] = None,
 ) -> int:
     """
     Load df into IBM Db2 LUW.
@@ -723,10 +778,14 @@ def bulk_load_db2(  # pragma: no cover
     paramstyle = _detect_paramstyle(conn)
     cfg        = _DIALECT_BATCH_DEFAULTS.get("db2", BatchConfig())
     batch_size = _effective_batch_size(cfg, len(col_names))
-    # DB2 DDL emitter creates tables with quoted uppercase names ("BRANCH").
-    # Pass the uppercased name so _build_multi_row_sql quotes it correctly.
+    # DB2 DDL emitter creates tables with quoted lowercase column names ("w_gmt_offset").
+    # Coerce pandas/numpy types and int→str for VARCHAR/CLOB columns.
+    if col_types:
+        coerced = (_coerce_db2_row(row, col_types) for row in rows)
+    else:
+        coerced = (tuple(_coerce_db2_val(v) for v in row) for row in rows)
     inserted   = _insert_multi_row(
-        cur, table.upper(), col_names, iter(rows), "db2", paramstyle, batch_size
+        cur, table.upper(), col_names, coerced, "db2", paramstyle, batch_size
     )
     conn.commit()
     logger.info("bulk_load_db2[MULTI_ROW]: loaded %d rows into %s", inserted, full)
@@ -746,6 +805,7 @@ def load_dataframe(
     strategy: LoadStrategy = LoadStrategy.MULTI_ROW,
     config: Optional[BatchConfig] = None,
     cols: Optional[list[str]] = None,
+    col_types: Optional[list[str]] = None,
     staging_dir: Optional[str] = None,
     commit: bool = True,
 ) -> int:
@@ -902,7 +962,7 @@ def load_dataframe(
             )
         elif dialect == "db2":
             inserted = bulk_load_db2(
-                conn, df, table, col_names, staging_dir=staging_dir
+                conn, df, table, col_names, staging_dir=staging_dir, col_types=col_types
             )
         else:
             logger.warning(

@@ -185,6 +185,12 @@ def _quote(name: str, dialect: str) -> str:
 
 
 def _schema_table(table: str, dialect: str, schema: str | None) -> str:
+    # Oracle and DB2 store unquoted identifiers in uppercase; do not double-quote
+    # them or the case-sensitive lookup will miss the object.
+    if dialect in ("oracle", "db2"):
+        if schema:
+            return f"{schema.upper()}.{table.upper()}"
+        return table.upper()
     if schema:
         return f"{_quote(schema, dialect)}.{_quote(table, dialect)}"
     return _quote(table, dialect)

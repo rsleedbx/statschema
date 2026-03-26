@@ -982,6 +982,9 @@ def load_source(
         _tname = table.name.upper() if dialect == "oracle" else table.name
         _cols  = ([c.name.upper() for c in table.columns] if dialect == "oracle"
                   else [c.name for c in table.columns])
+        # DB2: ibm_db_dbi cannot auto-coerce int/float → CLOB/VARCHAR; pass column
+        # types so bulk_load_db2 can str-ify non-string values for text columns.
+        _ctypes = [c.type for c in table.columns] if dialect == "db2" else None
         print(f"  [A]   loading {table.name:<25} {n:>10,} rows…", end=" ", flush=True)
         t0 = time.perf_counter()
         load_dataframe(
@@ -989,6 +992,7 @@ def load_source(
             conn, _tname, dialect,
             strategy=_strat,
             cols=_cols,
+            col_types=_ctypes,
             commit=False,
         )
         try:
@@ -1347,8 +1351,9 @@ def _compare_stats(
         t_null = t_null_hit = 0
         col_detail: dict[str, dict] = {}
 
-        src_cols = {c.name: c for c in (src_ts.columns or [])}
-        tgt_cols = {c.name: c for c in (tgt_ts.columns or [])}
+        # Normalize to lowercase so Oracle (uppercase) and PG (lowercase) match.
+        src_cols = {c.name.lower(): c for c in (src_ts.columns or [])}
+        tgt_cols = {c.name.lower(): c for c in (tgt_ts.columns or [])}
 
         for cname, sc in src_cols.items():
             tc = tgt_cols.get(cname)
@@ -2019,10 +2024,22 @@ def run_identity_test(
         _ss_schema  = stats_source_schema or source_schema
         print(f"  [C] Cross-DB stats: collecting from {_ss_dialect} schema {_ss_schema!r}…")
         _ss_conn = _connect(_ss_dialect, stats_source_dsn)
-        try:
-            _ss_conn.autocommit = False
-        except (AttributeError, TypeError):
-            pass
+        # SQL Server requires autocommit=True for DDL (CREATE DATABASE etc.);
+        # _connect_sqlserver sets it — don't override it here.
+        if _ss_dialect != "sqlserver":
+            try:
+                _ss_conn.autocommit = False
+            except (AttributeError, TypeError):
+                pass
+        # For SQL Server and MySQL the "schema" is a DATABASE.  Switch context so
+        # that subsequent catalog queries and table refs work without the 3-part
+        # name.  (load_source calls _create_schema / _set_namespace internally.)
+        if _ss_dialect in ("sqlserver", "mysql", "mariadb"):
+            try:
+                _set_namespace(_ss_conn, _ss_schema, _ss_dialect)
+            except Exception:
+                pass  # schema may not exist yet; will be created below
+
         # Ensure the stats-source schema exists; if empty, load data there first.
         _ss_empty = False
         try:
@@ -2044,6 +2061,16 @@ def run_identity_test(
             _ss_conn, ordered, _ss_schema, _ss_dialect, save_dir=save_yaml
         )
         _ss_conn.close()
+        # Cross-DB Phase C can be long (loading + collecting from source DB).
+        # The target connection may have been closed by an application-level idle
+        # timeout on the server side.  Reconnect before Phase D to avoid a stale
+        # connection error on the first Lakebase DDL statement.
+        try:
+            conn.cursor().execute("SELECT 1")
+        except Exception:
+            conn.close()
+            conn = _connect(dialect, dsn)
+            conn.autocommit = False
     else:
         collected_stats = collect_stats(
             conn, ordered, source_schema, dialect, save_dir=save_yaml

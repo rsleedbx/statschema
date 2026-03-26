@@ -116,6 +116,12 @@ def _lakebase_connect(endpoint: str, host: str, dbname: str, user: str, port: in
         host=host, port=port, dbname=dbname,
         user=user, password=credential.token,
         sslmode="require",
+        # TCP keepalives prevent SSL drops when the connection is idle during
+        # long Phase-C operations (loading and collecting stats from source DB).
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
     )
 
 

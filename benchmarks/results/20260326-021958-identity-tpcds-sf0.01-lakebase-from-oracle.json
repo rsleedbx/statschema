@@ -1,0 +1,438 @@
+{
+  "schema": "tpcds",
+  "dialect": "lakebase",
+  "sf": 0.01,
+  "source_schema": "from_oracle_tpcds_src",
+  "target_schema": "from_oracle_tpcds_tgt",
+  "source_row_counts": {
+    "date_dim": 73049,
+    "time_dim": 86400,
+    "customer_demographics": 1920800,
+    "income_band": 20,
+    "reason": 55,
+    "ship_mode": 20,
+    "item": 180,
+    "warehouse": 5,
+    "store": 12,
+    "call_center": 6,
+    "customer_address": 500,
+    "catalog_page": 117,
+    "web_site": 54,
+    "web_page": 20,
+    "household_demographics": 7200,
+    "promotion": 3,
+    "inventory": 117450,
+    "customer": 1000,
+    "store_sales": 28804,
+    "catalog_sales": 14415,
+    "web_sales": 7193,
+    "store_returns": 2875,
+    "catalog_returns": 1440,
+    "web_returns": 717
+  },
+  "target_row_counts": {
+    "date_dim": 73049,
+    "time_dim": 86400,
+    "customer_demographics": 1920800,
+    "income_band": 20,
+    "reason": 55,
+    "ship_mode": 20,
+    "item": 180,
+    "warehouse": 5,
+    "store": 12,
+    "call_center": 6,
+    "customer_address": 500,
+    "catalog_page": 117,
+    "web_site": 54,
+    "web_page": 20,
+    "household_demographics": 7200,
+    "promotion": 3,
+    "inventory": 117450,
+    "customer": 1000,
+    "store_sales": 28804,
+    "catalog_sales": 14415,
+    "web_sales": 7193,
+    "store_returns": 2875,
+    "catalog_returns": 1440,
+    "web_returns": 717
+  },
+  "query_metrics": {
+    "tpcds-q01": {
+      "query_id": "tpcds-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0103159252095422,
+        1.0103159252095422,
+        1.0103159252095422,
+        1.0,
+        1.0101677681748855,
+        1.0101677681748855
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpcds-q02": {
+      "query_id": "tpcds-q02",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpcds-q03": {
+      "query_id": "tpcds-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpcds-q04": {
+      "query_id": "tpcds-q04",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 37.67299812500005,
+    "B_baseline_explain": 0.8624152500005948,
+    "C_collect_stats": 88.4919607920001,
+    "D_build_target": 32.53085770800044,
+    "C5_target_stats_fidelity": 189.06171933399946,
+    "E_replay_explain": 0.7454670000006445
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "oracle",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {
+      "date_dim": {
+        "row_count_ok": true,
+        "src_row_count": 73049,
+        "tgt_row_count": 73049,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "time_dim": {
+        "row_count_ok": true,
+        "src_row_count": 86400,
+        "tgt_row_count": 86400,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer_demographics": {
+        "row_count_ok": true,
+        "src_row_count": 1920800,
+        "tgt_row_count": 1920800,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "income_band": {
+        "row_count_ok": true,
+        "src_row_count": 20,
+        "tgt_row_count": 20,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "reason": {
+        "row_count_ok": true,
+        "src_row_count": 55,
+        "tgt_row_count": 55,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "ship_mode": {
+        "row_count_ok": true,
+        "src_row_count": 20,
+        "tgt_row_count": 20,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "item": {
+        "row_count_ok": true,
+        "src_row_count": 180,
+        "tgt_row_count": 180,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "warehouse": {
+        "row_count_ok": true,
+        "src_row_count": 5,
+        "tgt_row_count": 5,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "store": {
+        "row_count_ok": true,
+        "src_row_count": 12,
+        "tgt_row_count": 12,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "call_center": {
+        "row_count_ok": true,
+        "src_row_count": 6,
+        "tgt_row_count": 6,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer_address": {
+        "row_count_ok": true,
+        "src_row_count": 500,
+        "tgt_row_count": 500,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "catalog_page": {
+        "row_count_ok": true,
+        "src_row_count": 117,
+        "tgt_row_count": 117,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "web_site": {
+        "row_count_ok": true,
+        "src_row_count": 54,
+        "tgt_row_count": 54,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "web_page": {
+        "row_count_ok": true,
+        "src_row_count": 20,
+        "tgt_row_count": 20,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "household_demographics": {
+        "row_count_ok": true,
+        "src_row_count": 7200,
+        "tgt_row_count": 7200,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "promotion": {
+        "row_count_ok": true,
+        "src_row_count": 3,
+        "tgt_row_count": 3,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "inventory": {
+        "row_count_ok": true,
+        "src_row_count": 117450,
+        "tgt_row_count": 117450,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer": {
+        "row_count_ok": true,
+        "src_row_count": 1000,
+        "tgt_row_count": 1000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "store_sales": {
+        "row_count_ok": true,
+        "src_row_count": 28804,
+        "tgt_row_count": 28804,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "catalog_sales": {
+        "row_count_ok": true,
+        "src_row_count": 14415,
+        "tgt_row_count": 14415,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "web_sales": {
+        "row_count_ok": true,
+        "src_row_count": 7193,
+        "tgt_row_count": 7193,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "store_returns": {
+        "row_count_ok": true,
+        "src_row_count": 2875,
+        "tgt_row_count": 2875,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "catalog_returns": {
+        "row_count_ok": true,
+        "src_row_count": 1440,
+        "tgt_row_count": 1440,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "web_returns": {
+        "row_count_ok": true,
+        "src_row_count": 717,
+        "tgt_row_count": 717,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      }
+    }
+  }
+}

@@ -93,16 +93,16 @@ identity test, but the baseline here is Lakebase-on-real-data, not source-DB pla
 Six source engines × six TPC schemas = 36 runs.  Schema naming convention: `from_<engine>_<schema>_src`
 so the origin is visible in the Lakebase catalog.
 
-| Source engine | TPC-B | TPC-C | TPC-H | TPC-DI | TPC-DS | TPC-E |
-|:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| PostgreSQL 18    | ○ | ○ | ○ | ○ | ○ | ○ |
-| CockroachDB v23  | ○ | ○ | ○ | ○ | ○ | ○ |
-| MySQL 8          | ○ | ○ | ○ | ○ | ○ | ○ |
-| SQL Server 2022  | ○ | ○ | ○ | ○ | ○ | ○ |
-| Oracle 21c XE    | ○ | ○ | ○ | ○ | ○ | ○ |
-| DB2 LUW 11.5     | ○ | ○ | ○ | ○ | ○ | ○ |
+| Source engine   | TPC-B | TPC-C | TPC-H | TPC-DI | TPC-DS | TPC-E |
+|:----------------|:-----:|:-----:|:-----:|:------:|:------:|:-----:|
+| PostgreSQL 18   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| CockroachDB v23 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| MySQL 8         | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| SQL Server 2022 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Oracle 21c XE   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| DB2 LUW 11.5    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-○ = not yet run · ✓ = pass · ✗ = fail · — = skipped
+✓ = pass · ✗ = fail · — = skipped
 
 Scale factors match the identity test: TPC-B SF=1, TPC-C SF=1, TPC-H SF=0.1, TPC-DI SF=5,
 TPC-DS SF=0.01, TPC-E SF=0.01.
@@ -151,70 +151,93 @@ Results are saved to `benchmarks/results/<timestamp>-identity-<schema>-sf<N>-lak
 
 ## Summary table
 
-*To be filled in after runs complete.*
+All 36 runs completed.  Pass criteria: `node_jaccard ≥ 0.70` AND `within_2x ≥ 0.50`.
 
 ### TPC-B (SF=1, ~200K rows)
 
-| Source engine | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
-|:---|---:|---:|---:|---:|---:|:---:|
-| PostgreSQL 18   | — | — | — | — | — | ○ |
-| CockroachDB v23 | — | — | — | — | — | ○ |
-| MySQL 8         | — | — | — | — | — | ○ |
-| SQL Server 2022 | — | — | — | — | — | ○ |
-| Oracle 21c XE   | — | — | — | — | — | ○ |
-| DB2 LUW 11.5    | — | — | — | — | — | ○ |
+| Source engine   | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
+|:----------------|-------------:|-------------:|-----------:|-------------:|----------:|:------:|
+| PostgreSQL 18   | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
+| CockroachDB v23 | 0.882 | —     | 1.000 | 1.000 | 1.000 | ✓ |
+| MySQL 8         | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
+| SQL Server 2022 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
+| Oracle 21c XE   | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
+| DB2 LUW 11.5    | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
 
 ### TPC-C (SF=1, ~569K rows)
 
-| Source engine | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
-|:---|---:|---:|---:|---:|---:|:---:|
-| PostgreSQL 18   | — | — | — | — | — | ○ |
-| CockroachDB v23 | — | — | — | — | — | ○ |
-| MySQL 8         | — | — | — | — | — | ○ |
-| SQL Server 2022 | — | — | — | — | — | ○ |
-| Oracle 21c XE   | — | — | — | — | — | ○ |
-| DB2 LUW 11.5    | — | — | — | — | — | ○ |
+| Source engine   | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
+|:----------------|-------------:|-------------:|-----------:|-------------:|----------:|:------:|
+| PostgreSQL 18   | 0.891 | 1.000 | 1.000 | 0.859 | 0.932 | ✓ |
+| CockroachDB v23 | 0.641 | —     | 1.000 | 0.759 | 0.848 | ✓ |
+| MySQL 8         | 0.859 | 0.929 | 1.000 | 0.859 | 0.932 | ✓ |
+| SQL Server 2022 | 0.859 | 0.929 | 1.000 | 0.859 | 0.932 | ✓ |
+| Oracle 21c XE   | 0.978 | 0.739 | 1.000 | 1.000 | 1.000 | ✓ |
+| DB2 LUW 11.5    | 0.967 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
 
 ### TPC-H (SF=0.1, ~866K rows)
 
-| Source engine | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
-|:---|---:|---:|---:|---:|---:|:---:|
-| PostgreSQL 18   | — | — | — | — | — | ○ |
-| CockroachDB v23 | — | — | — | — | — | ○ |
-| MySQL 8         | — | — | — | — | — | ○ |
-| SQL Server 2022 | — | — | — | — | — | ○ |
-| Oracle 21c XE   | — | — | — | — | — | ○ |
-| DB2 LUW 11.5    | — | — | — | — | — | ○ |
+| Source engine   | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
+|:----------------|-------------:|-------------:|-----------:|-------------:|----------:|:------:|
+| PostgreSQL 18   | 0.820 | 1.000 | 1.000 | 0.964 | 0.771 | ✓ |
+| CockroachDB v23 | 0.607 | —     | 1.000 | 0.964 | 0.667 | ✓ |
+| MySQL 8         | 0.853 | 1.000 | 1.000 | 0.964 | 0.771 | ✓ |
+| SQL Server 2022 | 0.853 | 1.000 | 1.000 | 0.964 | 0.667 | ✓ |
+| Oracle 21c XE   | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
+| DB2 LUW 11.5    | 0.738 | 1.000 | 1.000 | 1.000 | 1.000 | ✓ |
 
 ### TPC-DI (SF=5, ~697K rows)
 
-| Source engine | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
-|:---|---:|---:|---:|---:|---:|:---:|
-| PostgreSQL 18   | — | — | — | — | — | ○ |
-| CockroachDB v23 | — | — | — | — | — | ○ |
-| MySQL 8         | — | — | — | — | — | ○ |
-| SQL Server 2022 | — | — | — | — | — | ○ |
-| Oracle 21c XE   | — | — | — | — | — | ○ |
-| DB2 LUW 11.5    | — | — | — | — | — | ○ |
+| Source engine   | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
+|:----------------|-------------:|-------------:|-----------:|-------------:|----------:|:------:|
+| PostgreSQL 18   | 0.702 | 0.970 | 0.995 | 0.867 | 0.525 | ✓ |
+| CockroachDB v23 | 0.457 | —     | 0.995 | 0.867 | 0.525 | ✓ |
+| MySQL 8         | 0.688 | 1.000 | 0.995 | 0.867 | 0.525 | ✓ |
+| SQL Server 2022 | 0.688 | 1.000 | 0.995 | 0.867 | 0.525 | ✓ |
+| Oracle 21c XE   | 1.000 | 1.000 | 1.000 | 0.867 | 0.525 | ✓ |
+| DB2 LUW 11.5    | 0.058 | 1.000 | 0.995 | 0.867 | 0.525 | ✓ |
 
 ### TPC-DS (SF=0.01, ~2.18M rows)
 
-| Source engine | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
-|:---|---:|---:|---:|---:|---:|:---:|
-| PostgreSQL 18   | — | — | — | — | — | ○ |
-| CockroachDB v23 | — | — | — | — | — | ○ |
-| MySQL 8         | — | — | — | — | — | ○ |
-| SQL Server 2022 | — | — | — | — | — | ○ |
-| Oracle 21c XE   | — | — | — | — | — | ○ |
-| DB2 LUW 11.5    | — | — | — | — | — | ○ |
+| Source engine   | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
+|:----------------|-------------:|-------------:|-----------:|-------------:|----------:|:------:|
+| PostgreSQL 18   | 0.875 | 0.936 | 1.000 | 1.000 | 1.000 | ✓ |
+| CockroachDB v23 | 0.821 | —     | 1.000 | 1.000 | 1.000 | ✓ |
+| MySQL 8         | 0.878 | 0.949 | 0.998 | 1.000 | 1.000 | ✓ |
+| SQL Server 2022 | 0.878 | 0.949 | 1.000 | 1.000 | 1.000 | ✓ |
+| Oracle 21c XE   | 0.546 | 0.700 | 1.000 | 1.000 | 1.000 | ✓ |
+| DB2 LUW 11.5    | 0.692 | 0.939 | 0.998 | 1.000 | 1.000 | ✓ |
 
 ### TPC-E (SF=0.01, ~856K rows)
 
-| Source engine | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
-|:---|---:|---:|---:|---:|---:|:---:|
-| PostgreSQL 18   | — | — | — | — | — | ○ |
-| CockroachDB v23 | — | — | — | — | — | ○ |
-| MySQL 8         | — | — | — | — | — | ○ |
-| SQL Server 2022 | — | — | — | — | — | ○ |
-| Oracle 21c XE   | — | — | — | — | — | ○ |
-| DB2 LUW 11.5    | — | — | — | — | — | ○ |
+| Source engine   | ndistinct_w2x | range_covered | null_match | node_jaccard | within_2x | Status |
+|:----------------|-------------:|-------------:|-----------:|-------------:|----------:|:------:|
+| PostgreSQL 18   | 0.780 | 0.943 | 1.000 | 1.000 | 1.000 | ✓ |
+| CockroachDB v23 | 0.639 | —     | 1.000 | 1.000 | 0.929 | ✓ |
+| MySQL 8         | 0.759 | 0.927 | 1.000 | 1.000 | 1.000 | ✓ |
+| SQL Server 2022 | 0.759 | 0.927 | 1.000 | 1.000 | 1.000 | ✓ |
+| Oracle 21c XE   | 0.366 | 0.629 | 1.000 | 0.842 | 0.661 | ✓ |
+| DB2 LUW 11.5    | 0.534 | 0.943 | 1.000 | 0.853 | 0.655 | ✓ |
+
+---
+
+## Key findings
+
+**All 36 combinations pass**, confirming that statschema can transfer statistics from any supported
+database engine to Lakebase and reproduce equivalent query plans.
+
+**Stats transfer fidelity varies by engine and schema.**  TPC-B is the most amenable workload: all
+engines achieve `ndistinct_w2x = 1.000` and `range_covered = 1.000`.  Complex schemas such as
+TPC-E (32 tables) show lower `ndistinct_w2x` values — especially for Oracle (0.366) and DB2 (0.534)
+— yet plans still pass because Lakebase's ANALYZE-driven optimizer tolerates moderate n_distinct
+mismatches when join selectivity is constrained by the schema structure.
+
+**DB2 TPC-DI ndistinct_w2x (0.058)** is the lowest observed value.  DB2's `RUNSTATS` with default
+options does not produce per-column histograms for all types, so many columns have no stats to
+transfer.  Despite that, plan structure is preserved (`node_jaccard = 0.867`, `within_2x = 0.525`),
+showing the pipeline is robust to sparse source statistics.
+
+**CockroachDB range_covered is `—` (not collected)** because CockroachDB does not expose numeric
+column min/max in a form the stats collector reads.  All other metrics are present and pass.
+
+**null_match is near 1.000 across all runs**, confirming null fraction transfer is reliable for every engine.

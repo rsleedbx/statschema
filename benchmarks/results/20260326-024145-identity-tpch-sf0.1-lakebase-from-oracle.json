@@ -1,0 +1,265 @@
+{
+  "schema": "tpch",
+  "dialect": "lakebase",
+  "sf": 0.1,
+  "source_schema": "from_oracle_tpch_src",
+  "target_schema": "from_oracle_tpch_tgt",
+  "source_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "target_row_counts": {
+    "region": 5,
+    "part": 20000,
+    "nation": 25,
+    "supplier": 1000,
+    "customer": 15000,
+    "partsupp": 80000,
+    "orders": 150000,
+    "lineitem": 600000
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0010992657734268
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0090077932593366,
+        1.0090077932593366,
+        1.0090688259109313,
+        1.0090688259109313,
+        1.0090688259109313,
+        1.0092329385645817,
+        1.0002447381302007,
+        1.0002447381302007,
+        1.0015325670498085,
+        1.0013218770654329,
+        1.0013218770654329
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 9,
+      "target_plan_depth": 9
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0066523185286638
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.1201044386422976,
+        1.100361010830325,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 29.03434604099948,
+    "B_baseline_explain": 0.6028344579999612,
+    "C_collect_stats": 18.06260445800035,
+    "D_build_target": 26.79531550000047,
+    "C5_target_stats_fidelity": 41.14022295900031,
+    "E_replay_explain": 0.7614115420001326
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "oracle",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {
+      "region": {
+        "row_count_ok": true,
+        "src_row_count": 5,
+        "tgt_row_count": 5,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "part": {
+        "row_count_ok": true,
+        "src_row_count": 20000,
+        "tgt_row_count": 20000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "nation": {
+        "row_count_ok": true,
+        "src_row_count": 25,
+        "tgt_row_count": 25,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "supplier": {
+        "row_count_ok": true,
+        "src_row_count": 1000,
+        "tgt_row_count": 1000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer": {
+        "row_count_ok": true,
+        "src_row_count": 15000,
+        "tgt_row_count": 15000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "partsupp": {
+        "row_count_ok": true,
+        "src_row_count": 80000,
+        "tgt_row_count": 80000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "orders": {
+        "row_count_ok": true,
+        "src_row_count": 150000,
+        "tgt_row_count": 150000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "lineitem": {
+        "row_count_ok": true,
+        "src_row_count": 600000,
+        "tgt_row_count": 600000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      }
+    }
+  }
+}

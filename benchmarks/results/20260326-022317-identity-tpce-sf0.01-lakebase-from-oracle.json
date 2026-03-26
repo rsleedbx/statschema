@@ -1,0 +1,544 @@
+{
+  "schema": "tpce",
+  "dialect": "lakebase",
+  "sf": 0.01,
+  "source_schema": "from_oracle_tpce_src",
+  "target_schema": "from_oracle_tpce_tgt",
+  "source_row_counts": {
+    "exchange": 4,
+    "sector": 12,
+    "status_type": 5,
+    "trade_type": 5,
+    "taxrate": 320,
+    "charge": 15,
+    "commission_rate": 240,
+    "zip_code": 14741,
+    "address": 13333,
+    "news_item": 200,
+    "industry": 102,
+    "broker": 10,
+    "customer": 10000,
+    "company": 50,
+    "customer_taxrate": 30000,
+    "customer_account": 50000,
+    "watch_list": 10000,
+    "company_competitor": 150,
+    "security": 68,
+    "financial": 1000,
+    "news_xref": 600,
+    "account_permission": 75000,
+    "watch_item": 150000,
+    "daily_market": 125027,
+    "last_trade": 68,
+    "trade": 33387,
+    "holding_summary": 38000,
+    "trade_history": 100000,
+    "trade_request": 1000,
+    "holding": 50000,
+    "cash_transaction": 33387,
+    "holding_history": 100000
+  },
+  "target_row_counts": {
+    "exchange": 4,
+    "sector": 12,
+    "status_type": 5,
+    "trade_type": 5,
+    "taxrate": 320,
+    "charge": 15,
+    "commission_rate": 240,
+    "zip_code": 14741,
+    "address": 13333,
+    "news_item": 200,
+    "industry": 102,
+    "broker": 10,
+    "customer": 10000,
+    "company": 50,
+    "customer_taxrate": 30000,
+    "customer_account": 50000,
+    "watch_list": 10000,
+    "company_competitor": 150,
+    "security": 68,
+    "financial": 1000,
+    "news_xref": 600,
+    "account_permission": 75000,
+    "watch_item": 150000,
+    "daily_market": 125027,
+    "last_trade": 68,
+    "trade": 33387,
+    "holding_summary": 38000,
+    "trade_history": 100000,
+    "trade_request": 1000,
+    "holding": 50000,
+    "cash_transaction": 33387,
+    "holding_history": 100000
+  },
+  "query_metrics": {
+    "tpce-q01": {
+      "query_id": "tpce-q01",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.010688585794719,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpce-q02": {
+      "query_id": "tpce-q02",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.875,
+      "row_estimate_ratios": [
+        1.0,
+        68.0,
+        68.0,
+        558.8235294117648,
+        558.8235294117648,
+        558.8235294117648,
+        1.0
+      ],
+      "within_2x": 0.2857142857142857,
+      "within_10x": 0.2857142857142857,
+      "source_plan_depth": 5,
+      "target_plan_depth": 6
+    },
+    "tpce-q03": {
+      "query_id": "tpce-q03",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Incremental Sort",
+        "Merge Join",
+        "Sort",
+        "Seq Scan",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.5384615384615384,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1721.276595744681,
+        1330.0744680851064,
+        22.0,
+        22.0,
+        1.0,
+        17.0,
+        31256.75
+      ],
+      "within_2x": 0.3333333333333333,
+      "within_10x": 0.3333333333333333,
+      "source_plan_depth": 6,
+      "target_plan_depth": 7
+    },
+    "tpce-q04": {
+      "query_id": "tpce-q04",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    }
+  },
+  "mean_node_jaccard": 0.8533653846153846,
+  "mean_within_2x": 0.6547619047619047,
+  "mean_within_10x": 0.6547619047619047,
+  "phase_times": {
+    "A_load_source": 31.750665375000608,
+    "B_baseline_explain": 0.7109535839999808,
+    "C_collect_stats": 41.64129745900027,
+    "D_build_target": 36.367397709000215,
+    "C5_target_stats_fidelity": 83.50673358400036,
+    "E_replay_explain": 0.9642682080002487
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "oracle",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {
+      "exchange": {
+        "row_count_ok": true,
+        "src_row_count": 4,
+        "tgt_row_count": 4,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "sector": {
+        "row_count_ok": true,
+        "src_row_count": 12,
+        "tgt_row_count": 12,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "status_type": {
+        "row_count_ok": true,
+        "src_row_count": 5,
+        "tgt_row_count": 5,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "trade_type": {
+        "row_count_ok": true,
+        "src_row_count": 5,
+        "tgt_row_count": 5,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "taxrate": {
+        "row_count_ok": true,
+        "src_row_count": 320,
+        "tgt_row_count": 320,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "charge": {
+        "row_count_ok": true,
+        "src_row_count": 15,
+        "tgt_row_count": 15,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "commission_rate": {
+        "row_count_ok": true,
+        "src_row_count": 240,
+        "tgt_row_count": 240,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "zip_code": {
+        "row_count_ok": true,
+        "src_row_count": 14741,
+        "tgt_row_count": 14741,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "address": {
+        "row_count_ok": true,
+        "src_row_count": 13333,
+        "tgt_row_count": 13333,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "news_item": {
+        "row_count_ok": true,
+        "src_row_count": 200,
+        "tgt_row_count": 200,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "industry": {
+        "row_count_ok": true,
+        "src_row_count": 102,
+        "tgt_row_count": 102,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "broker": {
+        "row_count_ok": true,
+        "src_row_count": 10,
+        "tgt_row_count": 10,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer": {
+        "row_count_ok": true,
+        "src_row_count": 10000,
+        "tgt_row_count": 10000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "company": {
+        "row_count_ok": true,
+        "src_row_count": 50,
+        "tgt_row_count": 50,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer_taxrate": {
+        "row_count_ok": true,
+        "src_row_count": 30000,
+        "tgt_row_count": 30000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "customer_account": {
+        "row_count_ok": true,
+        "src_row_count": 50000,
+        "tgt_row_count": 50000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "watch_list": {
+        "row_count_ok": true,
+        "src_row_count": 10000,
+        "tgt_row_count": 10000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "company_competitor": {
+        "row_count_ok": true,
+        "src_row_count": 150,
+        "tgt_row_count": 150,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "security": {
+        "row_count_ok": true,
+        "src_row_count": 68,
+        "tgt_row_count": 68,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "financial": {
+        "row_count_ok": true,
+        "src_row_count": 1000,
+        "tgt_row_count": 1000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "news_xref": {
+        "row_count_ok": true,
+        "src_row_count": 600,
+        "tgt_row_count": 600,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "account_permission": {
+        "row_count_ok": true,
+        "src_row_count": 75000,
+        "tgt_row_count": 75000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "watch_item": {
+        "row_count_ok": true,
+        "src_row_count": 150000,
+        "tgt_row_count": 150000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "daily_market": {
+        "row_count_ok": true,
+        "src_row_count": 125027,
+        "tgt_row_count": 125027,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "last_trade": {
+        "row_count_ok": true,
+        "src_row_count": 68,
+        "tgt_row_count": 68,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "trade": {
+        "row_count_ok": true,
+        "src_row_count": 33387,
+        "tgt_row_count": 33387,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "holding_summary": {
+        "row_count_ok": true,
+        "src_row_count": 38000,
+        "tgt_row_count": 38000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "trade_history": {
+        "row_count_ok": true,
+        "src_row_count": 100000,
+        "tgt_row_count": 100000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "trade_request": {
+        "row_count_ok": true,
+        "src_row_count": 1000,
+        "tgt_row_count": 1000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "holding": {
+        "row_count_ok": true,
+        "src_row_count": 50000,
+        "tgt_row_count": 50000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "cash_transaction": {
+        "row_count_ok": true,
+        "src_row_count": 33387,
+        "tgt_row_count": 33387,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "holding_history": {
+        "row_count_ok": true,
+        "src_row_count": 100000,
+        "tgt_row_count": 100000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      }
+    }
+  }
+}

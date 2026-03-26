@@ -1,0 +1,288 @@
+{
+  "schema": "tpcds",
+  "dialect": "lakebase",
+  "sf": 0.01,
+  "source_schema": "from_mssql_tpcds_src",
+  "target_schema": "from_mssql_tpcds_tgt",
+  "source_row_counts": {
+    "date_dim": 73049,
+    "time_dim": 86400,
+    "customer_demographics": 1920800,
+    "income_band": 20,
+    "reason": 55,
+    "ship_mode": 20,
+    "item": 180,
+    "warehouse": 5,
+    "store": 12,
+    "call_center": 6,
+    "customer_address": 500,
+    "catalog_page": 117,
+    "web_site": 54,
+    "web_page": 20,
+    "household_demographics": 7200,
+    "promotion": 3,
+    "inventory": 117450,
+    "customer": 1000,
+    "store_sales": 28804,
+    "catalog_sales": 14415,
+    "web_sales": 7193,
+    "store_returns": 2875,
+    "catalog_returns": 1440,
+    "web_returns": 717
+  },
+  "target_row_counts": {
+    "date_dim": 73049,
+    "time_dim": 86400,
+    "customer_demographics": 1920800,
+    "income_band": 20,
+    "reason": 55,
+    "ship_mode": 20,
+    "item": 180,
+    "warehouse": 5,
+    "store": 12,
+    "call_center": 6,
+    "customer_address": 500,
+    "catalog_page": 117,
+    "web_site": 54,
+    "web_page": 20,
+    "household_demographics": 7200,
+    "promotion": 3,
+    "inventory": 117450,
+    "customer": 1000,
+    "store_sales": 28804,
+    "catalog_sales": 14415,
+    "web_sales": 7193,
+    "store_returns": 2875,
+    "catalog_returns": 1440,
+    "web_returns": 717
+  },
+  "query_metrics": {
+    "tpcds-q01": {
+      "query_id": "tpcds-q01",
+      "source_node_types": [
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0912571793235482,
+        1.0912571793235482,
+        1.0912571793235482,
+        1.0,
+        1.0910920986411676,
+        1.0910920986411676
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpcds-q02": {
+      "query_id": "tpcds-q02",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpcds-q03": {
+      "query_id": "tpcds-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpcds-q04": {
+      "query_id": "tpcds-q04",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 6,
+      "target_plan_depth": 6
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "B_baseline_explain": 0.5860185840010672,
+    "C_collect_stats": 20.468254417000935,
+    "D_build_target": 29.53316312499919,
+    "C5_target_stats_fidelity": 156.0772809170012,
+    "E_replay_explain": 1.0516702919994714
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "sqlserver",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": 0.0,
+    "mean_range_covered": null,
+    "mean_null_match": 1.0,
+    "per_table": {
+      "item": {
+        "row_count_ok": false,
+        "src_row_count": 0,
+        "tgt_row_count": 180,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      },
+      "warehouse": {
+        "row_count_ok": false,
+        "src_row_count": 0,
+        "tgt_row_count": 5,
+        "ndistinct_within_2x": 0.0,
+        "range_covered": null,
+        "null_match": 1.0,
+        "columns": {
+          "w_city": {
+            "src_n_distinct": 0.0,
+            "tgt_n_distinct": 5.0,
+            "nd_ok": false,
+            "src_min": null,
+            "tgt_min": "Oscarcw",
+            "src_max": null,
+            "tgt_max": "Yankeea",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_state": {
+            "src_n_distinct": 0.0,
+            "tgt_n_distinct": 5.0,
+            "nd_ok": false,
+            "src_min": null,
+            "tgt_min": "AK",
+            "src_max": null,
+            "tgt_max": "OR",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_zip": {
+            "src_n_distinct": 0.0,
+            "tgt_n_distinct": 5.0,
+            "nd_ok": false,
+            "src_min": null,
+            "tgt_min": "3m7kv6c",
+            "src_max": null,
+            "tgt_max": "zzq5s8o",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          }
+        }
+      },
+      "customer": {
+        "row_count_ok": false,
+        "src_row_count": 0,
+        "tgt_row_count": 1000,
+        "ndistinct_within_2x": null,
+        "range_covered": null,
+        "null_match": null,
+        "columns": {}
+      }
+    }
+  }
+}

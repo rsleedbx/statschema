@@ -1,0 +1,227 @@
+{
+  "schema": "tpcdi",
+  "dialect": "lakebase",
+  "sf": 5.0,
+  "source_schema": "from_mssql_tpcdi_src",
+  "target_schema": "from_mssql_tpcdi_tgt",
+  "source_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 2000,
+    "DimBroker": 500,
+    "DimCustomer": 4750,
+    "DimMessage": 2500,
+    "DimSecurity": 3425,
+    "Financial": 16000,
+    "DimAccount": 7500,
+    "FactMarketHistory": 285000,
+    "FactWatches": 25000,
+    "DimTrade": 230000,
+    "FactCashBalances": 12500,
+    "FactHoldings": 15000
+  },
+  "target_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 2000,
+    "DimBroker": 500,
+    "DimCustomer": 4750,
+    "DimMessage": 2500,
+    "DimSecurity": 3425,
+    "Financial": 16000,
+    "DimAccount": 7500,
+    "FactMarketHistory": 285000,
+    "FactWatches": 25000,
+    "DimTrade": 230000,
+    "FactCashBalances": 12500,
+    "FactHoldings": 15000
+  },
+  "query_metrics": {
+    "tpcdi-q01": {
+      "query_id": "tpcdi-q01",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        2.525252525252525,
+        2.525252525252525,
+        2.525252525252525,
+        2.525252525252525,
+        2.525252525252525,
+        2.913919970810022,
+        2.884798314268513,
+        2.525252525252525,
+        2.525252525252525
+      ],
+      "within_2x": 0.1,
+      "within_10x": 1.0,
+      "source_plan_depth": 8,
+      "target_plan_depth": 8
+    },
+    "tpcdi-q02": {
+      "query_id": "tpcdi-q02",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.625,
+      "row_estimate_ratios": [
+        1.0,
+        17.125,
+        17.125,
+        17.125,
+        17.125,
+        593.75
+      ],
+      "within_2x": 0.16666666666666666,
+      "within_10x": 0.16666666666666666,
+      "source_plan_depth": 5,
+      "target_plan_depth": 6
+    },
+    "tpcdi-q03": {
+      "query_id": "tpcdi-q03",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Hash Join",
+        "Seq Scan",
+        "Hash",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Gather Merge",
+        "Sort",
+        "Aggregate",
+        "Merge Join",
+        "Sort",
+        "Seq Scan",
+        "Sort",
+        "Merge Join",
+        "Sort",
+        "Seq Scan",
+        "Sort",
+        "Seq Scan"
+      ],
+      "node_jaccard": 0.35,
+      "row_estimate_ratios": [
+        1.0,
+        23.75,
+        23.75,
+        23.75,
+        23.75,
+        479.165,
+        27.67438147610948,
+        4.429333333333333,
+        4.429333333333333,
+        2.1289333333333333,
+        3.361473684210526,
+        4.4981060606060606
+      ],
+      "within_2x": 0.08333333333333333,
+      "within_10x": 0.5,
+      "source_plan_depth": 9,
+      "target_plan_depth": 10
+    },
+    "tpcdi-q04": {
+      "query_id": "tpcdi-q04",
+      "source_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Sort",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        9.985,
+        9.985,
+        1.8066847335140017
+      ],
+      "within_2x": 0.5,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    }
+  },
+  "mean_node_jaccard": 0.74375,
+  "mean_within_2x": 0.2125,
+  "mean_within_10x": 0.6666666666666667,
+  "phase_times": {
+    "B_baseline_explain": 0.6066208339998411,
+    "C_collect_stats": 3.894744625000385,
+    "D_build_target": 44.613425624998854,
+    "C5_target_stats_fidelity": 98.46744387500075,
+    "E_replay_explain": 0.6773122499998863
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": false,
+  "failure_reason": "mean_within_2x 0.212 < threshold 0.5",
+  "stats_injection_mode": "injected",
+  "stats_source_dialect": "sqlserver",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {}
+  }
+}
