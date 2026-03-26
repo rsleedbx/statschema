@@ -8,13 +8,13 @@ production, with real cardinalities, it would choose an index seek. The team con
 database is slower. The database is not slower — its optimizer is working from a description of data
 it does not have.
 
-This is not an edge case. A documented MySQL → PostgreSQL migration of a 400 million-row dataset
-(Medium, 2026) found that testing at 10% scale caused the optimizer to cross the hash join vs. index
-scan threshold: plans were correct for the test data and wrong for production volume. A PostgreSQL
-14 → 16 upgrade (mu88.github.io, 2024) produced sequential scans on a 17 million-row table because
-row estimates were off by two orders of magnitude — not because statistics were absent, but because
-the post-upgrade statistics described the pre-upgrade data shape. In both cases, query performance
-investigation began with the same question: **are the statistics accurate?**
+This is not an edge case. A MySQL → PostgreSQL migration of a 400 million-row dataset found that
+testing at 10% scale caused the optimizer to cross the hash join vs. index scan threshold: plans
+were correct for the test data and wrong for production volume. A PostgreSQL major version upgrade
+produced sequential scans on a 17 million-row table because row estimates were off by two orders of
+magnitude — not because statistics were absent, but because the post-upgrade statistics described
+the pre-upgrade data shape. In both cases, query performance investigation began with the same
+question: **are the statistics accurate?**
 
 ---
 
@@ -31,8 +31,9 @@ estimates lead to wrong plan choices. Wrong plan choices produce the performance
 looks like the new database is at fault.
 
 Autovacuum fills `pg_statistic` over time as real traffic runs. For a large database (hundreds of
-tables, hundreds of millions of rows), a full `ANALYZE` takes hours. For a team evaluating whether
-to migrate at all, real traffic is not available. The evaluation database has no data yet — or has
+tables, hundreds of millions of rows), a full `ANALYZE` takes time proportional to the data volume
+— minutes to hours depending on hardware and PostgreSQL version. For a team evaluating whether to
+migrate at all, real traffic is not available. The evaluation database has no data yet — or has
 the wrong data.
 
 ---
@@ -73,11 +74,12 @@ sufficient in three cases:
 has no rows to analyze. statschema generates rows that match production distributions and injects
 statistics before the first query.
 
-**After a cross-engine migration.** PostgreSQL 18 (released 2025) preserves `pg_statistic` across
-same-engine major-version upgrades via `pg_upgrade`. That improvement eliminates the blind period
-for PostgreSQL → PostgreSQL upgrades. It does not apply when the source engine is MySQL, Oracle,
-SQL Server, DB2, or CockroachDB. Cross-engine migrations always start with an empty catalog on the
-target.
+**After a cross-engine migration.** PostgreSQL 18 (released September 2025) preserves
+`pg_statistic` across same-engine major-version upgrades via `pg_upgrade` to PG18+. That
+improvement eliminates the blind period for PostgreSQL → PostgreSQL upgrades on PG18 and later.
+It does not apply when the source engine is MySQL, Oracle, SQL Server, DB2, or CockroachDB, and
+it does not apply to PostgreSQL installations still running PG16 or PG17. Cross-engine migrations
+always start with an empty catalog on the target.
 
 **After loading at the wrong scale.** `ANALYZE` accurately describes whatever rows are loaded. If
 those rows are a 10% sample, the statistics accurately describe a 10% dataset. The optimizer's
@@ -108,18 +110,18 @@ into the target catalog so the query optimizer sees production-representative ca
 `ANALYZE` runs. The tools are additive in this configuration.
 
 **Both — richer stats from dbldatagen fed into statschema.** This is the complementary path on the
-roadmap. dbldatagen's `DataAnalyzer.summarizeToDF()` produces a statistical summary of any source
-dataframe — joint distributions, column value frequencies, range bounds — that is richer than what
-the source DB's catalog provides natively, especially for Oracle and DB2, whose default catalog
+roadmap. dbldatagen's `DataAnalyzer.summarizeToDF()` produces a per-column statistical summary of any
+source dataframe — value frequencies, range bounds, distribution shape — that is richer than what
+the source DB's catalog provides natively, especially for source engines whose default catalog
 collection leaves many columns without histogram buckets.
 
 In this configuration, dbldatagen's statistical output feeds statschema's intake (`collect_table_stats`
 or a dedicated adapter), statschema generates synthetic rows from the richer distribution, and
 `inject_stats_postgres` / `inject_stats_databricks` load the statistics into the target catalog.
 dbldatagen handles data generation; statschema handles optimizer bootstrap. The cross-engine
-benchmark results show where the richer stats would have the most impact: Oracle×TPC-E
-(`ndistinct_w2x = 0.366`) and DB2×TPC-DI (`ndistinct_w2x = 0.058`) are the cases where catalog
-sparsity limits what statschema can transfer today.
+benchmark results show where the richer stats would have the most impact: the lowest-scoring
+combinations in the cross-engine results are the cases where source catalog sparsity limits what
+statschema can transfer today.
 
 This adapter is on the roadmap.
 
@@ -220,7 +222,10 @@ E) because they span a range of schema complexity — from TPC-B's four tables t
 
 These thresholds are conservative: a plan that shares 70% of its node types and estimates half its
 rows within 2× will make the same resource-allocation decisions — memory grants, parallelism
-choices, join algorithm selection — as the source plan under production load.
+choices, join algorithm selection — as the source plan under production load. The identity test
+measures plan structure and row estimate fidelity from `EXPLAIN` output. It does not measure actual
+runtime performance, which depends on additional factors outside statistics: hardware, buffer pool
+state, parallel worker availability, and runtime data skew.
 
 ---
 
@@ -283,15 +288,14 @@ null fractions transfer within 0.02.
 `null_match` is 1.000 across all 36 runs — null fraction transfer is exact for every engine and
 every schema.
 
-`ndistinct_w2x` is lowest for Oracle×TPC-E (0.366) and DB2×TPC-E (0.534). Both engines produce
-sparse cardinality statistics by default: Oracle's `ALL_TAB_COLUMNS` gives `NUM_DISTINCT` but not
-histogram buckets for all column types; DB2's `RUNSTATS` with default options skips per-column
-histograms for most types. Despite the low fidelity scores, plan metrics pass — Lakebase's
-optimizer tolerates moderate `n_distinct` mismatches when join selectivity is constrained by the
-schema structure (foreign key cardinalities and indexed column ranges).
+`ndistinct_w2x` varies across source engines. The lower values appear where a source engine's
+default catalog collection produces sparse cardinality data — fewer histogram buckets or missing
+`n_distinct` estimates for certain column types. Despite those lower fidelity scores, plan metrics
+still pass: Lakebase's optimizer tolerates moderate `n_distinct` mismatches when join selectivity
+is constrained by the schema structure (foreign key cardinalities and indexed column ranges).
 
-The lowest individual `ndistinct_w2x` in the entire test matrix is DB2×TPC-DI at 0.058 — DB2
-transferred almost no cardinality information for the DI staging tables. The plan still passes
+The lowest individual `ndistinct_w2x` in the entire test matrix is 0.058 (DB2×TPC-DI), where
+almost no cardinality information transferred for the DI staging tables. The plan still passes
 (`node_jaccard = 0.867`, `within_2x = 0.525`) because the join order for TPC-DI's staging queries
 is primarily determined by FK relationships, not column cardinalities.
 
@@ -302,9 +306,12 @@ Full results for all 36 combinations are in
 
 ## Where statschema does not help
 
-**Stored procedure and trigger rewriting.** A documented SQL Server → PostgreSQL migration required
-rewriting 150+ T-SQL procedures to PL/pgSQL. Oracle → PostgreSQL migrations require full PL/SQL →
-PL/pgSQL translation. statschema has no stored procedure parser. This work is manual.
+**Stored procedure and trigger rewriting.** Cross-dialect migrations that include stored procedures
+require rewriting procedural code — T-SQL to PL/pgSQL, PL/SQL to PL/pgSQL, and so on. statschema
+has no stored procedure parser. This work is done manually or with a dedicated tool such as
+[BladeBridge](https://www.databricks.com/company/newsroom/press-releases/databricks-acquires-bladebridge-technology-and-talent)
+(now part of Databricks), which provides LLM-powered code analysis and conversion across more than
+20 enterprise data warehouses and ETL tools.
 
 **Network and infrastructure performance.** A SQLite → Neon migration (HN 40820369) showed p79
 response time doubling after migration. HN commenters identified the cause as network round-trip
@@ -313,11 +320,15 @@ statistics; network physics are out of scope.
 
 **Zero-downtime cutover mechanics.** CDC pipelines, dual-write setups, traffic mirroring, and
 tap-compare testing require live production traffic. statschema generates offline synthetic data; it
-is not a proxy, CDC tool, or traffic mirror.
+is not a proxy, CDC tool, or traffic mirror. For CDC ingestion into Databricks, 
+[Lakeflow Connect](https://docs.databricks.com/aws/en/ingestion/overview) provides managed
+connectors with built-in change data capture from databases and SaaS applications. Similar
+CDC tooling exists for other targets.
 
-**ETL pipeline correctness.** AWS DMS has documented issues with JSON/BLOB integrity, MySQL
-`0000-00-00` datetime edge cases, and auto-increment sequence misalignment. These are defects in
-the data movement tool. statschema cannot validate that transferred rows are correct.
+**ETL pipeline correctness.** Data movement between engines surfaces cross-compatibility edge cases:
+invalid date values such as MySQL's `0000-00-00`, JSON and BLOB encoding differences, and
+auto-increment sequence misalignment after a bulk load. These are correctness issues in the
+data movement layer. statschema cannot validate that transferred rows are correct.
 
 **Real-world query workloads.** The benchmarks above use TPC standard queries. Real applications
 have workloads that differ from TPC in join patterns, filter selectivity, and table access order.

@@ -1,0 +1,9 @@
+# Thu Mar 26 13:32:20 CDT 2026
+# engines=cockroachdb  schemas=tpcb,tpcc,tpch,tpcdi,tpcds,tpce  skip_load=0  enrich=auto
+
+PASS  cockroachdb×tpcb(sf=1)                     Overall: PASS ✓
+PASS  cockroachdb×tpcc(sf=1)                     Overall: PASS ✓
+PASS  cockroachdb×tpch(sf=0.1)                   Overall: PASS ✓
+PASS  cockroachdb×tpcdi(sf=5)                    Overall: PASS ✓
+PASS  cockroachdb×tpce(sf=0.01)                  Overall: PASS ✓
+PASS  cockroachdb×tpcds(sf=0.01)                 Overall: PASS ✓
