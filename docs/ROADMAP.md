@@ -73,6 +73,30 @@ For higher-fidelity synthetic data — preserving multi-variate correlations, FK
 - **Gap**: statschema generates each column independently from marginal distributions. SDV (Synthetic Data Vault) can learn Gaussian copula or GAN-based joint distributions that preserve column correlations and FK relationships across tables — but requires the actual data rows to train on, which are available at the source database.
 - **Done**: Implement `statschema.sdv_adapter` that converts `CanonicalTableSchema` → `sdv.metadata.Metadata` and `DatabaseStats` → SDV column distribution hints. When source data is available and can be moved (small tables, non-sensitive data), a DBA can use SDV's `SingleTableSynthesizer` or `HMASynthesizer` as the generation backend while keeping statschema's DDL and stats injection pipeline for the optimizer bootstrap step. For large or sensitive datasets where moving production data is impractical or prohibited, statschema's native generator remains the only viable path.
 
+### 6a. External statistics adapter (Tonic / Gretel / Delphix / dbldatagen)
+
+- **Gap**: statschema collects statistics from source DB catalogs. Oracle and DB2 catalog
+  collection is sparse by default — many columns have no histogram buckets after `RUNSTATS` or
+  `ANALYZE` — which limits `ndistinct_w2x` and reduces row-estimate accuracy on complex schemas
+  (TPC-E, TPC-DI). Privacy and synthesis platforms (Tonic.ai, Gretel.ai, Delphix, and the
+  [Databricks Labs Data Generator](https://databrickslabs.github.io/dbldatagen/public_docs/generating_from_existing_data.html))
+  build rich statistical models from production rows as part of their data-generation or masking
+  pipeline. Those models contain joint distributions, conditional frequencies, and column
+  correlations that the source DB catalog does not expose. For Databricks / Lakebase environments,
+  dbldatagen's `DataAnalyzer.summarizeToDF()` produces a statistical summary of any source
+  dataframe that is a natural feed for statschema's intake path.
+- **Done**: Implement `statschema.external_stats_adapter` with importers for Tonic column
+  profiles, Gretel model metadata, Delphix data profiles, and dbldatagen `DataAnalyzer`
+  summary dataframes. Each importer produces a `DatabaseStats` / `TableStats` object compatible
+  with `inject_stats_postgres` and `inject_stats_databricks`. When a platform has already
+  processed the source data, a DBA passes its statistical output to statschema instead of (or to
+  supplement) `collect_table_stats`, giving the optimizer bootstrap step the benefit of row-level
+  distribution modeling without requiring statschema itself to access production rows.
+- **Why**: Closes the Oracle and DB2 sparse-stats gap observed in cross-engine benchmarks
+  (`ndistinct_w2x = 0.366` for Oracle×TPC-E, `0.058` for DB2×TPC-DI). Organizations that already
+  use one of these platforms for data generation or compliance can route its statistical output
+  through statschema at no additional compliance cost.
+
 ### 7. Temporal and sequential column patterns
 - **Gap**: Date and timestamp columns are generated from uniform distribution between `min_value` and `max_value`. Sequential integer IDs have no monotonic ordering.
 - **Done**: Detect date/timestamp columns and apply configurable time-of-day and day-of-week weight distributions driven by MCV frequencies. Detect sequential ID columns (n_distinct ≈ row_count, integer type) and generate gapless sequences.

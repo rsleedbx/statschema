@@ -1,0 +1,5 @@
+# Thu Mar 26 12:35:23 CDT 2026
+# engines=oracle  schemas=tpce,tpcds  skip_load=0  enrich=auto
+
+PASS  oracle×tpce(sf=0.01)                       Overall: PASS ✓
+PASS  oracle×tpcds(sf=0.01)                      Overall: PASS ✓

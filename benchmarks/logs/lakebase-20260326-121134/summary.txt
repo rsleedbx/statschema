@@ -1,0 +1,5 @@
+# Thu Mar 26 12:11:34 CDT 2026
+# engines=oracle  schemas=tpce,tpcds  skip_load=1  enrich=auto
+
+FAIL  oracle×tpce(sf=0.01)                     exit=1
+FAIL  oracle×tpcds(sf=0.01)                    exit=1
