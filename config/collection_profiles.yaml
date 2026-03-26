@@ -1,0 +1,149 @@
+# statschema collection profiles
+# ────────────────────────────────────────────────────────────────────────────
+# Named profiles define which enrichment techniques are applied during Phase C
+# stats collection.  The `defaults` section maps each source engine dialect to
+# the profile that gives the best results without manual tuning.
+#
+# CLI override:   identity_test.py --profile thorough
+# Technique override: identity_test.py --enrich full_mcv,ntile_hist
+#
+# When neither flag is supplied the profile is auto-selected from the source
+# engine dialect using the `defaults` rules (first match wins).
+# ────────────────────────────────────────────────────────────────────────────
+
+profiles:
+
+  # ── off ──────────────────────────────────────────────────────────────────
+  # No enrichment.  Use for native PostgreSQL sources where pg_stats is
+  # already authoritative and pg_restore_attribute_stats transfers it verbatim.
+  "off":
+    description: >
+      No enrichment. Native pg_stats is sufficient — adding SQL-based
+      approximations would only add noise.
+    full_mcv:    false
+    ntile_hist:  false
+    samp_nd:     false
+    rank_corr:   false
+    pred_cols:   false
+
+  # ── light ─────────────────────────────────────────────────────────────────
+  # One GROUP BY scan per eligible column.  Use when the source engine has
+  # reliable n_distinct and null_frac but limited MCV coverage (e.g. SQL
+  # Server unindexed columns).
+  light:
+    description: >
+      Complete MCV distributions for low-cardinality columns (≤100 distinct
+      values).  With --queries: scoped to predicate columns only.
+      Without --queries: applied to all columns.
+      Extra cost per eligible column: one GROUP BY scan.
+    full_mcv:              true
+    full_mcv_threshold:    100
+    ntile_hist:            false
+    samp_nd:               false
+    rank_corr:             false
+    pred_cols:             true   # no-op when --queries is absent; scopes to
+                                  # WHERE/JOIN/GROUP-BY columns when provided
+
+  # ── standard ──────────────────────────────────────────────────────────────
+  # Recommended for most non-PG sources.  Adds an equi-height histogram and
+  # sampling-based n_distinct.  Proven to resolve CockroachDB range_covered
+  # gaps and give modest ndistinct improvements for MySQL.
+  standard:
+    description: >
+      Full MCVs + 100-bucket NTILE histogram + sampled n_distinct.
+      With --queries: expensive scans (ntile_hist, full_mcv, samp_nd) are
+      focused on columns that appear in WHERE / JOIN ON / GROUP BY only.
+      Without --queries: applied to all columns.
+      Extra cost per predicate column: one ORDER-BY window scan, sampled
+      above 50 K rows.
+    full_mcv:                true
+    full_mcv_threshold:      200
+    ntile_hist:              true
+    ntile_hist_buckets:      100
+    ntile_hist_sample_rows:  50000
+    samp_nd:                 true
+    samp_nd_threshold:       100000
+    samp_nd_pct:             5.0
+    rank_corr:               false   # requires scipy; safe to enable if available
+    pred_cols:               true   # no-op when --queries is absent; scopes to
+                                    # WHERE/JOIN/GROUP-BY columns when provided
+
+  # ── thorough ──────────────────────────────────────────────────────────────
+  # Maximum fidelity for engines where the catalog stats are sparse by default.
+  # Observed results:
+  #   Oracle × TPC-E:   ndistinct_w2x 0.37 → 0.87,  range_covered 0.63 → 0.91
+  #   DB2    × TPC-DI:  ndistinct_w2x 0.06 → expected improvement
+  # Higher DB load: larger MCV threshold, larger sample window, rank_corr enabled.
+  thorough:
+    description: >
+      Maximum fidelity for Oracle and DB2.  Collects MCVs for up to 1 000
+      distinct values, uses 100 K-row NTILE samples, enables rank correlation
+      (requires scipy).  With --queries: all expensive scans scoped to
+      predicate columns.  Without --queries: applied to all columns.
+      Extra cost: 2–4× more collection time vs baseline per predicate column.
+    full_mcv:                true
+    full_mcv_threshold:      1000
+    ntile_hist:              true
+    ntile_hist_buckets:      100
+    ntile_hist_sample_rows:  100000
+    samp_nd:                 true
+    samp_nd_threshold:       50000
+    samp_nd_pct:             10.0
+    rank_corr:               true   # silent no-op when scipy is absent
+    pred_cols:               true   # no-op when --queries is absent; scopes to
+                                    # WHERE/JOIN/GROUP-BY columns when provided
+
+
+# ── Source-engine defaults ────────────────────────────────────────────────
+# Maps each source engine dialect to the profile used when --profile and
+# --enrich are both absent.  Rules are evaluated top-to-bottom; first match
+# wins.  Use "*" as a catch-all.
+#
+# Rationale for each choice is based on observed benchmark results.
+defaults:
+
+  # Native PostgreSQL family: pg_stats is authoritative after ANALYZE.
+  # pg_restore_attribute_stats (PG 18+) transfers stats verbatim — no SQL
+  # approximation can improve on the ground-truth catalog.
+  - source: postgres
+    profile: "off"
+
+  - source: lakebase
+    profile: "off"
+
+  - source: neon
+    profile: "off"
+
+  # CockroachDB uses the postgres wire protocol but does NOT populate
+  # pg_stats.histogram_bounds.  Without ntile_hist, range_covered = —.
+  # Benchmark: ntile_hist resolved range_covered — → 1.000 for TPC-H.
+  - source: cockroachdb
+    profile: standard
+
+  # MySQL / MariaDB have reliable n_distinct and null_frac but sparse
+  # histograms for non-indexed columns.
+  # Benchmark: full_mcv +0.021 ndistinct_w2x for TPC-C.
+  - source: mysql
+    profile: standard
+
+  - source: mariadb
+    profile: standard
+
+  # SQL Server provides sys.dm_db_stats_histogram for indexed columns;
+  # unindexed columns have no histogram entry.
+  - source: sqlserver
+    profile: standard
+
+  # Oracle ALL_TAB_COLUMNS alone gives very poor stats.
+  # Benchmark: full_mcv lifted ndistinct_w2x from 0.37 → 0.87 for TPC-E.
+  - source: oracle
+    profile: thorough
+
+  # DB2 RUNSTATS with default options leaves most columns without MCVs
+  # or histograms.  Observed ndistinct_w2x = 0.058 for TPC-DI.
+  - source: db2
+    profile: thorough
+
+  # Fallback for any unrecognised source dialect.
+  - source: "*"
+    profile: standard

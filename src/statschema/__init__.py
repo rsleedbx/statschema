@@ -128,7 +128,14 @@ from .stats_model import (
     TableStats,
 )
 from .override_model import ColumnOverride, OverrideSpec, TableOverride
-from .db_stats_collector import collect_table_stats
+from .db_stats_collector import (
+    CollectionConfig,
+    CollectionTiming,
+    collect_table_stats,
+    predicate_columns_from_queries,
+    predicate_col_map_from_db,
+    predicate_col_map_from_yaml,
+)
 from .stats_injector import (
     inject_stats_databricks,
     inject_stats_db2,
@@ -235,7 +242,12 @@ __all__ = [
     "inject_stats_sqlserver",
     "InjectionResult",
     # Statistics I/O + override application
+    "CollectionConfig",
+    "CollectionTiming",
     "collect_table_stats",
+    "predicate_columns_from_queries",
+    "predicate_col_map_from_db",
+    "predicate_col_map_from_yaml",
     "load_stats",
     "dump_stats",
     "make_default_stats",

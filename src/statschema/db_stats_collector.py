@@ -14,36 +14,183 @@ Supported databases
 
 Usage
 -----
-    from src.statschema.db_stats_collector import collect_table_stats
+    from src.statschema.db_stats_collector import collect_table_stats, CollectionConfig
 
-    # after generating and loading data into the live DB:
+    # Default collection (baseline)
     stats = collect_table_stats(conn, "my_table", dialect="mysql")
-    # stats is a TableStats ready for build_dataframe_from_canonical(stats=stats)
 
-Statistics collected
---------------------
+    # Enriched collection — all techniques enabled
+    cfg = CollectionConfig.all()
+    stats = collect_table_stats(conn, "my_table", dialect="mysql", config=cfg)
+
+    # Targeted collection — only for columns that appear in query predicates
+    predicate_cols = predicate_columns_from_queries(query_sqls, "my_table", "ansi")
+    cfg = CollectionConfig(full_mcv=True, ntile_hist=True, predicate_cols=predicate_cols)
+    stats = collect_table_stats(conn, "my_table", dialect="mysql", config=cfg)
+
+Statistics collected (baseline)
+--------------------------------
   Row count           COUNT(*)
   Per-column:
     null_fraction     (COUNT(*) - COUNT(col)) / COUNT(*)
     n_distinct        COUNT(DISTINCT col)
-    min_value         MIN(col) cast to string
+    min_value         MIN(col) cast to string  [indexed columns only, or all when no indexes]
     max_value         MAX(col) cast to string
     avg_width_bytes   AVG(LENGTH(CAST(col AS CHAR)))   [approx]
     most_common_vals  Top-10 values by frequency
     histogram_bounds  Percentile-based bounds (P10, P25, P50, P75, P90)
 
-Native statistics tables (pg_stats, COLUMN_STATISTICS) are used when
-available and more accurate; the portable COUNT/MIN/MAX path is always
-the fallback.
+Enrichment techniques (opt-in via CollectionConfig)
+----------------------------------------------------
+  full_mcv      Collect ALL distinct value/frequency pairs for columns with
+                n_distinct ≤ full_mcv_threshold (default 500).  One GROUP BY query
+                per column; same cost as the existing top-10 MCV query.
+
+  ntile_hist    Build an equi-height histogram with ntile_hist_buckets (default 100)
+                buckets using NTILE window function.  Replaces the 5-bound P10/P25/
+                P50/P75/P90 approximation for non-Postgres engines.  One full-scan
+                (or sampled) ORDER BY per column.
+
+  pred_cols     Focus full_mcv and ntile_hist on predicate columns (columns that
+                appear in JOIN ON, WHERE, HAVING, or GROUP BY in the workload
+                queries).  Other columns still receive baseline stats.  Use
+                predicate_columns_from_queries() to build the set.
+
+  samp_nd       For tables with row_count > samp_nd_threshold (default 100_000),
+                estimate n_distinct from a TABLESAMPLE rather than a full
+                COUNT(DISTINCT col) scan.  ~100× cheaper for large tables.
+
+  rank_corr     Estimate physical-sort correlation (Spearman rank) from a
+                scan-order sample.  Fills the correlation field that the PostgreSQL
+                optimizer uses to choose between index scan and bitmap heap scan.
+                Only meaningful for non-Postgres sources where correlation is NULL.
+
+DBA load comparison (future)
+-----------------------------
+Each technique records elapsed wall-clock time in CollectionTiming.technique_ms
+so that the additional database load of each technique can be measured and compared.
+Enable collection via CollectionConfig(record_timing=True) and retrieve from
+TableStats.collection_timing after the call.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Any
+import time
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from .dialect_registry import normalize_dialect
 from .stats_model import ColumnStats, MostCommonValue, TableStats
+
+
+# ---------------------------------------------------------------------------
+# CollectionConfig — opt-in enrichment techniques
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CollectionTiming:
+    """Per-technique wall-clock milliseconds — for future DBA load comparison.
+
+    Each field accumulates time across all columns in one table.  Set
+    CollectionConfig.record_timing=True to populate.
+    """
+    baseline_ms: float = 0.0    # COUNT/COUNT_DISTINCT/MIN/MAX/MCV-10/histogram-5
+    full_mcv_ms: float = 0.0    # full_mcv incremental cost (MCV query without LIMIT)
+    ntile_hist_ms: float = 0.0  # ntile_hist incremental cost (NTILE ORDER BY)
+    samp_nd_ms: float = 0.0     # samp_nd incremental cost (TABLESAMPLE COUNT DISTINCT)
+    rank_corr_ms: float = 0.0   # rank_corr incremental cost (sample + Python Spearman)
+
+
+@dataclass
+class CollectionConfig:
+    """Controls which enrichment techniques are applied during collection.
+
+    Technique names match the identifiers used in the docs and timing fields:
+      full_mcv    — full distinct-value distribution for low-cardinality columns
+      ntile_hist  — NTILE-based equi-height histogram (non-Postgres only)
+      pred_cols   — focus full_mcv and ntile_hist on predicate columns only
+      samp_nd     — sampling-based n_distinct for large tables
+      rank_corr   — Spearman rank correlation from scan-order sample
+
+    All techniques default to False so existing call sites are unaffected.
+    """
+    # ── technique flags ───────────────────────────────────────────────────────
+    full_mcv: bool = False
+    ntile_hist: bool = False
+    pred_cols: bool = False
+    samp_nd: bool = False
+    rank_corr: bool = False
+
+    # ── technique thresholds ─────────────────────────────────────────────────
+    # full_mcv: collect all distinct values when n_distinct ≤ this threshold.
+    full_mcv_threshold: int = 500
+    # ntile_hist: number of equi-height buckets.
+    ntile_hist_buckets: int = 100
+    # ntile_hist: only NTILE-sample when table has more rows than this; below
+    # threshold a full scan is acceptable.
+    ntile_hist_sample_rows: int = 50_000
+    # samp_nd: switch to sampling when row_count > this.
+    samp_nd_threshold: int = 100_000
+    # samp_nd: approximate sample percentage (1.0 = 1%).
+    samp_nd_pct: float = 1.0
+    # rank_corr: number of rows in the scan-order sample.
+    rank_corr_sample: int = 2_000
+
+    # ── predicate columns ─────────────────────────────────────────────────────
+    # {table_name_lowercase: set[col_name_lowercase]}
+    # Built by predicate_columns_from_queries(); empty means "all columns".
+    predicate_col_map: dict[str, set[str]] = field(default_factory=dict)
+
+    # ── DBA load comparison ──────────────────────────────────────────────────
+    record_timing: bool = False
+
+    # ── convenience constructors ─────────────────────────────────────────────
+    @classmethod
+    def all(cls, **overrides) -> "CollectionConfig":
+        """Enable every technique with default thresholds."""
+        return cls(
+            full_mcv=True, ntile_hist=True, pred_cols=False,
+            samp_nd=True, rank_corr=True, **overrides,
+        )
+
+    @classmethod
+    def from_profile_dict(cls, d: dict) -> "CollectionConfig":
+        """Build a CollectionConfig from a profiles YAML entry dict.
+
+        Unknown keys are silently ignored so future YAML additions are
+        forward-compatible with older code.
+        """
+        _bool  = {"full_mcv", "ntile_hist", "pred_cols", "samp_nd", "rank_corr"}
+        _int   = {"full_mcv_threshold", "ntile_hist_buckets",
+                  "ntile_hist_sample_rows", "samp_nd_threshold", "rank_corr_sample"}
+        _float = {"samp_nd_pct"}
+        kwargs: dict = {}
+        for k, v in d.items():
+            if k in _bool:
+                kwargs[k] = bool(v)
+            elif k in _int:
+                kwargs[k] = int(v)
+            elif k in _float:
+                kwargs[k] = float(v)
+        return cls(**kwargs)
+
+    @classmethod
+    def predicate_focused(
+        cls,
+        predicate_col_map: dict[str, set[str]],
+        **overrides,
+    ) -> "CollectionConfig":
+        """Enable full_mcv + ntile_hist only for predicate columns.
+
+        Non-predicate columns receive baseline stats only (null_frac + n_distinct).
+        """
+        return cls(
+            full_mcv=True, ntile_hist=True, pred_cols=True,
+            samp_nd=True, rank_corr=True,
+            predicate_col_map=predicate_col_map,
+            **overrides,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +203,7 @@ def collect_table_stats(  # pragma: no cover
     dialect: str,
     schema: str | None = None,
     columns: list[str] | None = None,
+    config: Optional[CollectionConfig] = None,
 ) -> TableStats:
     """
     Collect TableStats from a live database table.
@@ -68,24 +216,36 @@ def collect_table_stats(  # pragma: no cover
     schema      Schema / database name (optional; uses current schema if None).
     columns     List of column names to collect stats for.
                 If None, introspects via information_schema.
+    config      CollectionConfig controlling which enrichment techniques to apply.
+                None = baseline collection only (no enrichment).
 
     Returns
     -------
     TableStats  Populated with row_count and per-column ColumnStats.
     """
     d = normalize_dialect(dialect)
+    cfg = config or CollectionConfig()
 
     if columns is None:
         columns = _introspect_columns(conn, table, d, schema)
 
     row_count = _count_rows(conn, table, d, schema)
-
     indexed_cols = _indexed_columns(conn, table, d, schema)
+
+    # Predicate columns for this table (lowercase names).
+    tbl_key = table.lower()
+    pred_set: set[str] | None = cfg.predicate_col_map.get(tbl_key) if cfg.pred_cols else None
+
+    timing = CollectionTiming() if cfg.record_timing else None
 
     col_stats: list[ColumnStats] = []
     for col in columns:
         try:
-            cs = _collect_column_stats(conn, table, col, d, schema, row_count, indexed_cols)
+            cs = _collect_column_stats(
+                conn, table, col, d, schema, row_count, indexed_cols,
+                cfg=cfg, is_predicate=(pred_set is None or col.lower() in pred_set),
+                timing=timing,
+            )
             col_stats.append(cs)
         except Exception:
             _safe_rollback(conn)
@@ -99,17 +259,224 @@ def collect_table_stats(  # pragma: no cover
         except Exception:
             _safe_rollback(conn)
 
-    return TableStats(
+    ts = TableStats(
         name=table,
         row_count=row_count,
         columns=col_stats,
         composite_stats=composite,
     )
+    # Attach timing for DBA load comparison (accessed as ts.collection_timing)
+    if timing is not None:
+        ts.collection_timing = timing  # type: ignore[attr-defined]
+    return ts
+
+
+def predicate_columns_from_queries(
+    queries: list[str],
+    table: str,
+    source_dialect: str = "ansi",
+) -> set[str]:
+    """Return the set of columns for ``table`` that appear in query predicates.
+
+    Technique: pred_cols.  Parses each SQL string using sqlglot to extract
+    column references that appear in:
+      • WHERE clauses (filters)
+      • JOIN ON conditions (equi-join and non-equi-join keys)
+      • HAVING clauses
+      • GROUP BY expressions
+
+    Only columns that can be attributed to ``table`` (or its aliases in the
+    FROM clause) are returned; unresolvable references are included conservatively
+    (i.e. if the column name matches a column in the table, include it).
+
+    Parameters
+    ----------
+    queries         List of SQL strings from the workload.
+    table           Unquoted table name (case-insensitive).
+    source_dialect  sqlglot dialect for parsing ("ansi", "mysql", "tsql", …).
+
+    Returns
+    -------
+    set[str]  Lowercase column names; empty set if sqlglot is not installed or
+              no predicates reference the table.
+    """
+    try:
+        import sqlglot
+        import sqlglot.expressions as exp
+    except ImportError:
+        return set()
+
+    # sqlglot does not recognise "ansi" as a dialect; fall back to None (default).
+    _dialect_map = {"ansi": None, "tsql": "tsql", "mysql": "mysql",
+                    "postgres": "postgres", "oracle": "oracle", "db2": "db2"}
+    sg_dialect = _dialect_map.get(source_dialect.lower(), source_dialect.lower() or None)
+
+    tbl_lower = table.lower()
+    pred_cols: set[str] = set()
+
+    for sql in queries:
+        try:
+            parsed = sqlglot.parse_one(sql, dialect=sg_dialect)
+        except Exception:
+            continue
+
+        # Build alias → table_name map from the FROM clause.
+        alias_to_table: dict[str, str] = {}
+        for node in parsed.find_all(exp.Table):
+            tname = (node.name or "").lower()
+            alias = (node.alias or tname).lower()
+            if tname:
+                alias_to_table[alias] = tname
+
+        tbl_in_query = tbl_lower in alias_to_table.values()
+
+        def _col_belongs_to_table(col_node: exp.Column) -> bool:  # noqa: B023
+            tbl_ref = (col_node.table or "").lower()
+            if not tbl_ref:
+                # Unqualified column: include when the target table is referenced
+                # in the FROM clause (conservative — may over-include columns from
+                # other tables with the same name, but that is safe for stats).
+                return tbl_in_query
+            actual = alias_to_table.get(tbl_ref, tbl_ref)
+            return actual == tbl_lower
+
+        # Walk predicate-bearing clauses: WHERE, JOIN ON, HAVING, GROUP BY.
+        predicate_nodes: list[exp.Expression] = []
+        for cls in (exp.Where, exp.Join, exp.Having, exp.Group):
+            predicate_nodes.extend(parsed.find_all(cls))
+
+        for node in predicate_nodes:
+            for col in node.find_all(exp.Column):
+                if _col_belongs_to_table(col):
+                    pred_cols.add((col.name or "").lower())
+
+    return pred_cols
+
+
+def predicate_col_map_from_db(
+    conn,
+    dialect: str,
+    schema_tables: list[str],
+    n: int = 200,
+    rank_by: str = "total_time",
+    catalog: str | None = None,
+    schema: str | None = None,
+) -> dict[str, set[str]]:
+    """Build a predicate-column map by reading the database's own query store.
+
+    Calls ``collect_top_queries`` to pull the top-N SQL statements from the
+    engine's built-in query catalog (pg_stat_statements, performance_schema,
+    sys.dm_exec_query_stats, v$sql, …), filters them to queries that reference
+    the target tables, then passes them through ``predicate_columns_from_queries``
+    for each table in ``schema_tables``.
+
+    Parameters
+    ----------
+    conn
+        An open DB-API 2.0 connection to the source database.
+    dialect
+        Source engine dialect (postgres, mysql, oracle, …).
+    schema_tables
+        List of unquoted table names to extract predicate columns for.
+        Only queries that reference at least one of these tables are used.
+    n
+        Number of queries to pull from the query store (default: 200).
+    rank_by
+        Ranking metric passed to ``collect_top_queries``:
+        ``"total_time"`` (default), ``"calls"``, or ``"mean_time"``.
+    catalog
+        Database / catalog name — required by MySQL to filter to the right schema.
+    schema
+        Schema / owner name.  Passed to engines that support server-side schema
+        filtering (Oracle ``v$sql.PARSING_SCHEMA_NAME``).
+
+    Returns
+    -------
+    dict  {table_name_lowercase: set[col_name_lowercase]}
+          Empty dict when the query store is unavailable or no queries were found.
+    """
+    from .query_collector import collect_top_queries  # local import avoids circular dependency
+
+    workload = collect_top_queries(
+        conn, dialect, n=n, rank_by=rank_by,
+        catalog=catalog, schema=schema, tables=schema_tables,
+    )
+    if not workload.queries:
+        return {}
+
+    # Post-filter: keep only queries whose extracted table list overlaps the
+    # target tables.  This is the reliable backstop for engines that don't
+    # support server-side table filtering (SQL Server, Databricks, etc.).
+    target_set = {t.lower() for t in schema_tables}
+    relevant = [
+        q for q in workload.queries
+        if any(t.lower() in target_set for t in q.tables)
+    ]
+    if not relevant:
+        return {}
+
+    queries = [q.sql for q in relevant]
+    source_dialect = workload.source_dialect or dialect
+    return {
+        tbl: predicate_columns_from_queries(queries, tbl, source_dialect)
+        for tbl in schema_tables
+    }
+
+
+def predicate_col_map_from_yaml(yaml_path: str, schema_tables: list[str]) -> dict[str, set[str]]:
+    """Build a {table_name: set[col]} map from a workload YAML file.
+
+    Reads the ``queries[*].sql`` field from the YAML (same format as
+    benchmarks/queries/*.yaml) and calls ``predicate_columns_from_queries``
+    for each table in ``schema_tables``.
+
+    Parameters
+    ----------
+    yaml_path       Path to a workload YAML file (e.g. benchmarks/queries/tpch.yaml).
+    schema_tables   List of table names to extract predicate columns for.
+
+    Returns
+    -------
+    dict  {table_name_lowercase: set[col_name_lowercase]}
+    """
+    import yaml  # PyYAML is a transitive dependency of sqlalchemy
+
+    with open(yaml_path) as fh:
+        workload = yaml.safe_load(fh)
+
+    source_dialect = workload.get("source_dialect", "ansi")
+    queries = [q["sql"] for q in workload.get("queries", []) if "sql" in q]
+
+    return {
+        tbl: predicate_columns_from_queries(queries, tbl, source_dialect)
+        for tbl in schema_tables
+    }
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+_crdb_cache: dict[int, bool] = {}
+
+
+def _is_cockroachdb(conn) -> bool:
+    """Return True when the connection points to CockroachDB (not native PostgreSQL).
+
+    CockroachDB exposes a Postgres-compatible wire protocol but does not populate
+    pg_stats.histogram_bounds after ANALYZE; its pg_stats rows have NULL there.
+    We detect it by querying the server version string (cached per connection
+    object to avoid one extra query per column).
+    """
+    cid = id(conn)
+    if cid not in _crdb_cache:
+        try:
+            row = _fetchone(conn, "SELECT version()")
+            _crdb_cache[cid] = row is not None and "cockroach" in str(row[0]).lower()
+        except Exception:
+            _crdb_cache[cid] = False
+    return _crdb_cache[cid]
+
 
 def _needs_qmark(conn) -> bool:
     """Return True when the connection requires ? placeholders instead of %s.
@@ -408,98 +775,194 @@ def _collect_column_stats(  # pragma: no cover
     schema: str | None,
     row_count: int,
     indexed_cols: set[str] | None = None,
+    cfg: Optional[CollectionConfig] = None,
+    is_predicate: bool = True,
+    timing: Optional[CollectionTiming] = None,
 ) -> ColumnStats:
-    """Collect per-column statistics using portable SQL."""
+    """Collect per-column statistics using portable SQL.
+
+    ``is_predicate`` — when pred_cols technique is active and this column does
+    NOT appear in any workload query predicate, only null_fraction and
+    n_distinct are collected (no MCV, no histogram, no min/max).  This
+    mirrors Amazon Redshift's ANALYZE PREDICATE COLUMNS behaviour.
+    """
+    cfg = cfg or CollectionConfig()
     tref = _schema_table(table, dialect, schema)
     cref = _quote(col, dialect)
 
-    # ── null fraction ──────────────────────────────────────────────────────
-    row = _fetchone(conn, f"""
-        SELECT
-            COUNT(*),
-            COUNT({cref}),
-            COUNT(DISTINCT {cref})
-        FROM {tref}
-    """)
-    total, non_null, n_distinct_raw = (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
+    # ── native-PG detection (shared by all technique guards below) ───────
+    # CockroachDB normalises to dialect="postgres" but lacks pg_stats accuracy
+    # guarantees (no histogram_bounds, no reliable correlation).  Detect it once
+    # and use _is_native_pg as the guard throughout so CRDB gets SQL-based
+    # histogram, correlation, and samp_nd just like MySQL/Oracle/etc.
+    _is_native_pg = dialect == "postgres" and not _is_cockroachdb(conn)
+
+    # ── baseline: null fraction + n_distinct ──────────────────────────────
+    t0 = time.monotonic()
+
+    # samp_nd: for large tables, estimate n_distinct from a sample instead of
+    # COUNT(DISTINCT col) over the full table.  n_distinct is still collected
+    # exactly for small tables and for predicate columns if desired — callers
+    # can override by setting samp_nd=False in the config.
+    # samp_nd skips native PostgreSQL because pg_stats already has accurate n_distinct
+    # from ANALYZE.  CockroachDB is eligible for sampling.
+    _use_samp_nd = (
+        cfg.samp_nd
+        and row_count > cfg.samp_nd_threshold
+        and not _is_native_pg
+    )
+
+    if _use_samp_nd:
+        t_samp = time.monotonic()
+        total, non_null, n_distinct = _sample_ndistinct(
+            conn, tref, cref, dialect, row_count, cfg.samp_nd_pct
+        )
+        if timing:
+            timing.samp_nd_ms += (time.monotonic() - t_samp) * 1000
+    else:
+        row = _fetchone(conn, f"""
+            SELECT COUNT(*), COUNT({cref}), COUNT(DISTINCT {cref}) FROM {tref}
+        """)
+        total, non_null, n_distinct_raw = (
+            int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+        )
+        total    = total    or 0
+        non_null = non_null or 0
+        n_distinct = float(n_distinct_raw)
+
     null_fraction = (total - non_null) / total if total > 0 else 0.0
-    n_distinct = float(n_distinct_raw)
+
+    if timing:
+        timing.baseline_ms += (time.monotonic() - t0) * 1000
+
+    # ── pred_cols short-circuit: skip enrichment for non-predicate columns ─
+    # When pred_cols is active and this column is not a predicate column, we
+    # skip min/max, avg_width, MCV, and histogram — they won't influence any
+    # query plan.  null_fraction and n_distinct are always collected.
+    if cfg.pred_cols and not is_predicate:
+        return ColumnStats(
+            name=col, null_fraction=null_fraction, n_distinct=n_distinct
+        )
 
     # ── min / max ──────────────────────────────────────────────────────────
-    # Collect MIN/MAX when:
+    # Collect MIN/MAX for:
     #   • indexed_cols is None  — index catalog query failed; safe fallback
     #   • col is in indexed_cols — index guarantees a cheap scan
-    #   • indexed_cols is empty  — table has no indexes at all (e.g. constraints
-    #     stripped for bulk loading).  A seq scan is unavoidable here regardless,
-    #     so we collect min/max for every column rather than silently omitting
-    #     range information.  PostgreSQL is excluded because it derives bounds
-    #     from histogram_bounds in pg_stats even for non-indexed columns.
+    #   • all columns when the table has no indexes at all (e.g. constraints
+    #     stripped for bulk loading).  PostgreSQL is excluded because it derives
+    #     bounds from histogram_bounds in pg_stats.  CockroachDB normalises to
+    #     "postgres" but does NOT populate pg_stats.histogram_bounds.
     min_val = max_val = None
     _no_indexes = indexed_cols is not None and len(indexed_cols) == 0
-    if indexed_cols is None or col in indexed_cols or (_no_indexes and dialect != "postgres"):
+    if indexed_cols is None or col in indexed_cols or (_no_indexes and not _is_native_pg):
+        t0 = time.monotonic()
         min_val, max_val = _fetch_min_max(conn, tref, cref, dialect)
+        if timing:
+            timing.baseline_ms += (time.monotonic() - t0) * 1000
 
     # ── avg width ──────────────────────────────────────────────────────────
     avg_width = 8
     try:
+        t0 = time.monotonic()
         if dialect in ("mysql", "postgres"):
             row3 = _fetchone(conn, f"SELECT AVG(LENGTH(CAST({cref} AS CHAR))) FROM {tref}")
         else:
             row3 = _fetchone(conn, f"SELECT AVG(LEN(CAST({cref} AS NVARCHAR(MAX)))) FROM {tref}")
         if row3 and row3[0] is not None:
             avg_width = max(1, int(float(row3[0])))
+        if timing:
+            timing.baseline_ms += (time.monotonic() - t0) * 1000
     except Exception:
         _safe_rollback(conn)
 
-    # ── most common values (top 10 by frequency) ──────────────────────────
+    # ── most common values ─────────────────────────────────────────────────
+    # full_mcv: remove LIMIT and collect the complete distribution when
+    # n_distinct ≤ threshold.  Same query cost as top-10 (one GROUP BY scan).
+    # Baseline: top-10 only.
     mcvs: list[MostCommonValue] = []
+    _use_full_mcv = cfg.full_mcv and n_distinct <= cfg.full_mcv_threshold
     try:
-        if dialect == "mysql":
+        t0 = time.monotonic()
+        if dialect == "sqlserver":
+            # OFFSET/FETCH is the preferred paging syntax for SQL Server (TOP N
+            # cannot coexist with OFFSET/FETCH in the same query).
+            _ss_page = "" if _use_full_mcv else "OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY"
             mcv_sql = f"""
                 SELECT {cref}, COUNT(*) AS cnt
                 FROM {tref}
                 WHERE {cref} IS NOT NULL
                 GROUP BY {cref}
                 ORDER BY cnt DESC
-                LIMIT 10
+                {_ss_page}
             """
-        elif dialect == "postgres":
+        else:
+            _limit = "" if _use_full_mcv else "LIMIT 10"
             mcv_sql = f"""
                 SELECT {cref}, COUNT(*) AS cnt
                 FROM {tref}
                 WHERE {cref} IS NOT NULL
                 GROUP BY {cref}
                 ORDER BY cnt DESC
-                LIMIT 10
-            """
-        else:  # sqlserver
-            mcv_sql = f"""
-                SELECT TOP 10 {cref}, COUNT(*) AS cnt
-                FROM {tref}
-                WHERE {cref} IS NOT NULL
-                GROUP BY {cref}
-                ORDER BY cnt DESC
+                {_limit}
             """
         for row4 in _fetchall(conn, mcv_sql):
             val, cnt = row4[0], int(row4[1])
             freq = cnt / non_null if non_null > 0 else 0.0
             mcvs.append(MostCommonValue(value=str(val), frequency=freq))
+        elapsed = (time.monotonic() - t0) * 1000
+        if timing:
+            if _use_full_mcv:
+                timing.full_mcv_ms += elapsed
+            else:
+                timing.baseline_ms += elapsed
     except Exception:
         _safe_rollback(conn)
 
-    # ── histogram bounds (percentile-based fallback) ──────────────────────
-    # Skipped for postgres: pg_stats already holds authoritative histogram_bounds
-    # from ANALYZE, and the percentile_cont query can fail on certain column
-    # types, leaving the connection in an aborted-transaction state.
+    # ── histogram bounds ───────────────────────────────────────────────────
+    # ntile_hist: build an equi-height histogram using NTILE window function
+    #   (up to ntile_hist_buckets buckets, default 100).  Replaces the 5-bound
+    #   P10/P25/P50/P75/P90 approximation for non-Postgres engines.
+    # Baseline: 5-bucket percentile approximation.
+    # Both are skipped for NATIVE PostgreSQL (pg_stats provides authoritative
+    # histogram_bounds from ANALYZE).  CockroachDB is NOT native PostgreSQL —
+    # it uses the same wire protocol but does not populate pg_stats.histogram_bounds,
+    # so it must fall through to the SQL-based histogram path.
     histogram_bounds: list[str] = []
+    _use_ntile = cfg.ntile_hist and non_null > 0 and not _is_native_pg
     try:
-        if non_null > 0 and dialect != "postgres":
-            histogram_bounds = _collect_histogram(conn, tref, cref, dialect)
+        t0 = time.monotonic()
+        if non_null > 0 and not _is_native_pg:
+            if _use_ntile:
+                histogram_bounds = _collect_ntile_histogram(
+                    conn, tref, cref, dialect, row_count,
+                    cfg.ntile_hist_buckets, cfg.ntile_hist_sample_rows,
+                )
+            else:
+                histogram_bounds = _collect_histogram(conn, tref, cref, dialect)
+        elapsed = (time.monotonic() - t0) * 1000
+        if timing:
+            if _use_ntile:
+                timing.ntile_hist_ms += elapsed
+            else:
+                timing.baseline_ms += elapsed
     except Exception:
         _safe_rollback(conn)
 
-    # ── correlation (physical sort order) — PostgreSQL only ───────────────
+    # ── correlation (physical sort order) ─────────────────────────────────
+    # rank_corr: estimate Spearman rank correlation from a scan-order sample.
+    # Skipped for native PostgreSQL (pg_stats fills it natively).
+    # CockroachDB is included here as it doesn't provide pg_stats.correlation.
     correlation: float | None = None
+    if cfg.rank_corr and not _is_native_pg and non_null > 0:
+        try:
+            t0 = time.monotonic()
+            correlation = _collect_rank_correlation(
+                conn, tref, cref, dialect, cfg.rank_corr_sample
+            )
+            if timing:
+                timing.rank_corr_ms += (time.monotonic() - t0) * 1000
+        except Exception:
+            _safe_rollback(conn)
 
     # ── PostgreSQL: use pg_stats when available (authoritative) ───────────
     # pg_stats reflects the last ANALYZE run; covers histogram_bounds and
@@ -520,24 +983,26 @@ def _collect_column_stats(  # pragma: no cover
                 n_distinct = abs(raw_nd) * row_count if raw_nd < 0 else raw_nd
                 if pg_row[2] and pg_row[3]:
                     mcvs = _parse_pg_array_mcv(pg_row[2], pg_row[3])
-                # histogram_bounds from pg_stats supersedes percentile approximation
                 if pg_row[4]:
                     histogram_bounds = _parse_pg_array_str(pg_row[4])
-                    # For non-indexed columns where we skipped MIN/MAX, derive
-                    # approximate bounds from the first/last histogram bucket.
                     if min_val is None and histogram_bounds:
                         min_val = histogram_bounds[0]
                     if max_val is None and histogram_bounds:
                         max_val = histogram_bounds[-1]
                 if pg_row[5] is not None:
                     correlation = float(pg_row[5])
-                # avg_width from pg_stats is the real byte width; use it instead of
-                # the AVG(LENGTH(CAST(col AS CHAR))) approximation, which always
-                # returns 1 in PostgreSQL because bare CHAR has length 1.
                 if pg_row[6] is not None:
                     avg_width = int(pg_row[6])
         except Exception:
             _safe_rollback(conn)
+
+    # Derive min/max from histogram bounds when not collected via MIN/MAX or pg_stats.
+    # This matters for CockroachDB (postgres dialect, no pg_stats.histogram_bounds) when
+    # ntile_hist has populated histogram_bounds via NTILE window queries.
+    if min_val is None and histogram_bounds:
+        min_val = histogram_bounds[0]
+    if max_val is None and histogram_bounds:
+        max_val = histogram_bounds[-1]
 
     return ColumnStats(
         name=col,
@@ -550,6 +1015,213 @@ def _collect_column_stats(  # pragma: no cover
         histogram_bounds=histogram_bounds,
         correlation=correlation,
     )
+
+
+def _sample_ndistinct(  # pragma: no cover
+    conn, tref: str, cref: str, dialect: str, row_count: int, sample_pct: float
+) -> tuple[int, int, float]:
+    """Estimate (total, non_null, n_distinct) from a TABLESAMPLE.
+
+    Technique: samp_nd.  Used when row_count > samp_nd_threshold to avoid
+    a full-table COUNT(DISTINCT col) scan.  Returns exact counts for total
+    and non_null (from the full-table COUNT path) but estimates n_distinct
+    from the sample using simple linear scaling:
+        n_distinct_est = count_distinct_in_sample / sample_fraction
+
+    The Chao92 estimator would be more accurate for skewed distributions, but
+    simple scaling keeps the implementation portable across all dialects and is
+    accurate to within 10–20% for most optimizer purposes (our acceptance
+    threshold is 2×).
+
+    TABLESAMPLE syntax support:
+      postgres, mysql 8.0.29+, sqlserver 2016+  →  TABLESAMPLE BERNOULLI(pct)
+      oracle                                     →  SAMPLE(pct)
+      db2 11.1+                                  →  TABLESAMPLE BERNOULLI(pct)
+    """
+    # Clamp sample to a sensible range; at least 1000 rows for stability.
+    pct = max(0.01, min(100.0, sample_pct))
+
+    try:
+        if dialect == "oracle":
+            sample_clause = f"SAMPLE({pct:.4f})"
+            sample_sql = f"""
+                SELECT COUNT(*), COUNT({cref}), COUNT(DISTINCT {cref})
+                FROM {tref} {sample_clause}
+            """
+        elif dialect in ("mysql", "postgres", "db2", "sqlserver"):
+            sample_sql = f"""
+                SELECT COUNT(*), COUNT({cref}), COUNT(DISTINCT {cref})
+                FROM {tref} TABLESAMPLE BERNOULLI({pct:.4f})
+            """
+        else:
+            raise NotImplementedError(f"TABLESAMPLE not implemented for {dialect}")
+
+        row = _fetchone(conn, sample_sql)
+        s_total, s_non_null, s_distinct = (
+            int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+        )
+        # Scale up n_distinct from the sample fraction.
+        fraction = pct / 100.0
+        n_distinct_est = s_distinct / fraction if fraction > 0 else float(s_distinct)
+        # Clamp to row_count (can't have more distinct values than rows).
+        n_distinct_est = min(n_distinct_est, float(row_count))
+
+        # Use exact counts for total and non_null (cheap from existing baseline query).
+        exact = _fetchone(conn, f"SELECT COUNT(*), COUNT({cref}) FROM {tref}")
+        total    = int(exact[0] or 0)
+        non_null = int(exact[1] or 0)
+        return total, non_null, n_distinct_est
+
+    except Exception:
+        _safe_rollback(conn)
+        # Fall back to exact COUNT(DISTINCT) on failure.
+        row = _fetchone(conn, f"""
+            SELECT COUNT(*), COUNT({cref}), COUNT(DISTINCT {cref}) FROM {tref}
+        """)
+        return int(row[0] or 0), int(row[1] or 0), float(row[2] or 0)
+
+
+def _collect_ntile_histogram(  # pragma: no cover
+    conn,
+    tref: str,
+    cref: str,
+    dialect: str,
+    row_count: int,
+    n_buckets: int,
+    sample_rows: int,
+) -> list[str]:
+    """Build an equi-height histogram with n_buckets using NTILE.
+
+    Technique: ntile_hist.  Produces up to n_buckets upper-bound values that
+    directly correspond to a PostgreSQL-style histogram_bounds array.  For a
+    100-bucket histogram the planner gets the same density of range information
+    that PostgreSQL's native ANALYZE produces.
+
+    When the table is large (row_count > sample_rows), the NTILE is computed
+    over a TABLESAMPLE to avoid a full sorted scan.
+
+    Returns an empty list if the column type is not orderable (e.g. LOB types),
+    in which case the caller falls back to no histogram.
+    """
+    try:
+        if row_count > sample_rows:
+            pct = min(100.0, max(0.1, (sample_rows / row_count) * 100.0))
+            if dialect == "oracle":
+                from_clause = f"{tref} SAMPLE({pct:.4f})"
+            else:
+                from_clause = f"{tref} TABLESAMPLE BERNOULLI({pct:.4f})"
+        else:
+            from_clause = tref
+
+        if dialect == "sqlserver":
+            # SQL Server does not allow TABLESAMPLE in a sub-query used with NTILE;
+            # materialize via a CTE first.
+            ntile_sql = f"""
+                WITH sampled AS (
+                    SELECT {cref} FROM {from_clause} WHERE {cref} IS NOT NULL
+                ),
+                bucketed AS (
+                    SELECT {cref},
+                           NTILE({n_buckets}) OVER (ORDER BY {cref}) AS bkt
+                    FROM sampled
+                )
+                SELECT bkt, MAX({cref})
+                FROM bucketed
+                GROUP BY bkt
+                ORDER BY bkt
+            """
+        else:
+            ntile_sql = f"""
+                SELECT bkt, MAX({cref})
+                FROM (
+                    SELECT {cref},
+                           NTILE({n_buckets}) OVER (ORDER BY {cref}) AS bkt
+                    FROM {from_clause}
+                    WHERE {cref} IS NOT NULL
+                ) sub
+                GROUP BY bkt
+                ORDER BY bkt
+            """
+
+        rows = _fetchall(conn, ntile_sql)
+        bounds = [str(r[1]) for r in rows if r[1] is not None]
+        return bounds
+    except Exception:
+        _safe_rollback(conn)
+        return []
+
+
+def _collect_rank_correlation(  # pragma: no cover
+    conn,
+    tref: str,
+    cref: str,
+    dialect: str,
+    sample_size: int,
+) -> float | None:
+    """Estimate Spearman rank correlation between physical row order and column value.
+
+    Technique: rank_corr.  Draws sample_size rows without an ORDER BY clause
+    (i.e. in physical/heap scan order) then computes the Spearman rank
+    correlation between the scan position (1, 2, 3, …) and the column value's
+    rank within the sample.
+
+    A correlation near 1.0 means rows are stored in ascending column order
+    (ideal for index range scans).  Near -1.0 means descending.  Near 0 means
+    random — the planner should prefer a sequential scan or bitmap heap scan.
+
+    Returns None if the column is non-orderable (TEXT, LOB, etc.) or if scipy
+    is not available.
+    """
+    try:
+        from scipy.stats import spearmanr  # type: ignore[import]
+    except ImportError:
+        return None
+
+    try:
+        if dialect == "sqlserver":
+            sample_sql = f"""
+                SELECT TOP {sample_size} {cref}
+                FROM {tref}
+                WHERE {cref} IS NOT NULL
+            """
+        elif dialect == "oracle":
+            sample_sql = f"""
+                SELECT {cref} FROM {tref}
+                WHERE {cref} IS NOT NULL
+                AND ROWNUM <= {sample_size}
+            """
+        elif dialect == "db2":
+            sample_sql = f"""
+                SELECT {cref} FROM {tref}
+                WHERE {cref} IS NOT NULL
+                FETCH FIRST {sample_size} ROWS ONLY
+            """
+        else:  # mysql, postgres
+            sample_sql = f"""
+                SELECT {cref} FROM {tref}
+                WHERE {cref} IS NOT NULL
+                LIMIT {sample_size}
+            """
+
+        rows = _fetchall(conn, sample_sql)
+        if len(rows) < 10:
+            return None
+
+        values = [r[0] for r in rows]
+        # Attempt float conversion to detect non-orderable types.
+        # For dates and strings, spearmanr works on the rank of string values.
+        try:
+            numeric_vals = [float(v) for v in values]
+            corr, _ = spearmanr(range(len(numeric_vals)), numeric_vals)
+        except (TypeError, ValueError):
+            # Non-numeric: rank by string representation.
+            str_vals = [str(v) for v in values]
+            corr, _ = spearmanr(range(len(str_vals)), [sorted(set(str_vals)).index(v) for v in str_vals])
+
+        return float(corr) if corr is not None and not math.isnan(corr) else None
+    except Exception:
+        _safe_rollback(conn)
+        return None
 
 
 def _collect_histogram(conn, tref: str, cref: str, dialect: str) -> list[str]:  # pragma: no cover

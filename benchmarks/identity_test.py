@@ -86,7 +86,12 @@ from src.statschema.schema_io import load_canonical, resolve_load_order, resolve
 from src.statschema.ddl_emitter import emit_ddl, emit_ddl_all
 from src.statschema.row_generator import generate_rows
 from src.statschema.data_loader import BatchConfig, LoadStrategy, load_dataframe
-from src.statschema.db_stats_collector import collect_table_stats
+from src.statschema.db_stats_collector import (
+    CollectionConfig,
+    collect_table_stats,
+    predicate_col_map_from_yaml,
+    predicate_col_map_from_db,
+)
 from src.statschema.stats_model import TableStats
 from src.statschema.stats_io import dump_stats, load_stats
 
@@ -1229,8 +1234,15 @@ def collect_stats(
     source_schema: str,
     dialect: str,
     save_dir: Path | None = None,
+    config: CollectionConfig | None = None,
 ) -> dict[str, TableStats]:
-    """Phase C — collect column statistics from every table in source_schema."""
+    """Phase C — collect column statistics from every table in source_schema.
+
+    Parameters
+    ----------
+    config  Optional CollectionConfig enabling enrichment techniques.
+            None = baseline collection only (existing behaviour).
+    """
     def _safe_rb() -> None:
         try:
             conn.rollback()
@@ -1251,7 +1263,7 @@ def collect_stats(
             _tbl_name  = table.name.upper()          if dialect == "db2" else table.name
             _sch_name  = _stats_schema.upper()       if dialect == "db2" else _stats_schema
             ts = collect_table_stats(
-                conn, _tbl_name, dialect=dialect, schema=_sch_name
+                conn, _tbl_name, dialect=dialect, schema=_sch_name, config=config,
             )
             _safe_rb()  # stats queries are read-only; release any open txn
             all_stats[table.name] = ts
@@ -1871,6 +1883,7 @@ def run_identity_test(
     stats_source_dsn: str | None = None,
     stats_source_dialect: str | None = None,
     stats_source_schema: str | None = None,
+    collection_config: CollectionConfig | None = None,
     **kwargs,
 ) -> IdentityTestResult:
     """
@@ -2014,6 +2027,44 @@ def run_identity_test(
                                           table_names=_table_names)
     result.phase_times["B_baseline_explain"] = time.perf_counter() - t0
 
+    # ── Phase C prep: auto-build predicate_col_map for pred_cols technique ──
+    # Priority: explicit --queries YAML > live query store > all-columns fallback.
+    if collection_config and collection_config.pred_cols and not collection_config.predicate_col_map:
+        _tbl_names = [t.name for t in ordered]
+        if queries_yaml:
+            # YAML provided explicitly (e.g. benchmark workload or exported queries).
+            try:
+                pred_map = predicate_col_map_from_yaml(str(queries_yaml), _tbl_names)
+                collection_config.predicate_col_map = pred_map
+                _n_pred = sum(len(v) for v in pred_map.values())
+                print(f"  [C] pred_cols: {_n_pred} predicate columns from workload YAML"
+                      f" across {len(pred_map)} tables")
+            except Exception as exc:
+                logger.warning("predicate_col_map_from_yaml failed: %s", exc)
+        else:
+            # No YAML: try the live source-DB query store (pg_stat_statements,
+            # performance_schema, v$sql, sys.dm_exec_query_stats, …).
+            _pred_conn    = _ss_conn    if stats_source_dsn else conn
+            _pred_dialect = _ss_dialect if stats_source_dsn else dialect
+            _pred_src_schema = stats_source_schema if stats_source_dsn else source_schema
+            _pred_catalog = (_pred_src_schema if _pred_dialect in ("mysql", "mariadb") else None)
+            _pred_schema  = (_pred_src_schema if _pred_dialect == "oracle" else None)
+            try:
+                pred_map = predicate_col_map_from_db(
+                    _pred_conn, _pred_dialect, _tbl_names,
+                    catalog=_pred_catalog, schema=_pred_schema,
+                )
+                if pred_map and any(pred_map.values()):
+                    collection_config.predicate_col_map = pred_map
+                    _n_pred = sum(len(v) for v in pred_map.values())
+                    print(f"  [C] pred_cols: {_n_pred} predicate columns from live query"
+                          f" store ({_pred_dialect}) across {len(pred_map)} tables")
+                else:
+                    print(f"  [C] pred_cols: query store empty or unavailable"
+                          f" ({_pred_dialect}); collecting stats for all columns")
+            except Exception as exc:
+                logger.warning("predicate_col_map_from_db failed: %s", exc)
+
     # ── Phase C: Collect statistics ───────────────────────────────────────────
     t0 = time.perf_counter()
     if stats_source_dsn:
@@ -2058,7 +2109,8 @@ def run_identity_test(
             print(f"  [C] Stats-source schema {_ss_schema!r} is empty — loading data…")
             load_source(_ss_conn, schema, sf, _ss_schema, _ss_dialect, seed=seed)
         collected_stats = collect_stats(
-            _ss_conn, ordered, _ss_schema, _ss_dialect, save_dir=save_yaml
+            _ss_conn, ordered, _ss_schema, _ss_dialect, save_dir=save_yaml,
+            config=collection_config,
         )
         _ss_conn.close()
         # Cross-DB Phase C can be long (loading + collecting from source DB).
@@ -2073,7 +2125,8 @@ def run_identity_test(
             conn.autocommit = False
     else:
         collected_stats = collect_stats(
-            conn, ordered, source_schema, dialect, save_dir=save_yaml
+            conn, ordered, source_schema, dialect, save_dir=save_yaml,
+            config=collection_config,
         )
     result.phase_times["C_collect_stats"] = time.perf_counter() - t0
 
@@ -2237,6 +2290,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--no-extended-stats", action="store_true",
                    help="Disable Phase A.5/D.5 extended statistics (Layer 3 query feature)")
+    p.add_argument(
+        "--enrich", metavar="TECHNIQUES",
+        help=(
+            "Comma-separated list of enrichment techniques to apply during Phase C "
+            "stats collection.  Available: full_mcv, ntile_hist, pred_cols, samp_nd, "
+            "rank_corr, all.  Overrides --profile.  "
+            "Example: --enrich full_mcv,ntile_hist,samp_nd"
+        ),
+    )
+    p.add_argument(
+        "--profile", metavar="NAME",
+        help=(
+            "Named collection profile from config/collection_profiles.yaml "
+            "(off | light | standard | thorough).  "
+            "When omitted, the profile is auto-selected from the source engine dialect. "
+            "--enrich takes precedence over --profile when both are given."
+        ),
+    )
+    p.add_argument(
+        "--no-auto-profile", action="store_true",
+        help="Disable automatic profile selection; collect only baseline stats.",
+    )
 
     cross = p.add_argument_group(
         "Cross-database mode",
@@ -2263,12 +2338,99 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _parse_enrich(enrich_str: str | None) -> CollectionConfig | None:
+    """Parse --enrich CSV into a CollectionConfig.  Returns None for baseline."""
+    if not enrich_str:
+        return None
+    techniques = {t.strip().lower() for t in enrich_str.split(",")}
+    if "all" in techniques:
+        return CollectionConfig.all()
+    return CollectionConfig(
+        full_mcv="full_mcv" in techniques,
+        ntile_hist="ntile_hist" in techniques,
+        pred_cols="pred_cols" in techniques,
+        samp_nd="samp_nd" in techniques,
+        rank_corr="rank_corr" in techniques,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Collection profiles
+# ---------------------------------------------------------------------------
+
+_PROFILES_YAML = _REPO_ROOT / "config" / "collection_profiles.yaml"
+
+
+def _load_profiles() -> dict:
+    """Load config/collection_profiles.yaml.  Returns empty dict on failure."""
+    try:
+        import yaml  # PyYAML — already a dependency via ydata-sdk or similar
+        return yaml.safe_load(_PROFILES_YAML.read_text())
+    except Exception as exc:
+        logger.warning("Could not load collection profiles from %s: %s", _PROFILES_YAML, exc)
+        return {}
+
+
+def _config_for_profile(profile_name: str, profiles_data: dict) -> CollectionConfig | None:
+    """Return a CollectionConfig for a named profile, or None if not found."""
+    entry = profiles_data.get("profiles", {}).get(profile_name)
+    if entry is None:
+        logger.warning("Profile %r not found in %s", profile_name, _PROFILES_YAML)
+        return None
+    return CollectionConfig.from_profile_dict(entry)
+
+
+def _auto_profile(source_dialect: str | None, profiles_data: dict) -> CollectionConfig | None:
+    """Select the default profile for a source engine dialect.
+
+    Walks the `defaults` list in the YAML and returns the first matching
+    CollectionConfig.  Returns None if the YAML is unavailable or the
+    matched profile is 'off'.
+    """
+    if not source_dialect or not profiles_data:
+        return None
+    for rule in profiles_data.get("defaults", []):
+        src = rule.get("source", "*")
+        if src == "*" or src == source_dialect:
+            pname = rule.get("profile", "standard")
+            if pname == "off":
+                return None
+            return _config_for_profile(pname, profiles_data)
+    return None
+
+
 def main() -> None:
     args = _build_parser().parse_args()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s %(message)s",
     )
+
+    # ── Resolve collection config (precedence: --enrich > --profile > auto) ──
+    collection_config: CollectionConfig | None
+    if args.enrich:
+        # Explicit technique list always wins.
+        collection_config = _parse_enrich(args.enrich)
+    elif args.no_auto_profile:
+        collection_config = None
+    elif args.profile:
+        profiles_data = _load_profiles()
+        collection_config = _config_for_profile(args.profile, profiles_data)
+        if collection_config is not None:
+            print(f"  [C] Profile '{args.profile}' loaded from config/collection_profiles.yaml")
+    else:
+        # Auto-select based on the source engine dialect.
+        src_dialect = args.stats_source_dialect or args.dialect
+        profiles_data = _load_profiles()
+        collection_config = _auto_profile(src_dialect, profiles_data)
+        if collection_config is not None:
+            # Find the matched profile name for the printout.
+            matched = next(
+                (r.get("profile") for r in profiles_data.get("defaults", [])
+                 if r.get("source") in (src_dialect, "*")),
+                "standard",
+            )
+            print(f"  [C] Auto-selected profile '{matched}' for source dialect '{src_dialect}'")
 
     result = run_identity_test(
         schema=args.schema,
@@ -2287,6 +2449,7 @@ def main() -> None:
         stats_source_dsn=args.stats_source_dsn,
         stats_source_dialect=args.stats_source_dialect,
         stats_source_schema=args.stats_source_schema,
+        collection_config=collection_config,
     )
 
     print(result.summary())

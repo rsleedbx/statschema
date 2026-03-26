@@ -81,8 +81,28 @@ def _extract_tables(sql: str) -> list[str]:
 # PostgreSQL family
 # ---------------------------------------------------------------------------
 
-def _collect_postgres(cur: Any, n: int, rank_by: str) -> list[QueryEntry]:
+def _collect_postgres(
+    cur: Any,
+    n: int,
+    rank_by: str,
+    tables: list[str] | None = None,
+) -> list[QueryEntry]:
     order_col = _RANK_COLS.get(rank_by, _RANK_COLS["total_time"])["postgres"]
+
+    # When target table names are known, narrow the fetch to queries that
+    # mention at least one of them.  pg_stat_statements stores normalised SQL
+    # with $N placeholders, so schema-qualified filtering via LIKE is
+    # unreliable; table-name keyword matching is the practical alternative.
+    if tables:
+        # Build OR'd ILIKE conditions — one per table name.
+        like_clauses = " OR ".join(f"query ILIKE %s" for _ in tables)
+        like_params  = [f"%{t}%" for t in tables]
+        where = f"WHERE ({like_clauses})"
+        params: tuple = tuple(like_params) + (n,)
+    else:
+        where  = ""
+        params = (n,)
+
     try:
         cur.execute(f"""
             SELECT
@@ -92,9 +112,10 @@ def _collect_postgres(cur: Any, n: int, rank_by: str) -> list[QueryEntry]:
                 total_exec_time,
                 mean_exec_time
             FROM pg_stat_statements
+            {where}
             ORDER BY {order_col} DESC
             LIMIT %s
-        """, (n,))
+        """, params)
     except Exception:
         # Extension not installed or no SELECT privilege
         return []
@@ -207,8 +228,19 @@ def _collect_sqlserver(cur: Any, n: int, rank_by: str) -> list[QueryEntry]:
 # Oracle
 # ---------------------------------------------------------------------------
 
-def _collect_oracle(cur: Any, n: int, rank_by: str) -> list[QueryEntry]:
+def _collect_oracle(
+    cur: Any,
+    n: int,
+    rank_by: str,
+    schema: str | None = None,
+) -> list[QueryEntry]:
     order_col = _RANK_COLS.get(rank_by, _RANK_COLS["total_time"])["oracle"]
+    # v$sql.PARSING_SCHEMA_NAME is the owner who parsed the statement — a
+    # reliable server-side filter that avoids pulling cross-schema noise.
+    schema_clause = "AND PARSING_SCHEMA_NAME = UPPER(:schema)" if schema else ""
+    params: dict = {"n": n}
+    if schema:
+        params["schema"] = schema
     try:
         cur.execute(f"""
             SELECT sql_id, sql_text, executions,
@@ -218,10 +250,11 @@ def _collect_oracle(cur: Any, n: int, rank_by: str) -> list[QueryEntry]:
                 SELECT sql_id, sql_text, executions, elapsed_time
                 FROM v$sql
                 WHERE executions > 0
+                {schema_clause}
                 ORDER BY {order_col} DESC
             )
             WHERE ROWNUM <= :n
-        """, {"n": n})
+        """, params)
     except Exception:
         return []
 
@@ -293,6 +326,7 @@ def collect_top_queries(
     rank_by: str = "total_time",
     catalog: str | None = None,
     schema: str | None = None,
+    tables: list[str] | None = None,
 ) -> QueryWorkload:
     """Collect the top-N queries from a live database.
 
@@ -310,7 +344,13 @@ def collect_top_queries(
     catalog
         Database / catalog name — used by MySQL to filter to the right schema.
     schema
-        Schema name (unused by most backends, reserved for future use).
+        Schema / owner name.  Passed to engines that support server-side schema
+        filtering (currently Oracle via ``v$sql.PARSING_SCHEMA_NAME``).
+    tables
+        Optional list of table names to narrow the results to queries that
+        reference at least one of them.  For PostgreSQL this is applied as an
+        ILIKE filter on the query text; for other engines it is post-filtered
+        from the ``QueryEntry.tables`` list.
 
     Returns
     -------
@@ -322,7 +362,7 @@ def collect_top_queries(
     cur = conn.cursor()
 
     if d in _PG_FAMILY:
-        entries = _collect_postgres(cur, n, rank_by)
+        entries = _collect_postgres(cur, n, rank_by, tables=tables)
         source_dialect = "postgres"
     elif d in _MYSQL_FAMILY:
         entries = _collect_mysql(cur, n, rank_by, catalog)
@@ -331,7 +371,7 @@ def collect_top_queries(
         entries = _collect_sqlserver(cur, n, rank_by)
         source_dialect = "tsql"
     elif d == "oracle":
-        entries = _collect_oracle(cur, n, rank_by)
+        entries = _collect_oracle(cur, n, rank_by, schema=schema)
         source_dialect = "oracle"
     elif d == "databricks":
         entries = _collect_databricks(cur, n, rank_by)
