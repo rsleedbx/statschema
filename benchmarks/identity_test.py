@@ -159,6 +159,21 @@ class IdentityTestResult:
     #                      by PG-wire engines that lack pg_restore_attribute_stats
     #   "none"           — no stats update attempted
     stats_injection_mode: str = "none"
+    # When stats are collected from a different database engine than the target
+    # (cross-database test), this records the source engine's dialect name.
+    stats_source_dialect: str = ""
+    # Stats fidelity (Phase C.5) — how well did build_rows_from_canonical
+    # reproduce the source statistics on the target schema?
+    # Structure:
+    #   mean_ndistinct_within_2x  float  — fraction of (table,col) pairs where
+    #                                       target n_distinct is within 2× of source
+    #   mean_range_covered        float  — fraction of numeric/date columns where
+    #                                       target [min,max] stays within 5% of the
+    #                                       source range (string columns excluded)
+    #   mean_null_match           float  — fraction where null_fraction within 0.02
+    #   per_table                 dict   — per-table breakdown (row_count_ok,
+    #                                       ndistinct_within_2x, columns: {...})
+    stats_fidelity: dict = field(default_factory=dict)
 
     def summary(self) -> str:
         lines = [
@@ -167,6 +182,28 @@ class IdentityTestResult:
             f"  schema={self.schema}  dialect={self.dialect}  sf={self.sf}",
             f"  source={self.source_schema}  target={self.target_schema}",
             f"{'='*70}",
+        ]
+        # ── Stats fidelity ───────────────────────────────────────────────
+        if self.stats_fidelity:
+            nd   = self.stats_fidelity.get("mean_ndistinct_within_2x")
+            rng  = self.stats_fidelity.get("mean_range_covered")
+            null = self.stats_fidelity.get("mean_null_match")
+            lines.append(
+                f"  stats_fidelity: ndistinct_w2x={nd:.3f}  "
+                f"range_covered={rng:.3f}  null_match={null:.3f}"
+                if (nd is not None and rng is not None and null is not None)
+                else "  stats_fidelity: (not collected)"
+            )
+            # Warn on any table with poor n_distinct fidelity
+            for tname, td in self.stats_fidelity.get("per_table", {}).items():
+                nd_t = td.get("ndistinct_within_2x", 1.0)
+                if nd_t is not None and nd_t < 0.75:
+                    lines.append(
+                        f"    ⚠  {tname}: only {nd_t:.0%} of columns have "
+                        f"matching n_distinct (target stats may not reflect source)"
+                    )
+        lines += [
+            f"",
             f"  node_jaccard  : {self.mean_node_jaccard:.3f}  "
             f"(threshold ≥ {self.threshold_node_jaccard})",
             f"  within_2x     : {self.mean_within_2x:.3f}  "
@@ -1231,6 +1268,163 @@ def collect_stats(
     return all_stats
 
 
+def _compare_stats(
+    source: dict[str, "TableStats"],
+    target: dict[str, "TableStats"],
+) -> dict:
+    """Compare source vs target statistics and return a fidelity summary.
+
+    Per-column metrics:
+      ndistinct_within_2x — target n_distinct in [src/2, src*2]
+      range_covered       — for numeric/date columns: target [min,max] covers at
+                            least 95% of the source range AND does not exceed the
+                            source range by more than 5%.  String columns are
+                            excluded (random extreme values are meaningless).
+      null_match          — |src - tgt| ≤ 0.02
+    """
+    import datetime
+
+    def _norm_str(v) -> str | None:
+        if v is None:
+            return None
+        s = str(v)
+        if len(s) > 10 and s[4] == "-" and s[7] == "-" and s[10] == " ":
+            s = s[:10]
+        return s
+
+    def _to_numeric(v) -> float | None:
+        """Try to parse a min/max value as a float or date ordinal."""
+        if v is None:
+            return None
+        s = str(v).strip()
+        # Trim datetime → date
+        if len(s) > 10 and s[4] == "-" and s[7] == "-" and s[10] == " ":
+            s = s[:10]
+        # Try plain float
+        try:
+            return float(s)
+        except ValueError:
+            pass
+        # Try ISO date
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+            try:
+                d = datetime.datetime.strptime(s, fmt).date()
+                return float(d.toordinal())
+            except ValueError:
+                pass
+        return None  # string — not comparable numerically
+
+    def _range_covered(s_min, s_max, t_min, t_max) -> bool | None:
+        """Return True/False for numeric/date ranges, None for strings."""
+        sv_min = _to_numeric(s_min)
+        sv_max = _to_numeric(s_max)
+        tv_min = _to_numeric(t_min)
+        tv_max = _to_numeric(t_max)
+        if any(x is None for x in (sv_min, sv_max, tv_min, tv_max)):
+            return None  # string column — skip
+        span = sv_max - sv_min
+        if span == 0:
+            # Constant column: target must also be constant at the same value
+            return tv_min == sv_min and tv_max == sv_max
+        tol = max(abs(span) * 0.05, 1.0)
+        # Target must not undershoot source min by more than tol, and must not
+        # overshoot source max by more than tol.
+        return (tv_min >= sv_min - tol) and (tv_max <= sv_max + tol)
+
+    nd_hits = nd_total = 0
+    rng_hits = rng_total = 0
+    null_hits = null_total = 0
+    per_table: dict[str, dict] = {}
+
+    for tname, src_ts in source.items():
+        tgt_ts = target.get(tname)
+        if tgt_ts is None:
+            continue
+
+        row_ok = (src_ts.row_count == tgt_ts.row_count)
+        t_nd = t_nd_hit = 0
+        t_rng = t_rng_hit = 0
+        t_null = t_null_hit = 0
+        col_detail: dict[str, dict] = {}
+
+        src_cols = {c.name: c for c in (src_ts.columns or [])}
+        tgt_cols = {c.name: c for c in (tgt_ts.columns or [])}
+
+        for cname, sc in src_cols.items():
+            tc = tgt_cols.get(cname)
+            if tc is None:
+                continue
+
+            # n_distinct
+            s_nd = sc.n_distinct or 0.0
+            t_nd_val = tc.n_distinct or 0.0
+            t_nd += 1
+            nd_ok = False
+            if s_nd == 0:
+                nd_ok = (t_nd_val == 0)
+            elif s_nd < 0 and t_nd_val < 0:
+                nd_ok = (0.5 <= t_nd_val / s_nd <= 2.0)
+            elif s_nd > 0 and t_nd_val > 0:
+                nd_ok = (0.5 * s_nd <= t_nd_val <= 2.0 * s_nd)
+            if nd_ok:
+                t_nd_hit += 1
+
+            # range coverage (numeric/date only)
+            has_src_range = (sc.min_value is not None and sc.max_value is not None)
+            has_tgt_range = (tc.min_value is not None and tc.max_value is not None)
+            rng_ok: bool | None = None
+            if has_src_range and has_tgt_range:
+                rng_ok = _range_covered(sc.min_value, sc.max_value,
+                                        tc.min_value, tc.max_value)
+                if rng_ok is not None:   # numeric/date — count it
+                    t_rng += 1
+                    if rng_ok:
+                        t_rng_hit += 1
+
+            # null fraction
+            s_nf = sc.null_fraction or 0.0
+            t_nf = tc.null_fraction or 0.0
+            t_null += 1
+            null_ok = abs(s_nf - t_nf) <= 0.02
+            if null_ok:
+                t_null_hit += 1
+
+            col_detail[cname] = {
+                "src_n_distinct":  s_nd,
+                "tgt_n_distinct":  t_nd_val,
+                "nd_ok":           nd_ok,
+                "src_min":         _norm_str(sc.min_value),
+                "tgt_min":         _norm_str(tc.min_value),
+                "src_max":         _norm_str(sc.max_value),
+                "tgt_max":         _norm_str(tc.max_value),
+                "range_ok":        rng_ok,
+                "src_null_frac":   round(s_nf, 4),
+                "tgt_null_frac":   round(t_nf, 4),
+                "null_ok":         null_ok,
+            }
+
+        nd_hits   += t_nd_hit;   nd_total   += t_nd
+        rng_hits  += t_rng_hit;  rng_total  += t_rng
+        null_hits += t_null_hit; null_total += t_null
+
+        per_table[tname] = {
+            "row_count_ok":        row_ok,
+            "src_row_count":       src_ts.row_count,
+            "tgt_row_count":       tgt_ts.row_count,
+            "ndistinct_within_2x": round(t_nd_hit / t_nd, 4) if t_nd   else None,
+            "range_covered":       round(t_rng_hit / t_rng, 4) if t_rng else None,
+            "null_match":          round(t_null_hit / t_null, 4) if t_null else None,
+            "columns":             col_detail,
+        }
+
+    return {
+        "mean_ndistinct_within_2x": round(nd_hits  / nd_total,   4) if nd_total   else None,
+        "mean_range_covered":       round(rng_hits  / rng_total,  4) if rng_total  else None,
+        "mean_null_match":          round(null_hits / null_total, 4) if null_total else None,
+        "per_table": per_table,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Phases A.5 / D.5: extended statistics (query-driven, Layer 3)
 # ---------------------------------------------------------------------------
@@ -1669,6 +1863,9 @@ def run_identity_test(
     threshold_node_jaccard: float = 0.70,
     threshold_within_2x: float = 0.50,
     use_extended_stats: bool = True,
+    stats_source_dsn: str | None = None,
+    stats_source_dialect: str | None = None,
+    stats_source_schema: str | None = None,
     **kwargs,
 ) -> IdentityTestResult:
     """
@@ -1682,13 +1879,24 @@ def run_identity_test(
     dsn             DB-API2 connection string.
     queries_yaml    Path to queries YAML file; defaults to
                     benchmarks/queries/<schema>.yaml.
-    source_schema   PostgreSQL schema for the real TPC-H data.
-    target_schema   PostgreSQL schema for the statschema synthetic copy.
+    source_schema   Schema for the real TPC data on the target DB.
+    target_schema   Schema for the statschema synthetic copy on the target DB.
     skip_load            If True, skip Phase A (reuse existing source_schema data).
     save_yaml            If set, write collected stats and schema artifacts here.
     use_extended_stats   If True (default), run Phases A.5 and D.5 — parse the
                          query workload to create multi-column CREATE STATISTICS
                          objects on both source and target (Layer 3 feature).
+    stats_source_dsn      If set, collect Phase C statistics from this separate
+                          database instead of from ``source_schema`` on the main
+                          connection.  Enables cross-database tests where data
+                          is loaded into the target DB (e.g. Lakebase) but stats
+                          come from a different engine (e.g. MySQL).
+    stats_source_dialect  Dialect of the stats-source DB (required when
+                          ``stats_source_dsn`` is set).
+    stats_source_schema   Schema in the stats-source DB to collect from.
+                          Defaults to ``source_schema`` when not specified.
+                          If the schema does not already contain data it will
+                          be loaded fresh (Phase A on the stats-source connection).
     """
     if queries_yaml is None:
         queries_yaml = QUERIES_DIR / f"{schema}.yaml"
@@ -1710,6 +1918,7 @@ def run_identity_test(
         target_schema=target_schema,
         threshold_node_jaccard=threshold_node_jaccard,
         threshold_within_2x=threshold_within_2x,
+        stats_source_dialect=stats_source_dialect or "",
     )
 
     conn = _connect(dialect, dsn)
@@ -1802,9 +2011,43 @@ def run_identity_test(
 
     # ── Phase C: Collect statistics ───────────────────────────────────────────
     t0 = time.perf_counter()
-    collected_stats = collect_stats(
-        conn, ordered, source_schema, dialect, save_dir=save_yaml
-    )
+    if stats_source_dsn:
+        # Cross-database mode: collect stats from a separate engine.
+        # The stats-source schema must already contain data (loaded by the
+        # caller or a prior same-database identity run on that engine).
+        _ss_dialect = stats_source_dialect or dialect
+        _ss_schema  = stats_source_schema or source_schema
+        print(f"  [C] Cross-DB stats: collecting from {_ss_dialect} schema {_ss_schema!r}…")
+        _ss_conn = _connect(_ss_dialect, stats_source_dsn)
+        try:
+            _ss_conn.autocommit = False
+        except (AttributeError, TypeError):
+            pass
+        # Ensure the stats-source schema exists; if empty, load data there first.
+        _ss_empty = False
+        try:
+            with _ss_conn.cursor() as _cur:
+                _first = ordered[0]
+                _tref = _schema_table_ref(_first.name, _ss_schema, _ss_dialect)
+                _cur.execute(f"SELECT COUNT(*) FROM {_tref}")
+                _ss_empty = (_cur.fetchone()[0] == 0)
+        except Exception:
+            try:
+                _ss_conn.rollback()
+            except Exception:
+                pass
+            _ss_empty = True
+        if _ss_empty:
+            print(f"  [C] Stats-source schema {_ss_schema!r} is empty — loading data…")
+            load_source(_ss_conn, schema, sf, _ss_schema, _ss_dialect, seed=seed)
+        collected_stats = collect_stats(
+            _ss_conn, ordered, _ss_schema, _ss_dialect, save_dir=save_yaml
+        )
+        _ss_conn.close()
+    else:
+        collected_stats = collect_stats(
+            conn, ordered, source_schema, dialect, save_dir=save_yaml
+        )
     result.phase_times["C_collect_stats"] = time.perf_counter() - t0
 
     # ── Phase D: Build copy ────────────────────────────────────────────────────
@@ -1823,6 +2066,31 @@ def run_identity_test(
             conn, stat_defs, ordered, collected_stats, target_schema, dialect
         )
         result.phase_times["D5_target_extended_stats"] = time.perf_counter() - t0
+
+    # ── Phase C.5: Collect target stats and compare vs source ─────────────────
+    # Validates that build_rows_from_canonical actually reproduced the source
+    # statistics — if it didn't, plan matches in Phase E are coincidental.
+    t0 = time.perf_counter()
+    try:
+        print("  [C.5] Collecting target stats for fidelity check…")
+        target_stats = collect_stats(conn, ordered, target_schema, dialect)
+        result.stats_fidelity = _compare_stats(collected_stats, target_stats)
+        nd   = result.stats_fidelity.get("mean_ndistinct_within_2x")
+        rng  = result.stats_fidelity.get("mean_range_covered")
+        null = result.stats_fidelity.get("mean_null_match")
+        print(
+            f"  [C.5] stats fidelity: "
+            f"ndistinct_w2x={nd:.3f}  range_covered={rng:.3f}  null_match={null:.3f}"
+            if (nd is not None and rng is not None and null is not None)
+            else "  [C.5] stats fidelity: (insufficient data)"
+        )
+    except Exception as _c5_exc:
+        logger.warning("Phase C.5 stats comparison failed: %s", _c5_exc)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    result.phase_times["C5_target_stats_fidelity"] = time.perf_counter() - t0
 
     # Reconnect before Phase E so the new session starts with a fresh catalog
     # cache.  pg_restore_attribute_stats commits stats to pg_statistic, but the
@@ -1942,6 +2210,29 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--no-extended-stats", action="store_true",
                    help="Disable Phase A.5/D.5 extended statistics (Layer 3 query feature)")
+
+    cross = p.add_argument_group(
+        "Cross-database mode",
+        "Collect Phase C statistics from a separate engine while keeping the\n"
+        "target (Phases A, B, D, E) on the main --dsn.  Useful for N×Lakebase\n"
+        "tests where stats come from MySQL/Oracle/etc. but EXPLAIN plans are\n"
+        "compared on Lakebase.",
+    )
+    cross.add_argument(
+        "--stats-source-dsn", metavar="DSN",
+        help="DSN for the stats-collection source DB (e.g. MySQL, Oracle).",
+    )
+    cross.add_argument(
+        "--stats-source-dialect",
+        choices=["postgres", "mysql", "mariadb", "sqlserver", "oracle", "db2",
+                 "lakebase", "neon", "cockroachdb"],
+        help="Dialect of the stats-source DB (required with --stats-source-dsn).",
+    )
+    cross.add_argument(
+        "--stats-source-schema", metavar="SCHEMA",
+        help="Existing schema in the stats-source DB to collect from. "
+             "If omitted, data is loaded fresh using the source_schema name.",
+    )
     return p
 
 
@@ -1966,6 +2257,9 @@ def main() -> None:
         threshold_node_jaccard=args.threshold_jaccard,
         threshold_within_2x=args.threshold_within_2x,
         use_extended_stats=not args.no_extended_stats,
+        stats_source_dsn=args.stats_source_dsn,
+        stats_source_dialect=args.stats_source_dialect,
+        stats_source_schema=args.stats_source_schema,
     )
 
     print(result.summary())
@@ -1974,7 +2268,8 @@ def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    out = RESULTS_DIR / f"{ts}-identity-{args.schema}-sf{args.sf}-{args.dialect}.json"
+    _from_suffix = f"-from-{args.stats_source_dialect}" if args.stats_source_dialect else ""
+    out = RESULTS_DIR / f"{ts}-identity-{args.schema}-sf{args.sf}-{args.dialect}{_from_suffix}.json"
     import dataclasses
     out.write_text(json.dumps(dataclasses.asdict(result), indent=2, default=str))
     print(f"  Result saved → {out.relative_to(_REPO_ROOT)}\n")

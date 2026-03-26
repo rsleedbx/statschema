@@ -8,8 +8,40 @@ Pipeline:
 ```
 A load source → A.5 extended stats (Layer 3) → B baseline EXPLAIN →
 C collect stats → D build copy + inject → D.5 mirror extended stats →
-E replay EXPLAIN → F score
+C.5 compare target stats vs source → E replay EXPLAIN → F score
 ```
+
+## What source and target must agree on
+
+The identity test validates a chain of invariants.  Each level must hold before the next is
+meaningful — a matching query plan on top of mismatched statistics is a coincidence, not evidence.
+
+| # | Invariant | How it is checked | Phase |
+|---|-----------|-------------------|-------|
+| 1 | **Canonical schema** — source and target are created from the same DDL (same columns, types, and table names); the optimizer's structural knowledge of the schema is identical | Same `TableDef` objects from `statschema.schemas` used to create both | A / D |
+| 2 | **Row counts** — every table has the same number of rows on source and target; the optimizer's baseline size estimate is correct | `source_row_counts` vs `target_row_counts` in result JSON | D / F |
+| 3 | **Column statistics** — `n_distinct`, `min_value`, `max_value`, `null_fraction` collected from source are reproduced on target after ANALYZE; the optimizer is working from the same distribution inputs | `stats_fidelity` dict: `ndistinct_w2x`, `range_covered`, `null_match` per column | C.5 |
+| 4 | **Query text** — both EXPLAIN runs use the exact same SQL with the same bind-variable placeholders; the optimizer is answering the same question | Same query YAML applied to both `source_schema` and `target_schema` | B / E |
+| 5 | **Query plans** — once 1–4 hold, plan operators and cardinality estimates should match | `node_jaccard` (operator set) and `within_2x` (row estimates) | F |
+
+If invariant N fails, the results for invariant N+1 are suspect and should not be reported as
+evidence of quality.  The test surfaces all five levels so failures can be diagnosed precisely.
+
+## Stats fidelity metrics (Phase C.5)
+
+Three metrics are computed after Phase D to validate that `build_rows_from_canonical` reproduced
+the source statistics on the target.  If these fail, plan matches in Phase E are coincidental.
+
+- **ndistinct_w2x** — fraction of columns where the target's `n_distinct` is within 2× of the
+  source value.  This is the most important metric: `n_distinct` drives join-order decisions and
+  GROUP BY cardinality estimates.
+- **range_covered** — fraction of numeric/date columns where the target's `[min, max]` stays
+  within 5% of the source range span.  String columns are excluded — random extreme values from
+  two independently-generated datasets are not comparable and will always differ.  Drives
+  range-predicate selectivity.
+- **null_match** — fraction of columns where `null_fraction` is within 0.02 of source.
+
+## Plan metrics
 
 Two metrics are computed per query (both are statschema-specific terms, not industry standards):
 

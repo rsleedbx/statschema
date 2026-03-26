@@ -420,12 +420,17 @@ def _collect_column_stats(  # pragma: no cover
     n_distinct = float(n_distinct_raw)
 
     # ── min / max ──────────────────────────────────────────────────────────
-    # Only run MIN/MAX for indexed columns.  On large tables a full sequential
-    # scan for every non-indexed column would dominate collection time.
-    # Non-indexed PostgreSQL columns get approximate bounds from histogram_bounds
-    # (filled in below from pg_stats); other dialects leave min/max as None.
+    # Collect MIN/MAX when:
+    #   • indexed_cols is None  — index catalog query failed; safe fallback
+    #   • col is in indexed_cols — index guarantees a cheap scan
+    #   • indexed_cols is empty  — table has no indexes at all (e.g. constraints
+    #     stripped for bulk loading).  A seq scan is unavoidable here regardless,
+    #     so we collect min/max for every column rather than silently omitting
+    #     range information.  PostgreSQL is excluded because it derives bounds
+    #     from histogram_bounds in pg_stats even for non-indexed columns.
     min_val = max_val = None
-    if indexed_cols is None or col in indexed_cols:
+    _no_indexes = indexed_cols is not None and len(indexed_cols) == 0
+    if indexed_cols is None or col in indexed_cols or (_no_indexes and dialect != "postgres"):
         min_val, max_val = _fetch_min_max(conn, tref, cref, dialect)
 
     # ── avg width ──────────────────────────────────────────────────────────
