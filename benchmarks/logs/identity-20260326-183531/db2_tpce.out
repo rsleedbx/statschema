@@ -23,4 +23,56 @@
   [A]   loading news_xref                        600 rows… 1.86s
   [A]   loading account_permission            75,000 rows… 29.76s
   [A]   loading watch_item                   150,000 rows… 19.22s
-  [A]   loading daily_market                 125,027 rows… 
+  [A]   loading daily_market                 125,027 rows… 30.26s
+  [A]   loading last_trade                        68 rows… 1.76s
+  [A]   loading trade                         33,387 rows… 51.16s
+  [A]   loading holding_summary               38,000 rows… 8.30s
+  [A]   loading trade_history                100,000 rows… 18.39s
+  [A]   loading trade_request                  1,000 rows… 2.76s
+  [A]   loading holding                       50,000 rows… 11.75s
+  [A]   loading cash_transaction              33,387 rows… 6.63s
+  [A]   loading holding_history              100,000 rows… 12.51s
+  [A] Running ANALYZE on 'tpce_src'… done
+  [B] EXPLAIN tpce-q01… ok
+  [B] EXPLAIN tpce-q02… ok
+  [B] EXPLAIN tpce-q03… ok
+  [B] EXPLAIN tpce-q04… ok
+  [C] pred_cols: 15 predicate columns from workload YAML across 32 tables
+  [C] collecting stats exchange… ok  (row_count=4)
+  [C] collecting stats sector… ok  (row_count=12)
+  [C] collecting stats status_type… ok  (row_count=5)
+  [C] collecting stats trade_type… ok  (row_count=5)
+  [C] collecting stats taxrate… ok  (row_count=320)
+  [C] collecting stats charge… ok  (row_count=15)
+  [C] collecting stats commission_rate… ok  (row_count=240)
+  [C] collecting stats zip_code… ok  (row_count=14,741)
+  [C] collecting stats address… ok  (row_count=13,333)
+  [C] collecting stats news_item… ok  (row_count=200)
+  [C] collecting stats industry… ok  (row_count=102)
+  [C] collecting stats broker… ok  (row_count=10)
+  [C] collecting stats customer… ok  (row_count=10,000)
+  [C] collecting stats company… ok  (row_count=50)
+  [C] collecting stats customer_taxrate… ok  (row_count=30,000)
+  [C] collecting stats customer_account… ok  (row_count=50,000)
+  [C] collecting stats watch_list… ok  (row_count=10,000)
+  [C] collecting stats company_competitor… ok  (row_count=150)
+  [C] collecting stats security… ok  (row_count=68)
+  [C] collecting stats financial… ok  (row_count=1,000)
+  [C] collecting stats news_xref… ok  (row_count=600)
+  [C] collecting stats account_permission… ok  (row_count=75,000)
+  [C] collecting stats watch_item… ok  (row_count=150,000)
+  [C] collecting stats daily_market… ok  (row_count=125,027)
+  [C] collecting stats last_trade… ok  (row_count=68)
+  [C] collecting stats trade… ok  (row_count=33,387)
+  [C] collecting stats holding_summary… ok  (row_count=38,000)
+  [C] collecting stats trade_history… ok  (row_count=100,000)
+  [C] collecting stats trade_request… ok  (row_count=1,000)
+  [C] collecting stats holding… ok  (row_count=50,000)
+  [C] collecting stats cash_transaction… ok  (row_count=33,387)
+  [C] collecting stats holding_history… ok  (row_count=100,000)
+  [D] Creating tables in schema 'tpce_tgt'… done
+  [D]   synthetic exchange                           4 rows… 1.58s
+  [D]   synthetic sector                            12 rows… 1.51s
+  [D]   synthetic status_type                        5 rows… 0.43s
+  [D]   synthetic trade_type                         5 rows… 0.43s
+  [D]   synthetic taxrate                          320 rows… 

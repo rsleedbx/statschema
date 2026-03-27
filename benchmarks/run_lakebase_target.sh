@@ -101,7 +101,7 @@ ALL_ENGINES="postgres,cockroachdb,mysql,sqlserver,oracle,db2"
 ALL_SCHEMAS="tpcb,tpcc,tpch,tpcdi,tpcds,tpce"
 ENGINES="$ALL_ENGINES"
 SCHEMAS="$ALL_SCHEMAS"
-MAX_JOBS=4
+MAX_JOBS=8
 LOG_DIR=""
 ENRICH_FLAG=""
 # --no-auto-profile is on by default for Lakebase target runs.
