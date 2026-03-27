@@ -1,0 +1,26 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'db2'
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 0.69s
+  [A]   loading sector                            12 rows… 0.60s
+  [A]   loading status_type                        5 rows… 0.67s
+  [A]   loading trade_type                         5 rows… 0.79s
+  [A]   loading taxrate                          320 rows… 2.08s
+  [A]   loading charge                            15 rows… 0.71s
+  [A]   loading commission_rate                  240 rows… 1.71s
+  [A]   loading zip_code                      14,741 rows… 7.49s
+  [A]   loading address                       13,333 rows… 5.82s
+  [A]   loading news_item                        200 rows… 1.75s
+  [A]   loading industry                         102 rows… 1.64s
+  [A]   loading broker                            10 rows… 0.54s
+  [A]   loading customer                      10,000 rows… 60.72s
+  [A]   loading company                           50 rows… 1.72s
+  [A]   loading customer_taxrate              30,000 rows… 4.54s
+  [A]   loading customer_account              50,000 rows… 12.72s
+  [A]   loading watch_list                    10,000 rows… 3.12s
+  [A]   loading company_competitor               150 rows… 0.58s
+  [A]   loading security                          68 rows… 0.64s
+  [A]   loading financial                      1,000 rows… 3.16s
+  [A]   loading news_xref                        600 rows… 1.86s
+  [A]   loading account_permission            75,000 rows… 29.76s
+  [A]   loading watch_item                   150,000 rows… 19.22s
+  [A]   loading daily_market                 125,027 rows… 

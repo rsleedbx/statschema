@@ -1,0 +1,67 @@
+  [A] Creating tables in schema 'tpcb_src'… done
+  [A]   loading branch                             1 rows… 0.00s
+  [A]   loading teller                            10 rows… 0.00s
+  [A]   loading account                      100,000 rows… 1.41s
+  [A]   loading history                      100,000 rows… 1.32s
+  [A] Running ANALYZE on 'tpcb_src'… done
+  [A.5] Found 5 column pairs across 3 tables; creating statistics… done (5 created)
+  [A.5] Running ANALYZE for extended stats… done
+  [A.6] No literal predicates on dimension columns found — skipping FK range inference
+  [B] EXPLAIN tpcb-q01… ok
+  [B] EXPLAIN tpcb-q02… ok
+  [B] EXPLAIN tpcb-q03… ok
+  [B] EXPLAIN tpcb-q04… ok
+  [C] collecting stats branch… ok  (row_count=1)
+  [C] collecting stats teller… ok  (row_count=10)
+  [C] collecting stats account… ok  (row_count=100,000)
+  [C] collecting stats history… ok  (row_count=100,000)
+  [D] Creating tables in schema 'tpcb_tgt'… done
+  [D]   synthetic branch                             1 rows… 0.01s
+  [D]   synthetic teller                            10 rows… 0.00s
+  [D]   synthetic account                      100,000 rows… 1.59s
+  [D]   synthetic history                      100,000 rows… 1.64s
+  [D] Updating statistics in 'tpcb_tgt'… done
+  [D.5] Creating extended statistics in 'tpcb_tgt'… done (5 created)
+  [D.5] Analyzing target tables for extended stats… done
+  [D.5] Re-injecting single-column stats after ANALYZE… done
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats branch… ok  (row_count=1)
+  [C] collecting stats teller… ok  (row_count=10)
+  [C] collecting stats account… ok  (row_count=100,000)
+  [C] collecting stats history… ok  (row_count=100,000)
+  [C.5] stats fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+  [B] EXPLAIN tpcb-q01… ok
+  [B] EXPLAIN tpcb-q02… ok
+  [B] EXPLAIN tpcb-q03… ok
+  [B] EXPLAIN tpcb-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcb  dialect=postgres  sf=1.0
+  source=tpcb_src  target=tpcb_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcb-q01              jaccard=1.00  within_2x=1.00  nodes: 3→3
+  tpcb-q02              jaccard=1.00  within_2x=1.00  nodes: 6→6
+  tpcb-q03              jaccard=1.00  within_2x=1.00  nodes: 7→7
+  tpcb-q04              jaccard=1.00  within_2x=1.00  nodes: 3→3
+
+  Overall: PASS ✓
+    A_load_source             2.90s
+    A5_source_extended_stats  0.16s
+    A6_fk_range_inference     0.01s
+    B_baseline_explain        0.01s
+    C_collect_stats           0.83s
+    D_build_target            3.29s
+    D5_target_extended_stats  0.14s
+    C5_target_stats_fidelity  0.76s
+    E_replay_explain          0.01s
+======================================================================
+
+  Result saved → benchmarks/results/20260326-232532-identity-tpcb-sf1.0-postgres.json
+

@@ -1,0 +1,83 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'db2'
+  [A] Creating tables in schema 'tpcc_src'… done
+  [A]   loading item                         100,000 rows… 18.34s
+  [A]   loading warehouse                          1 rows… 0.04s
+  [A]   loading district                          10 rows… 0.04s
+  [A]   loading stock                        100,000 rows… 127.46s
+  [A]   loading customer                      30,000 rows… 54.93s
+  [A]   loading history                       30,000 rows… 9.66s
+  [A]   loading orders                        30,000 rows… 11.75s
+  [A]   loading new_order                      9,000 rows… 2.39s
+  [A]   loading order_line                   300,000 rows… 139.50s
+  [A] Running ANALYZE on 'tpcc_src'… done
+  [B] EXPLAIN tpcc-q01… ok
+  [B] EXPLAIN tpcc-q02… ok
+  [B] EXPLAIN tpcc-q03… ok
+  [B] EXPLAIN tpcc-q04… ok
+  [C] pred_cols: 14 predicate columns from workload YAML across 9 tables
+  [C] collecting stats item… ok  (row_count=100,000)
+  [C] collecting stats warehouse… ok  (row_count=1)
+  [C] collecting stats district… ok  (row_count=10)
+  [C] collecting stats stock… ok  (row_count=100,000)
+  [C] collecting stats customer… ok  (row_count=30,000)
+  [C] collecting stats history… ok  (row_count=30,000)
+  [C] collecting stats orders… ok  (row_count=30,000)
+  [C] collecting stats new_order… ok  (row_count=9,000)
+  [C] collecting stats order_line… ok  (row_count=300,000)
+  [D] Creating tables in schema 'tpcc_tgt'… done
+  [D]   synthetic item                         100,000 rows… 19.90s
+  [D]   synthetic warehouse                          1 rows… 1.80s
+  [D]   synthetic district                          10 rows… 3.31s
+  [D]   synthetic stock                        100,000 rows… 126.69s
+  [D]   synthetic customer                      30,000 rows… 51.85s
+  [D]   synthetic history                       30,000 rows… 10.74s
+  [D]   synthetic orders                        30,000 rows… 10.24s
+  [D]   synthetic new_order                      9,000 rows… 2.31s
+  [D]   synthetic order_line                   300,000 rows… 127.53s
+  [D] Updating statistics in 'tpcc_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats item… ok  (row_count=100,000)
+  [C] collecting stats warehouse… ok  (row_count=1)
+  [C] collecting stats district… ok  (row_count=10)
+  [C] collecting stats stock… ok  (row_count=100,000)
+  [C] collecting stats customer… ok  (row_count=30,000)
+  [C] collecting stats history… ok  (row_count=30,000)
+  [C] collecting stats orders… ok  (row_count=30,000)
+  [C] collecting stats new_order… ok  (row_count=9,000)
+  [C] collecting stats order_line… ok  (row_count=300,000)
+  [C.5] stats fidelity: ndistinct_w2x=0.793  range_covered=0.965  null_match=1.000
+  [B] EXPLAIN tpcc-q01… ok
+  [B] EXPLAIN tpcc-q02… ok
+  [B] EXPLAIN tpcc-q03… ok
+  [B] EXPLAIN tpcc-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcc  dialect=db2  sf=1.0
+  source=tpcc_src  target=tpcc_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.793  range_covered=0.965  null_match=1.000
+    ⚠  item: only 60% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  stock: only 71% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  order_line: only 30% of columns have matching n_distinct (target stats may not reflect source)
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcc-q01              jaccard=1.00  within_2x=1.00  nodes: 1→1
+  tpcc-q02              jaccard=1.00  within_2x=1.00  nodes: 1→1
+  tpcc-q03              jaccard=1.00  within_2x=1.00  nodes: 1→1
+  tpcc-q04              jaccard=1.00  within_2x=1.00  nodes: 1→1
+
+  Overall: PASS ✓
+    A_load_source             428.17s
+    B_baseline_explain        0.17s
+    C_collect_stats           65.18s
+    D_build_target            938.45s
+    C5_target_stats_fidelity  266.78s
+    E_replay_explain          0.14s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-000713-identity-tpcc-sf1.0-db2.json
+

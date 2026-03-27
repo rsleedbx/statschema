@@ -1,0 +1,7 @@
+# Thu Mar 26 18:31:54 CDT 2026
+# engines=oracle,db2
+# schemas=tpcb
+# skip_load=0
+
+PASS  oracle×tpcb(sf=1)                            Overall: PASS ✓
+PASS  db2×tpcb(sf=1)                               Overall: PASS ✓

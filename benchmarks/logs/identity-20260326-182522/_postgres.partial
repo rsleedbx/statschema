@@ -1,0 +1,2 @@
+PASS  postgres×tpcb(sf=1)                          Overall: PASS ✓
+PASS  postgres×tpcc(sf=1)                          Overall: PASS ✓

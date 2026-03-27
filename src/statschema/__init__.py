@@ -111,6 +111,7 @@ except ImportError:
         raise ImportError("pyspark is required: pip install statschema[spark]")
 from .row_generator import generate_rows
 from .postgen import apply_boundary_rows
+from .core.generator import PandasGenerator, RowGenerator, StreamingGenerator
 from .loader import (
     load_schema,
     detect_format,
@@ -215,7 +216,10 @@ __all__ = [
     "emit_ddl_all",
     "emit_column_comments",
     "SUPPORTED_DIALECTS",
-    # Data generation (canonical → pure-Python pandas or Spark dbldatagen)
+    # Data generation — backends + functional API
+    "RowGenerator",
+    "PandasGenerator",
+    "StreamingGenerator",
     "build_rows_from_canonical",
     "to_dbldatagen_specs",
     "build_dataframe_from_canonical",

@@ -1,0 +1,4 @@
+# Thu Mar 26 16:11:00 CDT 2026
+# engines=cockroachdb  schemas=tpcdi  skip_load=0
+
+PASS  cockroachdb×tpcdi(sf=5)                    Overall: PASS ✓

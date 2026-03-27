@@ -1,0 +1,45 @@
+"""MySQL / MariaDB bulk-copy loader (LOAD DATA LOCAL INFILE)."""
+
+from __future__ import annotations
+
+import csv
+import logging
+import os
+import tempfile
+from typing import Any, Optional
+
+from .._loader_shared import _iter_rows, _quote_id
+
+logger = logging.getLogger(__name__)
+
+
+def bulk_load_mysql(  # pragma: no cover
+    conn: Any,
+    df: Any,
+    table: str,
+    col_names: list[str],
+    staging_dir: Optional[str] = None,
+) -> int:
+    """Load df into MySQL / MariaDB via LOAD DATA LOCAL INFILE."""
+    cur    = conn.cursor()
+    qtable = _quote_id(table, "mysql")
+    qcols  = ", ".join(_quote_id(c, "mysql") for c in col_names)
+    path   = os.path.join(staging_dir or tempfile.gettempdir(), f"statschema_{table}.csv")
+
+    count = 0
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for row in _iter_rows(df):
+            writer.writerow(["\\N" if v is None else v for v in row])
+            count += 1
+
+    cur.execute(
+        f"LOAD DATA LOCAL INFILE %s INTO TABLE {qtable} "
+        f"FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"' "
+        f"LINES TERMINATED BY '\\n' ({qcols})",
+        (path,),
+    )
+    conn.commit()
+    os.unlink(path)
+    logger.info("bulk_load_mysql: loaded %d rows into %s", count, table)
+    return count

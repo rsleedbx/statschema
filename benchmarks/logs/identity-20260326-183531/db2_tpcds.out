@@ -1,0 +1,65 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'db2'
+  [A] Creating tables in schema 'tpcds_src'… done
+  [A]   loading date_dim                      73,049 rows… 279.10s
+  [A]   loading time_dim                      86,400 rows… 53.31s
+  [A]   loading customer_demographics      1,920,800 rows… 939.74s
+  [A]   loading income_band                       20 rows… 1.63s
+  [A]   loading reason                            55 rows… 0.58s
+  [A]   loading ship_mode                         20 rows… 1.70s
+  [A]   loading item                             180 rows… 2.09s
+  [A]   loading warehouse                          5 rows… 0.56s
+  [A]   loading store                             12 rows… 0.52s
+  [A]   loading call_center                        6 rows… 1.60s
+  [A]   loading customer_address                 500 rows… 1.38s
+  [A]   loading catalog_page                     117 rows… 0.61s
+  [A]   loading web_site                          54 rows… 0.89s
+  [A]   loading web_page                          20 rows… 1.55s
+  [A]   loading household_demographics         7,200 rows… 3.26s
+  [A]   loading promotion                          3 rows… 1.58s
+  [A]   loading inventory                    117,450 rows… 13.02s
+  [A]   loading customer                       1,000 rows… 5.51s
+  [A]   loading store_sales                   28,804 rows… 58.54s
+  [A]   loading catalog_sales                 14,415 rows… 60.20s
+  [A]   loading web_sales                      7,193 rows… 30.50s
+  [A]   loading store_returns                  2,875 rows… 8.08s
+  [A]   loading catalog_returns                1,440 rows… 7.40s
+  [A]   loading web_returns                      717 rows… 3.80s
+  [A] Running ANALYZE on 'tpcds_src'… done
+  [B] EXPLAIN tpcds-q01… ok
+  [B] EXPLAIN tpcds-q02… ok
+  [B] EXPLAIN tpcds-q03… ok
+  [B] EXPLAIN tpcds-q04… ok
+  [C] pred_cols: 9 predicate columns from workload YAML across 24 tables
+  [C] collecting stats date_dim… ok  (row_count=73,049)
+  [C] collecting stats time_dim… ok  (row_count=86,400)
+  [C] collecting stats customer_demographics… ok  (row_count=1,920,800)
+  [C] collecting stats income_band… ok  (row_count=20)
+  [C] collecting stats reason… ok  (row_count=55)
+  [C] collecting stats ship_mode… ok  (row_count=20)
+  [C] collecting stats item… ok  (row_count=180)
+  [C] collecting stats warehouse… ok  (row_count=5)
+  [C] collecting stats store… ok  (row_count=12)
+  [C] collecting stats call_center… ok  (row_count=6)
+  [C] collecting stats customer_address… ok  (row_count=500)
+  [C] collecting stats catalog_page… ok  (row_count=117)
+  [C] collecting stats web_site… ok  (row_count=54)
+  [C] collecting stats web_page… ok  (row_count=20)
+  [C] collecting stats household_demographics… ok  (row_count=7,200)
+  [C] collecting stats promotion… ok  (row_count=3)
+  [C] collecting stats inventory… ok  (row_count=117,450)
+  [C] collecting stats customer… ok  (row_count=1,000)
+  [C] collecting stats store_sales… ok  (row_count=28,804)
+  [C] collecting stats catalog_sales… ok  (row_count=14,415)
+  [C] collecting stats web_sales… ok  (row_count=7,193)
+  [C] collecting stats store_returns… ok  (row_count=2,875)
+  [C] collecting stats catalog_returns… ok  (row_count=1,440)
+  [C] collecting stats web_returns… ok  (row_count=717)
+  [D] Creating tables in schema 'tpcds_tgt'… done
+  [D]   synthetic date_dim                      73,049 rows… 272.59s
+  [D]   synthetic time_dim                      86,400 rows… 48.50s
+  [D]   synthetic customer_demographics      1,920,800 rows… 923.55s
+  [D]   synthetic income_band                       20 rows… 1.72s
+  [D]   synthetic reason                            55 rows… 0.47s
+  [D]   synthetic ship_mode                         20 rows… 0.46s
+  [D]   synthetic item                             180 rows… 0.90s
+  [D]   synthetic warehouse                          5 rows… 

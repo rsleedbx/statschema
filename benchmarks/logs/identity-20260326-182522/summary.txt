@@ -1,0 +1,9 @@
+# Thu Mar 26 18:26:33 CDT 2026
+# engines=postgres,cockroachdb
+# schemas=tpcb,tpcc
+# skip_load=0
+
+PASS  postgres×tpcb(sf=1)                          Overall: PASS ✓
+PASS  postgres×tpcc(sf=1)                          Overall: PASS ✓
+PASS  cockroachdb×tpcb(sf=1)                       Overall: PASS ✓
+PASS  cockroachdb×tpcc(sf=1)                       Overall: PASS ✓

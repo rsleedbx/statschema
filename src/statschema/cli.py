@@ -1,38 +1,22 @@
 """
-statschema command-line interface.
+statschema command-line interface — Click edition.
 
-A DBA writes a YAML schema file and runs one of three commands — no Python required.
+A DBA writes a YAML schema file and runs one of five commands — no Python required.
 
-  python -m statschema ddl      schema.yaml --dialect postgres
-  python -m statschema generate schema.yaml --sf 1 --format csv
-  python -m statschema load     schema.yaml --dialect postgres --dsn "host=... dbname=..."
+  statschema ddl      schema.yaml --dialect postgres
+  statschema generate schema.yaml --sf 1 --format csv
+  statschema load     schema.yaml --dialect postgres --dsn "host=... dbname=..."
+  statschema collect  --dialect postgres --host db.host.com --catalog mydb
+  statschema inject   --dialect postgres --stats stats.yaml --dsn "host=... dbname=..."
 
-Sub-commands
-------------
-ddl
-    Emit CREATE TABLE statements for every table in the schema.
-    Output goes to stdout (pipe to a .sql file to save).
-
-generate
-    Stream synthetic rows to stdout (CSV or JSONL) without touching any database.
-    Use --out-dir to write one file per table instead.
-
-load
-    Create tables in the target database and load synthetic data.
-    The fastest available strategy is chosen per dialect automatically.
-    Pass --strategy to override.
-
-Connection
-----------
-The --dsn flag accepts a plain libpq / JDBC-style connection string.
-For databases that use environment variables (MySQL, Oracle, Db2), the
-matching BENCH_* variables can be set in the environment instead — see
-`python -m statschema load --help` for the full list.
+The ``main(argv)`` wrapper preserves backward compatibility with the argparse-era
+test suite: it accepts an optional list of strings and calls the Click group with
+``standalone_mode=False`` so the function returns normally on success and callers
+can detect errors via ``SystemExit``.
 """
 
 from __future__ import annotations
 
-import argparse
 import csv
 import json
 import logging
@@ -40,6 +24,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+
+import click
 
 from .schema_io import load_canonical, resolve_load_order, resolve_row_counts, dump_schema
 from .ddl_emitter import emit_ddl, SUPPORTED_DIALECTS
@@ -71,36 +57,31 @@ _FASTEST: dict[str, LoadStrategy] = {
 
 _ALL_DIALECTS = sorted(set(SUPPORTED_DIALECTS) | set(_FASTEST))
 
+_INJECT_FN: dict[str, str] = {
+    "postgres":    "inject_stats_postgres",
+    "cockroachdb": "inject_stats_postgres",
+    "neon":        "inject_stats_postgres",
+    "lakebase":    "inject_stats_postgres",
+    "mysql":       "inject_stats_mysql",
+    "mariadb":     "inject_stats_mysql",
+    "sqlserver":   "inject_stats_sqlserver",
+    "oracle":      "inject_stats_oracle",
+    "db2":         "inject_stats_db2",
+    "databricks":  "inject_stats_databricks",
+}
+
 
 # ---------------------------------------------------------------------------
-# Connection helper
+# Connection helpers
 # ---------------------------------------------------------------------------
+
+def _die(msg: str) -> None:
+    click.echo(f"error: {msg}", err=True)
+    sys.exit(1)
+
 
 def _lakebase_connect(endpoint: str, host: str, dbname: str, user: str, port: int = 5432) -> Any:
-    """
-    Open a psycopg2 connection to Databricks Lakebase using a fresh OAuth token.
-
-    The Databricks SDK reads workspace credentials from the environment
-    (DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET, or any
-    other auth method the SDK supports such as a PAT in DATABRICKS_TOKEN).
-
-    Parameters
-    ----------
-    endpoint:
-        Full Lakebase endpoint resource path, e.g.
-        ``projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>``
-        Set via STATSCHEMA_LAKEBASE_ENDPOINT or ENDPOINT_NAME.
-    host:
-        PostgreSQL hostname for the endpoint, e.g.
-        ``<endpoint-id>.database.<region>.cloud.databricks.com``
-        Set via STATSCHEMA_LAKEBASE_HOST or PGHOST.
-    dbname:
-        Database name inside Lakebase (default: ``databricks_postgres``).
-        Set via STATSCHEMA_LAKEBASE_DB or PGDATABASE.
-    user:
-        Service-principal client ID (UUID) — this is the Postgres role name.
-        Set via STATSCHEMA_LAKEBASE_USER, PGUSER, or DATABRICKS_CLIENT_ID.
-    """
+    """Open a psycopg2 connection to Databricks Lakebase using OAuth."""
     try:
         from databricks.sdk import WorkspaceClient
     except ImportError:
@@ -109,57 +90,18 @@ def _lakebase_connect(endpoint: str, host: str, dbname: str, user: str, port: in
             "  pip install 'statschema[lakebase]'"
         )
     import psycopg2
-
     w = WorkspaceClient()
     credential = w.postgres.generate_database_credential(endpoint=endpoint)
     return psycopg2.connect(
         host=host, port=port, dbname=dbname,
         user=user, password=credential.token,
         sslmode="require",
-        # TCP keepalives prevent SSL drops when the connection is idle during
-        # long Phase-C operations (loading and collecting stats from source DB).
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
+        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
     )
 
 
 def _connect(dialect: str, dsn: str | None) -> Any:
-    """
-    Open and return a DBAPI-2 connection.
-
-    DSN formats by dialect
-    ----------------------
-    postgres / cockroachdb / neon
-        libpq keyword string:  "host=localhost port=5432 dbname=mydb user=me password=s3cr3t"
-        or URL:                "postgresql://me:s3cr3t@localhost/mydb"
-
-    lakebase
-        Space-separated keys:  "endpoint=projects/.../endpoints/... host=<pg-host> dbname=databricks_postgres user=<sp-client-id>"
-        Or env vars:           STATSCHEMA_LAKEBASE_ENDPOINT (or ENDPOINT_NAME)
-                               STATSCHEMA_LAKEBASE_HOST (or PGHOST)
-                               STATSCHEMA_LAKEBASE_DB   (or PGDATABASE)
-                               STATSCHEMA_LAKEBASE_USER (or PGUSER or DATABRICKS_CLIENT_ID)
-        Workspace auth:        DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET
-
-    mysql / mariadb
-        DSN format:            "host=localhost port=3306 user=root password=s3cr3t database=mydb"
-        Or env vars:           STATSCHEMA_MYSQL_HOST / _PORT / _USER / _PASS / _DB
-
-    sqlserver
-        ADO-style string:      "SERVER=localhost,1433;DATABASE=mydb;UID=sa;PWD=s3cr3t"
-
-    oracle
-        Easy-connect string:   "localhost:1521/XEPDB1"
-        With user/pass via env: STATSCHEMA_ORACLE_USER / _PASS / _DSN
-
-    db2
-        CLI DSN:               "DATABASE=mydb;HOSTNAME=localhost;PORT=50000;UID=u;PWD=p"
-
-    sqlite
-        File path:             "/tmp/mydb.db"  (use ":memory:" for in-memory)
-    """
+    """Open and return a DBAPI-2 connection from a DSN string."""
     env = os.environ
 
     if dialect == "sqlite":
@@ -185,26 +127,19 @@ def _connect(dialect: str, dsn: str | None) -> Any:
         port     = int(parts.get("port") or env.get("PGPORT", "5432"))
         if not endpoint:
             _die(
-                "Lakebase: provide endpoint= in --dsn or set STATSCHEMA_LAKEBASE_ENDPOINT.\n"
-                "  Format: projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>"
+                "Lakebase: provide endpoint= in --dsn or set STATSCHEMA_LAKEBASE_ENDPOINT."
             )
         if not host:
-            _die("Lakebase: provide host= in --dsn or set STATSCHEMA_LAKEBASE_HOST (or PGHOST).")
+            _die("Lakebase: provide host= in --dsn or set STATSCHEMA_LAKEBASE_HOST.")
         if not user:
-            _die(
-                "Lakebase: provide user= in --dsn or set STATSCHEMA_LAKEBASE_USER / PGUSER.\n"
-                "  Value must be the service-principal client ID (UUID)."
-            )
+            _die("Lakebase: provide user= in --dsn or set STATSCHEMA_LAKEBASE_USER.")
         return _lakebase_connect(endpoint, host, dbname, user, port)
 
     if dialect in ("postgres", "cockroachdb", "neon"):
         import psycopg2
         conn_str = dsn or env.get("STATSCHEMA_PG_DSN", "")
         if not conn_str:
-            _die(
-                "Provide --dsn or set STATSCHEMA_PG_DSN.\n"
-                '  Example: --dsn "host=localhost dbname=mydb user=postgres password=s3cr3t"'
-            )
+            _die("Provide --dsn or set STATSCHEMA_PG_DSN.")
         return psycopg2.connect(conn_str)
 
     if dialect in ("mysql", "mariadb"):
@@ -232,10 +167,7 @@ def _connect(dialect: str, dsn: str | None) -> Any:
     if dialect == "sqlserver":
         conn_str = dsn or env.get("STATSCHEMA_SQLSERVER_DSN", "")
         if not conn_str:
-            _die(
-                "Provide --dsn or set STATSCHEMA_SQLSERVER_DSN.\n"
-                '  Example: --dsn "SERVER=localhost,1433;DATABASE=mydb;UID=sa;PWD=s3cr3t"'
-            )
+            _die("Provide --dsn or set STATSCHEMA_SQLSERVER_DSN.")
         try:
             import mssql_python
             return mssql_python.connect(conn_str)
@@ -261,92 +193,138 @@ def _connect(dialect: str, dsn: str | None) -> Any:
         oracle_user = env.get("STATSCHEMA_ORACLE_USER", "")
         oracle_pass = env.get("STATSCHEMA_ORACLE_PASS", "")
         if dsn and "@" in dsn:
-            # URL form: user/pass@host:port/service
             cred, oracle_dsn = dsn.rsplit("@", 1)
             oracle_user, oracle_pass = cred.split("/", 1)
         if not oracle_user:
-            _die(
-                "Set STATSCHEMA_ORACLE_USER and STATSCHEMA_ORACLE_PASS, or use\n"
-                '  --dsn "user/password@localhost:1521/XEPDB1"'
-            )
+            _die("Set STATSCHEMA_ORACLE_USER and STATSCHEMA_ORACLE_PASS.")
         return oracledb.connect(user=oracle_user, password=oracle_pass, dsn=oracle_dsn)
 
     if dialect == "db2":
         import ibm_db_dbi
         conn_str = dsn or env.get("STATSCHEMA_DB2_DSN", "")
         if not conn_str:
-            _die(
-                "Provide --dsn or set STATSCHEMA_DB2_DSN.\n"
-                '  Example: --dsn "DATABASE=mydb;HOSTNAME=localhost;PORT=50000;UID=u;PWD=p"'
-            )
+            _die("Provide --dsn or set STATSCHEMA_DB2_DSN.")
         return ibm_db_dbi.connect(conn_str, "", "")
 
     _die(f"Unsupported dialect {dialect!r}. Choices: {', '.join(_ALL_DIALECTS)}")
 
 
 # ---------------------------------------------------------------------------
-# DDL sub-command
+# Shared option helpers
 # ---------------------------------------------------------------------------
 
-def _build_table_map(args: argparse.Namespace) -> dict[str, str]:
-    """Merge --table-preset and --table-map into a single mapping dict."""
+def _build_table_map(table_preset: str | None, table_map: str | None) -> dict[str, str]:
     mapping: dict[str, str] = {}
-    preset = getattr(args, "table_preset", None)
-    raw    = getattr(args, "table_map", None)
-    if preset:
-        mapping.update(TABLE_NAME_PRESETS[preset])
-    if raw:
-        mapping.update(parse_table_map(raw))
+    if table_preset:
+        mapping.update(TABLE_NAME_PRESETS[table_preset])
+    if table_map:
+        mapping.update(parse_table_map(table_map))
     return mapping
 
 
-def _cmd_ddl(args: argparse.Namespace) -> None:
-    """Emit CREATE TABLE SQL for every table in the YAML schema."""
-    tables = load_canonical(Path(args.schema))
-    mapping = _build_table_map(args)
+def _rename_options(fn):
+    """Decorator that adds --table-preset and --table-map to a Click command."""
+    fn = click.option(
+        "--table-map", "table_map",
+        metavar="old=new[,old=new…]",
+        default=None,
+        help="Comma-separated rename pairs applied after --table-preset.",
+    )(fn)
+    fn = click.option(
+        "--table-preset", "table_preset",
+        type=click.Choice(sorted(TABLE_NAME_PRESETS)),
+        default=None,
+        metavar="PRESET",
+        help=f"Built-in table-name preset. Available: {', '.join(sorted(TABLE_NAME_PRESETS))}.",
+    )(fn)
+    return fn
+
+
+# ---------------------------------------------------------------------------
+# Click group
+# ---------------------------------------------------------------------------
+
+@click.group()
+@click.option("-v", "--verbose", is_flag=True, default=False, hidden=True,
+              help="Enable debug logging.")
+@click.pass_context
+def cli(ctx: click.Context, verbose: bool) -> None:
+    """statschema — YAML-driven schema DDL, data generation, and optimizer statistics."""
+    ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+
+# ---------------------------------------------------------------------------
+# ddl sub-command
+# ---------------------------------------------------------------------------
+
+@cli.command("ddl")
+@click.argument("schema")
+@click.option("--dialect", required=True, type=click.Choice(_ALL_DIALECTS),
+              help="Target SQL dialect.")
+@_rename_options
+def cmd_ddl(schema: str, dialect: str, table_preset: str | None, table_map: str | None) -> None:
+    """Emit CREATE TABLE SQL to stdout."""
+    tables  = load_canonical(Path(schema))
+    mapping = _build_table_map(table_preset, table_map)
     if mapping:
         tables = rename_tables(tables, mapping)
     ordered = resolve_load_order(tables)
 
     for table in ordered:
         try:
-            stmt = emit_ddl(table, args.dialect)
+            stmt = emit_ddl(table, dialect)
         except ValueError as exc:
-            print(f"-- WARNING: {exc}", file=sys.stderr)
+            click.echo(f"-- WARNING: {exc}", err=True)
             continue
-        print(stmt)
-        print()
+        click.echo(stmt)
+        click.echo()
 
 
 # ---------------------------------------------------------------------------
-# Generate sub-command
+# generate sub-command
 # ---------------------------------------------------------------------------
 
-def _cmd_generate(args: argparse.Namespace) -> None:
-    """Stream synthetic rows to stdout (CSV or JSONL) or to per-table files."""
-    tables  = load_canonical(Path(args.schema))
-    mapping = _build_table_map(args)
+@cli.command("generate")
+@click.argument("schema")
+@click.option("--sf",     type=float, default=1.0, show_default=True, help="Scale factor.")
+@click.option("--seed",   type=int,   default=42,  show_default=True, help="Random seed.")
+@click.option("--format", "fmt",
+              type=click.Choice(["csv", "jsonl"]), default="jsonl", show_default=True,
+              help="Output format.")
+@click.option("--out-dir", "out_dir", metavar="DIR", default=None,
+              help="Write one file per table here instead of stdout.")
+@_rename_options
+def cmd_generate(schema: str, sf: float, seed: int, fmt: str,
+                 out_dir: str | None, table_preset: str | None, table_map: str | None) -> None:
+    """Stream synthetic rows to stdout (CSV/JSONL) or to files."""
+    tables  = load_canonical(Path(schema))
+    mapping = _build_table_map(table_preset, table_map)
     if mapping:
         tables = rename_tables(tables, mapping)
     ordered = resolve_load_order(tables)
-    counts  = resolve_row_counts(ordered, scale_factor=args.sf)
+    counts  = resolve_row_counts(ordered, scale_factor=sf)
 
-    out_dir = Path(args.out_dir) if args.out_dir else None
-    if out_dir:
-        out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = Path(out_dir) if out_dir else None
+    if out_path:
+        out_path.mkdir(parents=True, exist_ok=True)
 
     for table in ordered:
         n    = counts[table.name]
         cols = [c.name for c in table.columns]
-        rows = generate_rows(table, n, parent_row_counts=counts, seed=args.seed)
+        rows = generate_rows(table, n, parent_row_counts=counts, seed=seed)
 
-        if out_dir:
-            dest = out_dir / f"{table.name}.{args.format}"
+        if out_path:
+            dest = out_path / f"{table.name}.{fmt}"
             with dest.open("w", newline="") as fh:
-                _write_rows(fh, rows, cols, args.format)
-            print(f"  {table.name:<24} {n:>10,} rows → {dest}", file=sys.stderr)
+                _write_rows(fh, rows, cols, fmt)
+            click.echo(f"  {table.name:<24} {n:>10,} rows → {dest}", err=True)
         else:
-            _write_rows(sys.stdout, rows, cols, args.format)
+            _write_rows(sys.stdout, rows, cols, fmt)
 
 
 def _write_rows(fh, rows, cols: list[str], fmt: str) -> None:
@@ -355,23 +333,123 @@ def _write_rows(fh, rows, cols: list[str], fmt: str) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
-    else:  # jsonl
+    else:
         for row in rows:
             fh.write(json.dumps(row, default=str) + "\n")
 
 
 # ---------------------------------------------------------------------------
-# Load sub-command
+# load sub-command
 # ---------------------------------------------------------------------------
 
+@cli.command("load")
+@click.argument("schema")
+@click.option("--dialect", required=True, type=click.Choice(_ALL_DIALECTS),
+              help="Target database dialect.")
+@click.option("--dsn",      default=None,   help="Connection string.")
+@click.option("--sf",       type=float, default=1.0, show_default=True, help="Scale factor.")
+@click.option("--seed",     type=int,   default=42,  show_default=True, help="Random seed.")
+@click.option("--strategy",
+              type=click.Choice([s.name.lower() for s in LoadStrategy]),
+              default=None, help="Load strategy override (default: fastest for dialect).")
+@click.option("--append", is_flag=True, default=False,
+              help="Append rows; skip DROP/CREATE.")
+@click.option("-v", "--verbose", is_flag=True, default=False,
+              help="Enable debug logging.")
+@_rename_options
+def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
+             strategy: str | None, append: bool, verbose: bool,
+             table_preset: str | None, table_map: str | None) -> None:
+    """Create tables and load synthetic data into a live database."""
+    import dataclasses
+    import time
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+
+    tables  = load_canonical(Path(schema))
+    mapping = _build_table_map(table_preset, table_map)
+    if mapping:
+        tables = rename_tables(tables, mapping)
+    ordered = resolve_load_order(tables)
+    counts  = resolve_row_counts(ordered, scale_factor=sf)
+
+    strat = (
+        LoadStrategy[strategy.upper()]
+        if strategy
+        else _FASTEST.get(dialect, LoadStrategy.MULTI_ROW)
+    )
+    conn = _connect(dialect, dsn)
+
+    if append:
+        existing     = _query_row_offsets(conn, ordered, dialect)
+        total_exist  = sum(existing.values())
+        eff_seed     = seed + total_exist
+        par_counts   = {t.name: existing.get(t.name, 0) + counts[t.name] for t in ordered}
+        click.echo(
+            f"  Append mode: {total_exist:,} existing rows; effective seed = {eff_seed}",
+            err=True,
+        )
+    else:
+        existing   = {t.name: 0 for t in ordered}
+        eff_seed   = seed
+        par_counts = counts
+        cur = conn.cursor()
+        t_ddl = time.perf_counter()
+        for table in ordered:
+            stripped = dataclasses.replace(
+                table,
+                columns=[dataclasses.replace(c, primary_key=False, unique=False) for c in table.columns],
+                fk_constraints=None,
+                foreign_keys=None,
+            )
+            _drop_table(cur, table.name, dialect)
+            try:
+                stmt = emit_ddl(stripped, dialect)
+            except ValueError:
+                stmt = _simple_ddl(stripped)
+            try:
+                cur.execute(stmt)
+            except Exception as exc:
+                logger.warning("DDL failed for %s: %s", table.name, exc)
+        conn.commit()
+        click.echo(f"  Tables created ({time.perf_counter() - t_ddl:.1f}s)", err=True)
+
+    total_rows = 0
+    t0_all = time.perf_counter()
+    for table in ordered:
+        n          = counts[table.name]
+        row_offset = existing.get(table.name, 0)
+        cols       = [c.name for c in table.columns]
+        insert_name = table.name.upper() if dialect in ("oracle", "db2") else table.name
+        t0 = time.perf_counter()
+        loaded = load_dataframe(
+            generate_rows(table, n, parent_row_counts=par_counts, seed=eff_seed, row_offset=row_offset),
+            conn, insert_name, dialect, strategy=strat, cols=cols, commit=True,
+        )
+        elapsed = time.perf_counter() - t0
+        rps = loaded / elapsed if elapsed > 0 else 0
+        total_rows += loaded
+        click.echo(
+            f"  {table.name:<24} +{loaded:>10,} rows (offset={row_offset:,})  "
+            f"{elapsed:6.1f}s  {rps:>8,.0f} rows/s",
+            err=True,
+        )
+
+    total_s = time.perf_counter() - t0_all
+    click.echo(
+        f"\n  TOTAL  +{total_rows:>10,} rows  {total_s:.1f}s  "
+        f"{total_rows / total_s:,.0f} rows/s",
+        err=True,
+    )
+    conn.close()
+
+
 def _query_row_offsets(conn, ordered, dialect: str) -> dict[str, int]:
-    """Return the current COUNT(*) for each table (used as row_offset in append mode)."""
     offsets: dict[str, int] = {}
     cur = conn.cursor()
     for table in ordered:
-        tname = (
-            table.name.upper() if dialect in ("oracle", "db2") else table.name
-        )
+        tname = table.name.upper() if dialect in ("oracle", "db2") else table.name
         try:
             cur.execute(f"SELECT COUNT(*) FROM {tname}")
             row = cur.fetchone()
@@ -379,110 +457,6 @@ def _query_row_offsets(conn, ordered, dialect: str) -> dict[str, int]:
         except Exception:
             offsets[table.name] = 0
     return offsets
-
-
-def _cmd_load(args: argparse.Namespace) -> None:
-    """Create tables and load synthetic data into the target database."""
-    import dataclasses
-    import time
-
-    tables  = load_canonical(Path(args.schema))
-    mapping = _build_table_map(args)
-    if mapping:
-        tables = rename_tables(tables, mapping)
-    ordered = resolve_load_order(tables)
-    counts  = resolve_row_counts(ordered, scale_factor=args.sf)
-    append  = getattr(args, "append", False)
-
-    strategy = (
-        LoadStrategy[args.strategy.upper()]
-        if args.strategy
-        else _FASTEST.get(args.dialect, LoadStrategy.MULTI_ROW)
-    )
-
-    conn = _connect(args.dialect, args.dsn)
-
-    if append:
-        # Query existing rows to compute PK offsets and a fresh seed.
-        existing = _query_row_offsets(conn, ordered, args.dialect)
-        total_existing = sum(existing.values())
-        effective_seed = args.seed + total_existing
-        # FK parent ranges span existing + new rows so child FKs stay valid.
-        parent_row_counts_for_gen = {
-            t.name: existing.get(t.name, 0) + counts[t.name]
-            for t in ordered
-        }
-        print(
-            f"  Append mode: {total_existing:,} existing rows; "
-            f"effective seed = {effective_seed}",
-            file=sys.stderr,
-        )
-    else:
-        existing = {t.name: 0 for t in ordered}
-        effective_seed = args.seed
-        parent_row_counts_for_gen = counts
-
-        # ----- create tables (drop first) ----------------------------------------
-        cur = conn.cursor()
-        t_ddl = time.perf_counter()
-        for table in ordered:
-            tname = table.name
-            # strip PK/unique to avoid uniqueness violations from random generator
-            stripped = dataclasses.replace(
-                table,
-                columns=[dataclasses.replace(c, primary_key=False, unique=False) for c in table.columns],
-                fk_constraints=None,
-                foreign_keys=None,
-            )
-            _drop_table(cur, tname, args.dialect)
-            try:
-                stmt = emit_ddl(stripped, args.dialect)
-            except ValueError:
-                stmt = _simple_ddl(stripped)
-            try:
-                cur.execute(stmt)
-            except Exception as exc:
-                logger.warning("DDL failed for %s: %s", tname, exc)
-        conn.commit()
-        print(f"  Tables created ({time.perf_counter() - t_ddl:.1f}s)", file=sys.stderr)
-
-    # ----- load data ----------------------------------------------------------
-    total_rows = 0
-    t0_all = time.perf_counter()
-    for table in ordered:
-        n          = counts[table.name]
-        row_offset = existing.get(table.name, 0)
-        cols       = [c.name for c in table.columns]
-        insert_name = (
-            table.name.upper() if args.dialect in ("oracle", "db2") else table.name
-        )
-        t0 = time.perf_counter()
-        loaded = load_dataframe(
-            generate_rows(
-                table, n,
-                parent_row_counts=parent_row_counts_for_gen,
-                seed=effective_seed,
-                row_offset=row_offset,
-            ),
-            conn, insert_name, args.dialect,
-            strategy=strategy, cols=cols, commit=True,
-        )
-        elapsed = time.perf_counter() - t0
-        rps = loaded / elapsed if elapsed > 0 else 0
-        total_rows += loaded
-        print(
-            f"  {table.name:<24} +{loaded:>10,} rows (offset={row_offset:,})  "
-            f"{elapsed:6.1f}s  {rps:>8,.0f} rows/s",
-            file=sys.stderr,
-        )
-
-    total_s = time.perf_counter() - t0_all
-    print(
-        f"\n  TOTAL  +{total_rows:>10,} rows  {total_s:.1f}s  "
-        f"{total_rows / total_s:,.0f} rows/s",
-        file=sys.stderr,
-    )
-    conn.close()
 
 
 def _drop_table(cur, tname: str, dialect: str) -> None:
@@ -501,7 +475,6 @@ def _drop_table(cur, tname: str, dialect: str) -> None:
 
 
 def _simple_ddl(table) -> str:
-    """Minimal SQLite-compatible DDL used when emit_ddl raises ValueError."""
     _map = {
         "integer": "INTEGER", "long": "INTEGER", "string": "TEXT",
         "boolean": "INTEGER", "decimal": "REAL", "float": "REAL",
@@ -516,46 +489,8 @@ def _simple_ddl(table) -> str:
 
 
 # ---------------------------------------------------------------------------
-# collect sub-command — connect to a live database, pull schema + stats
+# collect sub-command
 # ---------------------------------------------------------------------------
-
-def _prompt_if_missing(value: str | None, label: str, default: str | None = None,
-                       secret: bool = False) -> str:
-    """Return value if already set; otherwise prompt the user interactively."""
-    if value:
-        return value
-    if not sys.stdin.isatty():
-        if default is not None:
-            return default
-        _die(f"--{label.lower().replace(' ', '-')} is required (not running interactively).")
-    display = f"  {label} [{default}]: " if default else f"  {label}: "
-    if secret:
-        import getpass
-        result = getpass.getpass(display)
-    else:
-        result = input(display).strip()
-    return result or default or ""
-
-
-class _LoggingCursor:
-    """Thin cursor wrapper that prints every SQL statement when show_sql=True."""
-
-    def __init__(self, cursor, show_sql: bool) -> None:
-        self._cur = cursor
-        self._show = show_sql
-
-    def execute(self, sql: str, params=None):
-        if self._show:
-            import re
-            disp = re.sub(r"\s+", " ", sql.strip())[:300]
-            print(f"    → SQL: {disp}", file=sys.stderr)
-        return self._cur.execute(sql, params) if params is not None else self._cur.execute(sql)
-
-    def fetchall(self):   return self._cur.fetchall()
-    def fetchone(self):   return self._cur.fetchone()
-    def __iter__(self):   return iter(self._cur)
-    def __getattr__(self, name): return getattr(self._cur, name)
-
 
 _DEFAULT_PORTS: dict[str, int] = {
     "mysql": 3306, "mariadb": 3306,
@@ -563,7 +498,6 @@ _DEFAULT_PORTS: dict[str, int] = {
     "sqlserver": 1433, "oracle": 1521, "db2": 50000, "sqlite": 0,
 }
 
-# information_schema / udt_name → canonical type
 _SQL_TO_CANONICAL: dict[str, str] = {
     "int": "integer", "integer": "integer", "int4": "integer", "int32": "integer",
     "int2": "smallint", "smallint": "smallint",
@@ -596,95 +530,112 @@ def _canonical_type(sql_type: str, udt_name: str | None = None) -> str:
     return _SQL_TO_CANONICAL.get(key) or _SQL_TO_CANONICAL.get(sql_type.lower().strip(), sql_type.lower())
 
 
-def _connect_interactive(args) -> tuple[Any, str, int, str, str]:
-    """
-    Build a live DB connection from parsed args, prompting for any missing values.
-    Returns (conn, host, port, user, database).
-    """
-    dialect = args.dialect
+def _prompt_if_missing(value: str | None, label: str, default: str | None = None,
+                       secret: bool = False) -> str:
+    if value:
+        return value
+    if not sys.stdin.isatty():
+        if default is not None:
+            return default
+        _die(f"--{label.lower().replace(' ', '-')} is required (not running interactively).")
+    if secret:
+        result = click.prompt(f"  {label}", default=default or "", hide_input=True)
+    else:
+        result = click.prompt(f"  {label}", default=default or "")
+    return result or default or ""
 
+
+class _LoggingCursor:
+    def __init__(self, cursor, show_sql: bool) -> None:
+        self._cur = cursor
+        self._show = show_sql
+
+    def execute(self, sql: str, params=None):
+        if self._show:
+            import re
+            disp = re.sub(r"\s+", " ", sql.strip())[:300]
+            click.echo(f"    → SQL: {disp}", err=True)
+        return self._cur.execute(sql, params) if params is not None else self._cur.execute(sql)
+
+    def fetchall(self):   return self._cur.fetchall()
+    def fetchone(self):   return self._cur.fetchone()
+    def __iter__(self):   return iter(self._cur)
+    def __getattr__(self, name): return getattr(self._cur, name)
+
+
+def _connect_interactive(dialect: str, host: str | None, port: int | None,
+                         user: str | None, password: str | None,
+                         catalog: str | None, endpoint: str | None) -> tuple[Any, str, int, str, str]:
     if dialect == "sqlite":
         import sqlite3
-        path = getattr(args, "catalog", None) or ":memory:"
+        path = catalog or ":memory:"
         return sqlite3.connect(path), "localhost", 0, "", path
 
     if dialect == "lakebase":
         env = os.environ
-        endpoint = _prompt_if_missing(
-            getattr(args, "endpoint", None) or env.get("STATSCHEMA_LAKEBASE_ENDPOINT") or env.get("ENDPOINT_NAME"),
+        ep   = _prompt_if_missing(
+            endpoint or env.get("STATSCHEMA_LAKEBASE_ENDPOINT") or env.get("ENDPOINT_NAME"),
             "Lakebase endpoint (projects/.../branches/.../endpoints/...)",
         )
-        host = _prompt_if_missing(
-            getattr(args, "host", None) or env.get("STATSCHEMA_LAKEBASE_HOST") or env.get("PGHOST"),
+        h    = _prompt_if_missing(
+            host or env.get("STATSCHEMA_LAKEBASE_HOST") or env.get("PGHOST"),
             "Lakebase host",
         )
-        port = int(
-            getattr(args, "port", None)
-            or env.get("PGPORT", "5432")
-        )
-        dbname = (
-            getattr(args, "catalog", None)
-            or env.get("STATSCHEMA_LAKEBASE_DB")
-            or env.get("PGDATABASE", "databricks_postgres")
-        )
-        user = _prompt_if_missing(
-            getattr(args, "user", None)
-            or env.get("STATSCHEMA_LAKEBASE_USER")
-            or env.get("PGUSER")
-            or env.get("DATABRICKS_CLIENT_ID"),
+        p    = int(port or os.environ.get("PGPORT", "5432"))
+        db   = (catalog
+                or env.get("STATSCHEMA_LAKEBASE_DB")
+                or env.get("PGDATABASE", "databricks_postgres"))
+        u    = _prompt_if_missing(
+            user or env.get("STATSCHEMA_LAKEBASE_USER") or env.get("PGUSER") or env.get("DATABRICKS_CLIENT_ID"),
             "Service-principal client ID (PGUSER)",
         )
-        conn = _lakebase_connect(endpoint, host, dbname, user, port)
-        return conn, host, port, user, dbname
+        conn = _lakebase_connect(ep, h, db, u, p)
+        return conn, h, p, u, db
 
-    host = _prompt_if_missing(getattr(args, "host", None),     "Host",     "localhost")
-    port = int(_prompt_if_missing(str(getattr(args, "port", None) or ""),
-                                  "Port", str(_DEFAULT_PORTS.get(dialect, 5432))))
-    user = _prompt_if_missing(getattr(args, "user", None),     "Username", "")
-    pw   = _prompt_if_missing(getattr(args, "password", None), "Password", secret=True)
-    db   = _prompt_if_missing(getattr(args, "catalog", None),  "Catalog",  "")
+    h = _prompt_if_missing(host, "Host", "localhost")
+    p = int(_prompt_if_missing(
+        str(port or ""), "Port", str(_DEFAULT_PORTS.get(dialect, 5432))
+    ))
+    u  = _prompt_if_missing(user,     "Username", "")
+    pw = _prompt_if_missing(password, "Password", secret=True)
+    db = _prompt_if_missing(catalog,  "Catalog",  "")
 
     if dialect in ("postgres", "cockroachdb", "neon"):
         import psycopg2
-        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw), host, port, user, db
+        return psycopg2.connect(host=h, port=p, dbname=db, user=u, password=pw), h, p, u, db
 
     if dialect in ("mysql", "mariadb"):
         import pymysql
-        return (pymysql.connect(host=host, port=port, user=user, password=pw,
+        return (pymysql.connect(host=h, port=p, user=u, password=pw,
                                 database=db, local_infile=True, autocommit=True),
-                host, port, user, db)
+                h, p, u, db)
 
     if dialect == "sqlserver":
         try:
             import mssql_python
-            cs = f"SERVER={host},{port};DATABASE={db};UID={user};PWD={pw}"
-            return mssql_python.connect(cs), host, port, user, db
+            cs = f"SERVER={h},{p};DATABASE={db};UID={u};PWD={pw}"
+            return mssql_python.connect(cs), h, p, u, db
         except ImportError:
             import pymssql
-            return pymssql.connect(server=host, port=port, database=db,
-                                   user=user, password=pw), host, port, user, db
+            return pymssql.connect(server=h, port=p, database=db, user=u, password=pw), h, p, u, db
 
     if dialect == "oracle":
         import oracledb
-        dsn = f"{host}:{port}/{db}"
-        return oracledb.connect(user=user, password=pw, dsn=dsn), host, port, user, db
+        dsn = f"{h}:{p}/{db}"
+        return oracledb.connect(user=u, password=pw, dsn=dsn), h, p, u, db
 
     if dialect == "db2":
         import ibm_db_dbi
-        cs = f"DATABASE={db};HOSTNAME={host};PORT={port};UID={user};PWD={pw}"
-        return ibm_db_dbi.connect(cs, "", ""), host, port, user, db
+        cs = f"DATABASE={db};HOSTNAME={h};PORT={p};UID={u};PWD={pw}"
+        return ibm_db_dbi.connect(cs, "", ""), h, p, u, db
 
     _die(f"Unsupported dialect: {dialect!r}")
 
 
-def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None,
-                 pattern: str) -> list[str]:
-    """Return table names matching the SQL LIKE pattern."""
+def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None, pattern: str) -> list[str]:
     like = pattern.replace("*", "%")
-
     if dialect == "sqlite":
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?", (like,))
-
     elif dialect in ("mysql", "mariadb"):
         if schema:
             cur.execute(
@@ -693,9 +644,8 @@ def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None,
                 (schema, like),
             )
         else:
-            cur.execute(f"SHOW TABLES LIKE %s", (like,))
-
-    elif dialect in ("postgres", "cockroachdb", "neon"):
+            cur.execute("SHOW TABLES LIKE %s", (like,))
+    elif dialect in ("postgres", "cockroachdb", "neon", "lakebase"):
         pg_schema = schema or "public"
         cur.execute(
             "SELECT table_name FROM information_schema.tables "
@@ -703,7 +653,6 @@ def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None,
             "AND table_type = 'BASE TABLE' ORDER BY table_name",
             (pg_schema, like),
         )
-
     elif dialect == "sqlserver":
         ss_schema = schema or "dbo"
         cur.execute(
@@ -712,27 +661,22 @@ def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None,
             "AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
             (ss_schema, like),
         )
-
     elif dialect == "oracle":
         cur.execute(
             "SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER = :1 AND TABLE_NAME LIKE :2 ORDER BY TABLE_NAME",
             ((schema or "").upper(), like.upper()),
         )
-
     elif dialect == "db2":
         cur.execute(
             "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TABNAME LIKE ? AND TYPE = 'T' ORDER BY TABNAME",
             ((schema or "").upper(), like.upper()),
         )
-
     else:
         return []
-
     return [row[0] for row in cur.fetchall()]
 
 
 def _fk_groups(rows) -> list[CanonicalForeignKey]:
-    """Group FK rows (constraint_name, col, ref_table, ref_col) into CanonicalForeignKey list."""
     from collections import defaultdict
     groups: dict[str, dict] = defaultdict(lambda: {"cols": [], "ref_table": "", "ref_cols": []})
     for (cname, col, ref_tbl, ref_col) in rows:
@@ -747,14 +691,12 @@ def _fk_groups(rows) -> list[CanonicalForeignKey]:
 
 
 def _collect_schema_mysql(cur: _LoggingCursor, table: str) -> CanonicalTableSchema | None:
-    """Use SHOW CREATE TABLE — captures AUTO_INCREMENT, defaults, COMMENTs exactly."""
     from .ddl_parser import parse_ddl
     cur.execute(f"SHOW CREATE TABLE `{table}`")
     row = cur.fetchone()
     if not row:
         return None
-    ddl = row[1]
-    tables = parse_ddl(ddl, dialect="mysql")
+    tables = parse_ddl(row[1], dialect="mysql")
     return tables[0] if tables else None
 
 
@@ -770,7 +712,6 @@ def _collect_schema_sqlite(cur: _LoggingCursor, table: str) -> CanonicalTableSch
 
 def _collect_schema_postgres(cur: _LoggingCursor, schema: str, table: str) -> CanonicalTableSchema | None:
     pg_schema = schema or "public"
-
     cur.execute(
         "SELECT column_name, udt_name, data_type, character_maximum_length, "
         "       numeric_precision, numeric_scale, is_nullable, column_default "
@@ -782,7 +723,6 @@ def _collect_schema_postgres(cur: _LoggingCursor, schema: str, table: str) -> Ca
     if not col_rows:
         return None
 
-    # PKs
     cur.execute(
         "SELECT kcu.column_name FROM information_schema.table_constraints tc "
         "JOIN information_schema.key_column_usage kcu "
@@ -793,7 +733,6 @@ def _collect_schema_postgres(cur: _LoggingCursor, schema: str, table: str) -> Ca
     )
     pk_cols = [r[0] for r in cur.fetchall()]
 
-    # FKs
     cur.execute(
         "SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name "
         "FROM information_schema.table_constraints tc "
@@ -810,29 +749,22 @@ def _collect_schema_postgres(cur: _LoggingCursor, schema: str, table: str) -> Ca
     cols = []
     for (col_name, udt_name, data_type, char_len, num_prec, num_scale, is_null, col_def) in col_rows:
         ctype = _canonical_type(data_type, udt_name)
-        c = CanonicalColumn(
-            name=col_name,
-            type=ctype,
-            not_null=(is_null == "NO"),
-            primary_key=(col_name in pk_cols),
-            length=char_len,
+        cols.append(CanonicalColumn(
+            name=col_name, type=ctype, not_null=(is_null == "NO"),
+            primary_key=(col_name in pk_cols), length=char_len,
             precision=num_prec if ctype == "decimal" else None,
             scale=num_scale if ctype == "decimal" else None,
             default=col_def if col_def not in (None, "NULL", "null") else None,
-        )
-        cols.append(c)
+        ))
 
     return CanonicalTableSchema(
-        name=table,
-        columns=cols,
-        primary_key=pk_cols or None,
-        fk_constraints=fks or None,
+        name=table, columns=cols,
+        primary_key=pk_cols or None, fk_constraints=fks or None,
     )
 
 
 def _collect_schema_sqlserver(cur: _LoggingCursor, schema: str, table: str) -> CanonicalTableSchema | None:
     ss_schema = schema or "dbo"
-
     cur.execute(
         "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH, "
         "       c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.IS_NULLABLE, c.COLUMN_DEFAULT, "
@@ -858,10 +790,8 @@ def _collect_schema_sqlserver(cur: _LoggingCursor, schema: str, table: str) -> C
     cur.execute(
         "SELECT tc.CONSTRAINT_NAME, kcu.COLUMN_NAME, ccu.TABLE_NAME, ccu.COLUMN_NAME "
         "FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc "
-        "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu "
-        "     ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME "
-        "JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu "
-        "     ON tc.CONSTRAINT_NAME = ccu.CONSTRAINT_NAME "
+        "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME "
+        "JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu ON tc.CONSTRAINT_NAME = ccu.CONSTRAINT_NAME "
         "WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY' AND tc.TABLE_SCHEMA = %s AND tc.TABLE_NAME = %s "
         "ORDER BY kcu.ORDINAL_POSITION",
         (ss_schema, table),
@@ -871,24 +801,18 @@ def _collect_schema_sqlserver(cur: _LoggingCursor, schema: str, table: str) -> C
     cols = []
     for (col_name, data_type, char_len, num_prec, num_scale, is_null, col_def, is_identity) in col_rows:
         ctype = _canonical_type(data_type)
-        c = CanonicalColumn(
-            name=col_name,
-            type=ctype,
-            not_null=(is_null == "NO"),
-            primary_key=(col_name in pk_cols),
-            auto_increment=bool(is_identity),
+        cols.append(CanonicalColumn(
+            name=col_name, type=ctype, not_null=(is_null == "NO"),
+            primary_key=(col_name in pk_cols), auto_increment=bool(is_identity),
             length=char_len,
             precision=num_prec if ctype == "decimal" else None,
             scale=num_scale if ctype == "decimal" else None,
             default=col_def if col_def not in (None, "NULL", "(null)") else None,
-        )
-        cols.append(c)
+        ))
 
     return CanonicalTableSchema(
-        name=table,
-        columns=cols,
-        primary_key=pk_cols or None,
-        fk_constraints=fks or None,
+        name=table, columns=cols,
+        primary_key=pk_cols or None, fk_constraints=fks or None,
     )
 
 
@@ -906,7 +830,6 @@ def _collect_schema_oracle(cur: _LoggingCursor, schema: str, table: str) -> Cano
         tables = parse_ddl(str(row[0]), dialect="oracle")
         return tables[0] if tables else None
 
-    # Fallback: ALL_TAB_COLUMNS
     cur.execute(
         "SELECT COLUMN_NAME, DATA_TYPE, CHAR_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE, DATA_DEFAULT "
         "FROM ALL_TAB_COLUMNS WHERE OWNER = :1 AND TABLE_NAME = :2 ORDER BY COLUMN_ID",
@@ -926,13 +849,9 @@ def _collect_schema_oracle(cur: _LoggingCursor, schema: str, table: str) -> Cano
 
     cols = [
         CanonicalColumn(
-            name=col_name,
-            type=_canonical_type(data_type),
-            not_null=(nullable == "N"),
-            primary_key=(col_name in pk_cols),
-            length=char_len,
-            precision=prec,
-            scale=scale,
+            name=col_name, type=_canonical_type(data_type), not_null=(nullable == "N"),
+            primary_key=(col_name in pk_cols), length=char_len,
+            precision=prec, scale=scale,
             default=default.strip() if default and default.strip() not in ("NULL",) else None,
         )
         for (col_name, data_type, char_len, prec, scale, nullable, default) in col_rows
@@ -942,7 +861,6 @@ def _collect_schema_oracle(cur: _LoggingCursor, schema: str, table: str) -> Cano
 
 def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
                          table: str) -> CanonicalTableSchema | None:
-    """Dispatch to the dialect-specific schema collector."""
     if dialect in ("mysql", "mariadb"):
         return _collect_schema_mysql(cur, table)
     if dialect == "sqlite":
@@ -953,67 +871,83 @@ def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
         return _collect_schema_sqlserver(cur, schema or "dbo", table)
     if dialect == "oracle":
         return _collect_schema_oracle(cur, schema or "", table)
-    _die(f"Schema collection not yet supported for dialect {dialect!r}; collect DDL manually.")
+    _die(f"Schema collection not supported for dialect {dialect!r}.")
 
 
-def _cmd_collect(args) -> None:
-    """Connect to a live database, collect schema + statistics, write YAML files."""
+@cli.command("collect")
+@click.option("--dialect",   required=True, type=click.Choice(_ALL_DIALECTS), help="Source database dialect.")
+@click.option("--host",      default=None,  metavar="HOST",    help="Database host.")
+@click.option("--port",      type=int, default=None, metavar="PORT", help="Database port.")
+@click.option("--user",      default=None,  metavar="USER",    help="Database username.")
+@click.option("--password",  default=None,  metavar="PASS",    help="Database password.")
+@click.option("--catalog",   default=None,  metavar="CATALOG", help="Catalog / database name.")
+@click.option("--schema",    "schema_name", default=None, metavar="SCHEMA", help="Schema / namespace.")
+@click.option("--tables",    default="%",   metavar="PATTERN", help="SQL LIKE pattern (default: %%).")
+@click.option("--endpoint",  default=None,  metavar="ENDPOINT_NAME", help="Lakebase endpoint resource path.")
+@click.option("--show-sql",  "show_sql",    is_flag=True, default=False, help="Print SQL statements sent.")
+@click.option("--analyze",   is_flag=True,  default=False, help="Run ANALYZE before collecting.")
+@click.option("--out-schema", "out_schema", default="schema.yaml", show_default=True,
+              metavar="FILE", help="Output schema YAML path.")
+@click.option("--out-stats",  "out_stats",  default="stats.yaml",  show_default=True,
+              metavar="FILE", help="Output stats YAML path.")
+@click.option("--top-queries", "top_queries", type=int, default=0, metavar="N",
+              help="Collect top-N queries (0 = disabled).")
+@click.option("--rank-by",   "rank_by",
+              type=click.Choice(["total_time", "calls", "mean_time"]),
+              default="total_time", show_default=True, help="Query ranking metric.")
+@click.option("--out-queries", "out_queries", default="queries.yaml", show_default=True,
+              metavar="FILE", help="Output queries YAML path.")
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable debug logging.")
+def cmd_collect(dialect: str, host, port, user, password, catalog, schema_name,
+                tables, endpoint, show_sql, analyze, out_schema, out_stats,
+                top_queries, rank_by, out_queries, verbose) -> None:
+    """Connect to a live database and collect DDL + statistics into YAML."""
     import time
     from .db_stats_collector import collect_table_stats
 
-    dialect    = args.dialect
-    schema     = getattr(args, "schema_name", None) or None
-    pattern    = getattr(args, "tables", "%")
-    show_sql   = getattr(args, "show_sql", False)
-    out_schema = Path(getattr(args, "out_schema", "schema.yaml"))
-    out_stats  = Path(getattr(args, "out_stats",  "stats.yaml"))
-    do_analyze = getattr(args, "analyze", False)
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
-    # ── connect ──────────────────────────────────────────────────────────────
-    conn, host, port, user, catalog = _connect_interactive(args)
-    schema_note = f"/{schema}" if schema else ""
-    print(f"\n  Connected to {dialect} @ {host}:{port}/{catalog}{schema_note} as {user}", file=sys.stderr)
+    conn, h, p, u, db = _connect_interactive(
+        dialect, host, port, user, password, catalog, endpoint
+    )
+    schema_note = f"/{schema_name}" if schema_name else ""
+    click.echo(f"\n  Connected to {dialect} @ {h}:{p}/{db}{schema_note} as {u}", err=True)
 
     raw_cur = conn.cursor()
     cur = _LoggingCursor(raw_cur, show_sql)
 
-    # ── optional ANALYZE ─────────────────────────────────────────────────────
-    if do_analyze:
+    if analyze:
         if dialect in ("mysql", "mariadb"):
-            print("  Running ANALYZE TABLE … (use --no-analyze to skip)", file=sys.stderr)
+            click.echo("  Running ANALYZE TABLE …", err=True)
         elif dialect in ("postgres", "cockroachdb", "neon"):
-            print("  Running ANALYZE … (use --no-analyze to skip)", file=sys.stderr)
+            click.echo("  Running ANALYZE …", err=True)
             cur.execute("ANALYZE")
             conn.commit()
 
-    # ── list tables ──────────────────────────────────────────────────────────
-    tables_found = _list_tables(cur, dialect, schema, pattern)
+    tables_found = _list_tables(cur, dialect, schema_name, tables)
     if not tables_found:
-        _die(f"No tables found matching {pattern!r} in {dialect}@{catalog}{schema_note}")
-    print(f"  Found {len(tables_found)} table(s) matching {pattern!r}\n", file=sys.stderr)
+        _die(f"No tables found matching {tables!r} in {dialect}@{db}{schema_note}")
+    click.echo(f"  Found {len(tables_found)} table(s) matching {tables!r}\n", err=True)
 
-    # ── collect per table ─────────────────────────────────────────────────────
     canonical_tables: list[CanonicalTableSchema] = []
     table_stats_list = []
 
     for tname in tables_found:
         t0 = time.perf_counter()
-
-        # Schema
-        tbl = _collect_schema_live(cur, dialect, schema, tname)
+        tbl = _collect_schema_live(cur, dialect, schema_name, tname)
         if tbl is None:
-            print(f"  ⚠  {tname}: schema not found — skipped", file=sys.stderr)
+            click.echo(f"  ⚠  {tname}: schema not found — skipped", err=True)
             continue
         canonical_tables.append(tbl)
         n_cols = len(tbl.columns)
         n_fks  = len(tbl.fk_constraints or [])
 
-        # Stats
-        if do_analyze and dialect in ("mysql", "mariadb"):
+        if analyze and dialect in ("mysql", "mariadb"):
             cur.execute(f"ANALYZE TABLE `{tname}`")
 
         try:
-            ts = collect_table_stats(conn, tname, dialect=dialect, schema=schema)
+            ts = collect_table_stats(conn, tname, dialect=dialect, schema=schema_name)
             table_stats_list.append(ts)
             row_count = ts.row_count or 0
         except Exception as exc:
@@ -1022,78 +956,87 @@ def _cmd_collect(args) -> None:
 
         elapsed = time.perf_counter() - t0
         fk_note = f", {n_fks} FK{'s' if n_fks != 1 else ''}" if n_fks else ""
-        print(
+        click.echo(
             f"  ✓  {tname:<30} {n_cols} cols{fk_note}, {row_count:,} rows  ({elapsed:.1f}s)",
-            file=sys.stderr,
+            err=True,
         )
 
     if not canonical_tables:
         _die("No tables collected — nothing to write.")
 
-    # ── write output ─────────────────────────────────────────────────────────
     dump_schema(canonical_tables, str(out_schema))
     db_stats = DatabaseStats(tables=table_stats_list)
     from .stats_io import dump_stats as _dump_stats
     _dump_stats(db_stats, str(out_stats))
 
     total_rows = sum(ts.row_count or 0 for ts in table_stats_list)
-    print(
+    click.echo(
         f"\n  Wrote {out_schema}  ({len(canonical_tables)} tables)\n"
         f"  Wrote {out_stats}   ({len(table_stats_list)} tables, {total_rows:,} total rows)",
-        file=sys.stderr,
+        err=True,
     )
 
-    # ── optional query collection ─────────────────────────────────────────────
-    top_n = getattr(args, "top_queries", 0)
-    if top_n:
+    if top_queries:
         from .query_collector import collect_top_queries
         from .query_model import dump_queries
-        rank_by   = getattr(args, "rank_by", "total_time")
-        out_queries = Path(getattr(args, "out_queries", "queries.yaml"))
-
-        catalog_val = getattr(args, "catalog", None)
-        workload = collect_top_queries(conn, dialect, n=top_n, rank_by=rank_by, catalog=catalog_val)
-
+        workload = collect_top_queries(conn, dialect, n=top_queries, rank_by=rank_by, catalog=catalog)
         if workload.queries:
             dump_queries(workload, str(out_queries))
-            print(
+            click.echo(
                 f"  Wrote {out_queries}  ({len(workload.queries)} queries, ranked by {rank_by})\n",
-                file=sys.stderr,
+                err=True,
             )
         else:
-            print(
-                f"  ⚠  No queries collected — query statistics catalog may be unavailable "
-                f"or empty (dialect: {dialect}).\n",
-                file=sys.stderr,
+            click.echo(
+                f"  ⚠  No queries collected (dialect: {dialect}).\n",
+                err=True,
             )
 
 
 # ---------------------------------------------------------------------------
-# replay sub-command — transpile + EXPLAIN queries on a target database
+# replay sub-command
 # ---------------------------------------------------------------------------
 
-def _cmd_replay(args) -> None:
-    """Transpile queries.yaml to the target dialect and run EXPLAIN on each."""
+@cli.command("replay")
+@click.option("--dialect",  required=True, type=click.Choice(_ALL_DIALECTS), help="Target dialect.")
+@click.option("--queries",  required=True, metavar="FILE", help="Path to queries.yaml.")
+@click.option("--dsn",      default=None,  help="Connection string for the target.")
+@click.option("--host",     default=None,  metavar="HOST")
+@click.option("--port",     type=int, default=None, metavar="PORT")
+@click.option("--user",     default=None,  metavar="USER")
+@click.option("--password", default=None,  metavar="PASS")
+@click.option("--catalog",  default=None,  metavar="CATALOG")
+@click.option("--endpoint", default=None,  metavar="ENDPOINT_NAME")
+@click.option("--skip-manual-review", "skip_manual", is_flag=True, default=False)
+@click.option("--show-plans", "show_plans", is_flag=True, default=False)
+@click.option("-v", "--verbose", is_flag=True, default=False)
+def cmd_replay(dialect: str, queries: str, dsn: str | None,
+               host, port, user, password, catalog, endpoint,
+               skip_manual: bool, show_plans: bool, verbose: bool) -> None:
+    """Transpile and EXPLAIN collected queries against a target database."""
     from .query_model import load_queries
     from .query_replayer import print_replay_report, replay_queries
 
-    dialect     = args.dialect
-    queries_path = Path(args.queries)
-    skip_manual = getattr(args, "skip_manual_review", False)
-    show_plans  = getattr(args, "show_plans", False)
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
+    queries_path = Path(queries)
     if not queries_path.exists():
         _die(f"queries file not found: {queries_path}")
 
     workload = load_queries(queries_path)
-    print(
+    click.echo(
         f"\n  Loaded {len(workload.queries)} queries (source: {workload.source_dialect})\n"
         f"  Target: {dialect}\n",
-        file=sys.stderr,
+        err=True,
     )
 
-    conn, host, port, user, catalog = _connect_interactive(args)
-    print(f"  Connected to {dialect} @ {host}:{port}/{catalog} as {user}\n", file=sys.stderr)
+    if dsn:
+        conn = _connect(dialect, dsn)
+        h, p, u, db = "?", 0, "?", "?"
+    else:
+        conn, h, p, u, db = _connect_interactive(dialect, host, port, user, password, catalog, endpoint)
+        click.echo(f"  Connected to {dialect} @ {h}:{p}/{db} as {u}\n", err=True)
 
     results = replay_queries(conn, workload, target_dialect=dialect, skip_manual_review=skip_manual)
 
@@ -1103,44 +1046,37 @@ def _cmd_replay(args) -> None:
         ok   = sum(1 for r in results if r.success)
         fail = len(results) - ok
         skip = sum(1 for r in results if not r.success and r.error and "Skipped" in (r.error or ""))
-        print(
-            f"  Results: {ok} ok / {fail - skip} errors / {skip} skipped "
-            f"({len(results)} total)\n",
-            file=sys.stderr,
+        click.echo(
+            f"  Results: {ok} ok / {fail - skip} errors / {skip} skipped ({len(results)} total)\n",
+            err=True,
         )
         for r in results:
             if not r.success:
                 status = "↷" if r.error and "Skipped" in r.error else "✗"
-                print(f"  {status}  {r.query_id}  {r.error}", file=sys.stderr)
+                click.echo(f"  {status}  {r.query_id}  {r.error}", err=True)
 
 
 # ---------------------------------------------------------------------------
-# inject sub-command — push collected stats into a target database
+# inject sub-command
 # ---------------------------------------------------------------------------
 
-_INJECT_FN: dict[str, str] = {
-    "postgres":    "inject_stats_postgres",
-    "cockroachdb": "inject_stats_postgres",
-    "neon":        "inject_stats_postgres",
-    "lakebase":    "inject_stats_postgres",
-    "mysql":       "inject_stats_mysql",
-    "mariadb":     "inject_stats_mysql",
-    "sqlserver":   "inject_stats_sqlserver",
-    "oracle":      "inject_stats_oracle",
-    "db2":         "inject_stats_db2",
-    "databricks":  "inject_stats_databricks",
-}
-
-
-def _cmd_inject(args) -> None:
-    """Inject stats YAML into the target database's optimizer statistics catalog."""
+@cli.command("inject")
+@click.option("--dialect", required=True, type=click.Choice(list(_INJECT_FN)), help="Target dialect.")
+@click.option("--dsn",     default=None,  help="Connection string.")
+@click.option("--stats",   required=True, metavar="FILE", help="Path to stats.yaml.")
+@click.option("--schema",  "schema_name", default=None, metavar="SCHEMA")
+@click.option("--tables",  default=None,  metavar="TABLE[,TABLE…]",
+              help="Comma-separated table names to inject (default: all).")
+@click.option("--show-sql", "show_sql", is_flag=True, default=False)
+@click.option("-v", "--verbose", is_flag=True, default=False)
+def cmd_inject(dialect: str, dsn: str | None, stats: str, schema_name: str | None,
+               tables: str | None, show_sql: bool, verbose: bool) -> None:
+    """Inject collected statistics into a target database optimizer."""
     import importlib
     from .stats_io import load_stats as _load_stats
 
-    dialect   = args.dialect
-    show_sql  = getattr(args, "show_sql", False)
-    schema    = getattr(args, "schema_name", None) or None
-    only_tbls = set(t.strip() for t in args.tables.split(",")) if args.tables else None
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
     fn_name = _INJECT_FN.get(dialect)
     if fn_name is None:
@@ -1148,413 +1084,66 @@ def _cmd_inject(args) -> None:
 
     inject_fn = getattr(importlib.import_module(".stats_injector", "statschema"), fn_name)
 
-    db_stats = _load_stats(args.stats)
-    tables   = [ts for ts in db_stats.tables if not only_tbls or ts.name in only_tbls]
-    if not tables:
-        _die(f"No matching tables found in {args.stats}.")
+    db_stats = _load_stats(stats)
+    only_tbls = {t.strip() for t in tables.split(",")} if tables else None
+    tbl_list  = [ts for ts in db_stats.tables if not only_tbls or ts.name in only_tbls]
+    if not tbl_list:
+        _die(f"No matching tables found in {stats}.")
 
-    conn = _connect(dialect, args.dsn)
+    conn = _connect(dialect, dsn)
 
-    print(f"\n  Injecting stats from {args.stats} → {dialect}", file=sys.stderr)
+    click.echo(f"\n  Injecting stats from {stats} → {dialect}", err=True)
     if only_tbls:
-        print(f"  Tables: {', '.join(sorted(only_tbls))}", file=sys.stderr)
+        click.echo(f"  Tables: {', '.join(sorted(only_tbls))}", err=True)
 
     ok = err = 0
-    for ts in tables:
+    for ts in tbl_list:
         try:
             kwargs: dict = {}
-            if dialect in ("postgres", "cockroachdb", "neon") and schema:
-                kwargs["schema"] = schema
-            elif dialect in ("mysql", "mariadb") and schema:
-                kwargs["database"] = schema
+            if dialect in ("postgres", "cockroachdb", "neon") and schema_name:
+                kwargs["schema"] = schema_name
+            elif dialect in ("mysql", "mariadb") and schema_name:
+                kwargs["database"] = schema_name
             if show_sql:
-                print(f"  → injecting {ts.name} ({ts.row_count or 0:,} rows) …", file=sys.stderr)
+                click.echo(f"  → injecting {ts.name} ({ts.row_count or 0:,} rows) …", err=True)
             result = inject_fn(conn, ts, **kwargs)
             status = getattr(result, "status", "ok")
-            print(f"  ✓  {ts.name:<30} {status}", file=sys.stderr)
+            click.echo(f"  ✓  {ts.name:<30} {status}", err=True)
             ok += 1
         except Exception as exc:
-            print(f"  ✗  {ts.name:<30} {exc}", file=sys.stderr)
+            click.echo(f"  ✗  {ts.name:<30} {exc}", err=True)
             err += 1
 
     conn.close()
-    print(f"\n  {ok} table(s) injected", *(["—", err, "error(s)"] if err else []),
-          file=sys.stderr)
+    msg = f"\n  {ok} table(s) injected"
+    if err:
+        msg += f" — {err} error(s)"
+    click.echo(msg, err=True)
     if err:
         sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
-# Argument parser
-# ---------------------------------------------------------------------------
-
-def _add_rename_args(p: argparse.ArgumentParser) -> None:
-    """Add --table-preset and --table-map to any subcommand parser."""
-    p.add_argument(
-        "--table-preset",
-        dest="table_preset",
-        choices=sorted(TABLE_NAME_PRESETS),
-        metavar="PRESET",
-        help=(
-            "Apply a built-in table-name preset before processing.  "
-            f"Available: {', '.join(sorted(TABLE_NAME_PRESETS))}.  "
-            "pgbench renames TPC-B tables to pgbench_branches/tellers/accounts/history; "
-            "cockroach-tpcc renames orders→order for cockroach workload tpcc."
-        ),
-    )
-    p.add_argument(
-        "--table-map",
-        dest="table_map",
-        metavar="old=new[,old=new…]",
-        help=(
-            "Comma-separated rename pairs, e.g. --table-map orders=order.  "
-            "Applied after --table-preset if both are given."
-        ),
-    )
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(
-        prog="statschema",
-        description=(
-            "statschema — YAML-driven schema DDL, data generation, and loading.\n\n"
-            "A DBA writes a YAML file and runs one command.  No Python required.\n\n"
-            "Quick start\n"
-            "-----------\n"
-            "  # Print DDL for PostgreSQL\n"
-            "  python -m statschema ddl myschema.yaml --dialect postgres\n\n"
-            "  # Generate 10 000 rows to CSV files\n"
-            "  python -m statschema generate myschema.yaml --sf 1 --out-dir ./data\n\n"
-            "  # Create tables and load into PostgreSQL\n"
-            '  python -m statschema load myschema.yaml --dialect postgres \\\n'
-            '      --dsn "host=localhost dbname=mydb user=me password=s3cr3t"'
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    sub = root.add_subparsers(dest="cmd", required=True)
-
-    # ── ddl ──────────────────────────────────────────────────────────────────
-    p_ddl = sub.add_parser(
-        "ddl",
-        help="Emit CREATE TABLE SQL to stdout.",
-        description=(
-            "Print dialect-specific CREATE TABLE statements for every table in the YAML.\n"
-            "Tables are emitted in FK dependency order (parents before children).\n\n"
-            "Examples\n"
-            "--------\n"
-            "  python -m statschema ddl schema.yaml --dialect postgres\n"
-            "  python -m statschema ddl schema.yaml --dialect mysql > schema.sql"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_ddl.add_argument("schema", help="Path to the canonical YAML schema file.")
-    p_ddl.add_argument(
-        "--dialect", required=True,
-        choices=_ALL_DIALECTS,
-        help="Target SQL dialect.",
-    )
-    _add_rename_args(p_ddl)
-
-    # ── generate ─────────────────────────────────────────────────────────────
-    p_gen = sub.add_parser(
-        "generate",
-        help="Stream synthetic rows to stdout (CSV/JSONL) or to files.",
-        description=(
-            "Generate synthetic rows driven by the generation rules in the YAML.\n"
-            "No database connection is needed.\n\n"
-            "Examples\n"
-            "--------\n"
-            "  # Stream all tables as JSONL\n"
-            "  python -m statschema generate schema.yaml --sf 1\n\n"
-            "  # Write one CSV file per table to ./data/\n"
-            "  python -m statschema generate schema.yaml --sf 1 --out-dir ./data\n\n"
-            "  # Generate 10× scale factor\n"
-            "  python -m statschema generate schema.yaml --sf 10 --format csv"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_gen.add_argument("schema", help="Path to the canonical YAML schema file.")
-    p_gen.add_argument("--sf",     type=float, default=1.0,  help="Scale factor (default: 1).")
-    p_gen.add_argument("--seed",   type=int,   default=42,   help="Random seed (default: 42).")
-    p_gen.add_argument("--format", choices=["csv", "jsonl"], default="jsonl",
-                       help="Output format (default: jsonl).")
-    p_gen.add_argument("--out-dir", metavar="DIR",
-                       help="Write one file per table here instead of stdout.")
-    _add_rename_args(p_gen)
-
-    # ── load ─────────────────────────────────────────────────────────────────
-    p_load = sub.add_parser(
-        "load",
-        help="Create tables and load synthetic data into a live database.",
-        description=(
-            "Create tables (drop-and-recreate) in the target database, then stream\n"
-            "synthetic rows from the YAML generation rules directly into those tables.\n"
-            "Tables are created and loaded in FK dependency order.\n\n"
-            "Connection\n"
-            "----------\n"
-            "Pass --dsn or set the matching environment variable:\n\n"
-            "  Dialect          --dsn format / env var\n"
-            '  postgres         "host=H dbname=D user=U password=P"  |  STATSCHEMA_PG_DSN\n'
-            '  lakebase         "endpoint=projects/.../endpoints/... host=H dbname=D user=<sp-client-id>"\n'
-            "                   Workspace auth: DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET\n"
-            '  mysql/mariadb    "host=H port=P user=U password=P database=D"  |  STATSCHEMA_MYSQL_*\n'
-            '  sqlserver        "SERVER=H,P;DATABASE=D;UID=U;PWD=P"  |  STATSCHEMA_SQLSERVER_DSN\n'
-            '  oracle           "user/pass@host:port/service"  |  STATSCHEMA_ORACLE_DSN/_USER/_PASS\n'
-            '  db2              "DATABASE=D;HOSTNAME=H;PORT=P;UID=U;PWD=P"  |  STATSCHEMA_DB2_DSN\n'
-            '  sqlite           "/path/to/file.db"  |  STATSCHEMA_SQLITE_PATH\n\n'
-            "Examples\n"
-            "--------\n"
-            "  python -m statschema load schema.yaml --dialect postgres \\\n"
-            '      --dsn "host=localhost dbname=mydb user=me password=s3cr3t"\n\n'
-            "  python -m statschema load schema.yaml --dialect mysql --sf 10 \\\n"
-            '      --dsn "host=localhost user=root password=secret database=bench"\n\n'
-            "  python -m statschema load schema.yaml --dialect sqlite \\\n"
-            "      --dsn /tmp/bench.db"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_load.add_argument("schema",  help="Path to the canonical YAML schema file.")
-    p_load.add_argument("--dialect", required=True, choices=_ALL_DIALECTS,
-                        help="Target database dialect.")
-    p_load.add_argument("--dsn",    help="Connection string (see above).")
-    p_load.add_argument("--sf",     type=float, default=1.0,
-                        help="Scale factor — multiplied by row_count_per_sf (default: 1).")
-    p_load.add_argument("--seed",   type=int,   default=42,
-                        help="Random seed for reproducible data (default: 42).")
-    p_load.add_argument(
-        "--strategy",
-        choices=[s.name.lower() for s in LoadStrategy],
-        help="Load strategy override.  Default: fastest for the dialect.",
-    )
-    p_load.add_argument(
-        "--append", action="store_true",
-        help=(
-            "Append mode: skip DROP/CREATE and add rows on top of what already "
-            "exists.  Sequential PK columns continue from the current row count; "
-            "a new seed is derived automatically so data values are distinct."
-        ),
-    )
-    _add_rename_args(p_load)
-    p_load.add_argument("-v", "--verbose", action="store_true",
-                        help="Enable debug logging.")
-
-    # ── collect ───────────────────────────────────────────────────────────────
-    p_col = sub.add_parser(
-        "collect",
-        help="Connect to a live database and collect DDL + statistics into YAML.",
-        description=(
-            "Connect to a live database, extract the schema and column statistics\n"
-            "for every table matching --tables, and write canonical YAML files.\n\n"
-            "Any missing connection flags are prompted for interactively.\n"
-            "Use --show-sql to see every SQL statement sent to the database.\n\n"
-            "Examples\n"
-            "--------\n"
-            "  # Collect everything from MySQL (prompts for password)\n"
-            "  statschema collect --dialect mysql --host localhost --user root \\\n"
-            "      --catalog northwind --tables '%'\n\n"
-            "  # PostgreSQL: catalog=database name, schema=namespace (e.g. public)\n"
-            "  statschema collect --dialect postgres --host db.example.com \\\n"
-            "      --user myuser --catalog prod --schema public --tables 'order%' \\\n"
-            "      --show-sql --out-schema orders.yaml --out-stats orders_stats.yaml\n\n"
-            "  # SQL Server: catalog=database name, schema=dbo (or other)\n"
-            "  statschema collect --dialect sqlserver --catalog mydb --schema dbo\n\n"
-            "  # Oracle: --schema = owner name; --catalog is not used\n"
-            "  statschema collect --dialect oracle --host orahost --catalog XE --schema HR\n\n"
-            "  # Lakebase (Databricks): workspace auth via DATABRICKS_HOST / _CLIENT_ID / _CLIENT_SECRET\n"
-            "  statschema collect --dialect lakebase \\\n"
-            "      --endpoint 'projects/<proj-id>/branches/<branch-id>/endpoints/<ep-id>' \\\n"
-            "      --host '<ep-id>.database.<region>.cloud.databricks.com' \\\n"
-            "      --user '<service-principal-client-id>' --catalog databricks_postgres\n\n"
-            "  # Prompt for everything\n"
-            "  statschema collect --dialect sqlserver"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_col.add_argument("--dialect", required=True, choices=_ALL_DIALECTS,
-                       help="Source database dialect.")
-    p_col.add_argument("--host",     metavar="HOST",
-                       help="Database host (default: localhost — prompted if omitted).")
-    p_col.add_argument("--port",     type=int, metavar="PORT",
-                       help="Database port (dialect default — prompted if omitted).")
-    p_col.add_argument("--user",     metavar="USER",
-                       help="Database username (prompted if omitted).")
-    p_col.add_argument("--password", metavar="PASS",
-                       help="Database password (prompted securely if omitted).")
-    p_col.add_argument("--catalog",  metavar="CATALOG",
-                       help=(
-                           "Catalog / database name (prompted if omitted). "
-                           "MySQL: the database name. "
-                           "PostgreSQL/SQL Server: the database that contains the schema. "
-                           "Oracle: the service name (XE, XEPDB1, etc.) — schema is the owner. "
-                           "SQLite: file path."
-                       ))
-    p_col.add_argument("--schema",   dest="schema_name", metavar="SCHEMA",
-                       help=(
-                           "Schema / namespace within the catalog (prompted if omitted for "
-                           "dialects that require it). "
-                           "PostgreSQL default: public. "
-                           "SQL Server default: dbo. "
-                           "Oracle: owner name (required). "
-                           "MySQL/SQLite: not used."
-                       ))
-    p_col.add_argument("--tables",   default="%", metavar="PATTERN",
-                       help="SQL LIKE pattern for table names (default: %% = all tables). "
-                            "Shell glob * is accepted and converted to %%.")
-    p_col.add_argument(
-        "--endpoint", metavar="ENDPOINT_NAME",
-        help=(
-            "Lakebase endpoint resource path "
-            "(format: projects/<id>/branches/<id>/endpoints/<id>). "
-            "Required when --dialect lakebase; falls back to "
-            "STATSCHEMA_LAKEBASE_ENDPOINT or ENDPOINT_NAME env vars."
-        ),
-    )
-    p_col.add_argument("--show-sql", action="store_true",
-                       help="Print every SQL statement sent to the database.")
-    p_col.add_argument("--analyze",  action="store_true",
-                       help="Run ANALYZE (MySQL/PostgreSQL) before collecting statistics.")
-    p_col.add_argument("--out-schema", default="schema.yaml", metavar="FILE",
-                       help="Output path for the canonical schema YAML (default: schema.yaml).")
-    p_col.add_argument("--out-stats",  default="stats.yaml",  metavar="FILE",
-                       help="Output path for the statistics YAML (default: stats.yaml).")
-    p_col.add_argument(
-        "--top-queries", type=int, default=0, metavar="N",
-        help=(
-            "Also collect the top-N queries from the database's query statistics catalog "
-            "(pg_stat_statements, performance_schema, sys.dm_exec_query_stats, v$sql, "
-            "system.query.history).  Writes queries.yaml alongside schema.yaml.  "
-            "Default: 0 (disabled)."
-        ),
-    )
-    p_col.add_argument(
-        "--rank-by", default="total_time",
-        choices=["total_time", "calls", "mean_time"],
-        help=(
-            "Metric used to rank top queries (default: total_time). "
-            "total_time: highest cumulative cost; "
-            "calls: most frequently executed; "
-            "mean_time: slowest per-call latency."
-        ),
-    )
-    p_col.add_argument("--out-queries", default="queries.yaml", metavar="FILE",
-                       help="Output path for the query workload YAML (default: queries.yaml).")
-    p_col.add_argument("-v", "--verbose", action="store_true",
-                       help="Enable debug logging.")
-
-    # ── replay ───────────────────────────────────────────────────────────────
-    p_rep = sub.add_parser(
-        "replay",
-        help="Transpile and EXPLAIN collected queries against a target database.",
-        description=(
-            "Load a queries.yaml produced by 'collect --top-queries N', transpile each\n"
-            "query to the target dialect, and run EXPLAIN on the target database.\n"
-            "No rows are read or written — only query plans are collected.\n\n"
-            "Examples\n"
-            "--------\n"
-            "  # Replay MySQL workload against PostgreSQL\n"
-            "  statschema replay --dialect postgres --queries queries.yaml \\\n"
-            '      --dsn "host=target-db dbname=myapp user=me password=s3cr3t"\n\n'
-            "  # Replay against Lakebase, skip queries flagged for manual review\n"
-            "  statschema replay --dialect lakebase --queries queries.yaml \\\n"
-            "      --endpoint projects/.../endpoints/... --skip-manual-review"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_rep.add_argument("--dialect", required=True, choices=_ALL_DIALECTS,
-                       help="Target database dialect.")
-    p_rep.add_argument("--queries", required=True, metavar="FILE",
-                       help="Path to the queries.yaml produced by 'collect --top-queries'.")
-    p_rep.add_argument("--dsn", help="Connection string for the target (same format as 'load').")
-    p_rep.add_argument(
-        "--endpoint", metavar="ENDPOINT_NAME",
-        help="Lakebase endpoint resource path (required when --dialect lakebase).",
-    )
-    p_rep.add_argument(
-        "--skip-manual-review", action="store_true",
-        help="Skip queries flagged as requiring manual review instead of attempting them.",
-    )
-    p_rep.add_argument("--show-plans", action="store_true",
-                       help="Print full EXPLAIN output for every successful query.")
-    p_rep.add_argument("-v", "--verbose", action="store_true",
-                       help="Enable debug logging.")
-
-    # ── inject ────────────────────────────────────────────────────────────────
-    p_inj = sub.add_parser(
-        "inject",
-        help="Inject collected statistics into a target database optimizer.",
-        description=(
-            "Load a stats.yaml produced by 'collect' and push the column statistics\n"
-            "directly into the target database's optimizer catalog.\n\n"
-            "The target table must already exist (run 'statschema ddl | psql …' first).\n"
-            "After injection, EXPLAIN plans reflect production-scale distributions\n"
-            "before a single production row is loaded.\n\n"
-            "Examples\n"
-            "--------\n"
-            "  # Inject into PostgreSQL\n"
-            "  statschema inject --dialect postgres --stats stats.yaml \\\n"
-            '      --dsn "host=target-db dbname=myapp user=me password=s3cr3t"\n\n'
-            "  # Inject into MySQL\n"
-            "  statschema inject --dialect mysql --stats stats.yaml \\\n"
-            '      --dsn "host=localhost user=root password=s3cr3t database=myapp"\n\n'
-            "  # Inject only specific tables\n"
-            "  statschema inject --dialect postgres --stats stats.yaml \\\n"
-            '      --dsn "host=target-db dbname=myapp user=me password=s3cr3t" \\\n'
-            "      --tables orders,order_details"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_inj.add_argument("--dialect", required=True, choices=list(_INJECT_FN),
-                       help="Target database dialect.")
-    p_inj.add_argument("--dsn",     required=True,
-                       help="Connection string for the target database (same format as 'load').")
-    p_inj.add_argument("--stats",   required=True, metavar="FILE",
-                       help="Path to the stats YAML produced by 'collect' (e.g. stats.yaml).")
-    p_inj.add_argument("--schema",  dest="schema_name", metavar="SCHEMA",
-                       help="Target schema (PostgreSQL default: public; SQL Server default: dbo).")
-    p_inj.add_argument("--tables",  default=None, metavar="TABLE[,TABLE…]",
-                       help="Comma-separated list of table names to inject (default: all).")
-    p_inj.add_argument("--show-sql", action="store_true",
-                       help="Print each injection operation as it runs.")
-    p_inj.add_argument("-v", "--verbose", action="store_true",
-                       help="Enable debug logging.")
-
-    return root
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _die(msg: str) -> None:
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
-# ---------------------------------------------------------------------------
-# Entry point
+# Entry point — backward-compatible with argparse-era tests
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args   = parser.parse_args(argv)
+    """
+    Invoke the Click CLI.
 
-    logging.basicConfig(
-        level=logging.DEBUG if getattr(args, "verbose", False) else logging.WARNING,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-
-    if args.cmd == "ddl":
-        _cmd_ddl(args)
-    elif args.cmd == "generate":
-        _cmd_generate(args)
-    elif args.cmd == "load":
-        _cmd_load(args)
-    elif args.cmd == "collect":
-        _cmd_collect(args)
-    elif args.cmd == "replay":
-        _cmd_replay(args)
-    elif args.cmd == "inject":
-        _cmd_inject(args)
+    Backward-compatible with ``main(["ddl", "schema.yaml", "--dialect", "postgres"])``
+    style calls from tests and scripts.
+    """
+    try:
+        cli.main(args=argv, standalone_mode=False, prog_name="statschema")
+    except click.UsageError as exc:
+        click.echo(f"Error: {exc.format_message()}", err=True)
+        sys.exit(2)
+    except click.ClickException as exc:
+        exc.show()
+        sys.exit(exc.exit_code)
+    except SystemExit:
+        raise
 
 
 if __name__ == "__main__":

@@ -111,8 +111,8 @@ SCHEMAS_DIR   = Path(__file__).parent / "schemas"
 QUERIES_DIR   = Path(__file__).parent / "queries"
 RESULTS_DIR   = Path(__file__).parent / "results"
 
-_SOURCE_SCHEMA = "tpch_src"
-_TARGET_SCHEMA = "tpch_tgt"
+_SOURCE_SCHEMA = None  # derived from --schema at runtime: <schema>_src
+_TARGET_SCHEMA = None  # derived from --schema at runtime: <schema>_tgt
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -1872,8 +1872,8 @@ def run_identity_test(
     dialect: str,
     dsn: str,
     queries_yaml: Path | None = None,
-    source_schema: str = _SOURCE_SCHEMA,
-    target_schema: str = _TARGET_SCHEMA,
+    source_schema: str | None = None,
+    target_schema: str | None = None,
     skip_load: bool = False,
     save_yaml: Path | None = None,
     seed: int = 42,
@@ -1923,6 +1923,11 @@ def run_identity_test(
             f"No queries file for schema {schema!r}: {queries_yaml}\n"
             f"Create benchmarks/queries/{schema}.yaml to enable query comparison."
         )
+
+    if source_schema is None:
+        source_schema = f"{schema}_src"
+    if target_schema is None:
+        target_schema = f"{schema}_tgt"
 
     yaml_path = SCHEMAS_DIR / f"{schema}_schema.yaml"
     tables    = load_canonical(yaml_path)
@@ -2274,10 +2279,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         'dbname=testdb user=postgres password=testpass"')
     p.add_argument("--queries", metavar="FILE",
                    help="Path to queries YAML (default: benchmarks/queries/<schema>.yaml)")
-    p.add_argument("--source-schema", default=_SOURCE_SCHEMA,
-                   help=f"PostgreSQL schema for real TPC data (default: {_SOURCE_SCHEMA})")
-    p.add_argument("--target-schema", default=_TARGET_SCHEMA,
-                   help=f"PostgreSQL schema for statschema copy (default: {_TARGET_SCHEMA})")
+    p.add_argument("--source-schema", default=None,
+                   help="Schema name for real TPC data (default: <schema>_src)")
+    p.add_argument("--target-schema", default=None,
+                   help="Schema name for statschema copy (default: <schema>_tgt)")
     p.add_argument("--skip-load", action="store_true",
                    help="Skip Phase A — reuse existing source_schema data")
     p.add_argument("--save-yaml", metavar="DIR",
@@ -2401,6 +2406,13 @@ def _auto_profile(source_dialect: str | None, profiles_data: dict) -> Collection
 
 def main() -> None:
     args = _build_parser().parse_args()
+
+    # Derive schema-name defaults from --schema so parallel runs don't collide.
+    if args.source_schema is None:
+        args.source_schema = f"{args.schema}_src"
+    if args.target_schema is None:
+        args.target_schema = f"{args.schema}_tgt"
+
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s %(message)s",

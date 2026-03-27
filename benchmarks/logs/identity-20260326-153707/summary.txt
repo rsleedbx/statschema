@@ -1,0 +1,4 @@
+# Thu Mar 26 15:37:07 CDT 2026
+# engines=postgres  schemas=tpcb  skip_load=0
+
+PASS  postgres×tpcb(sf=1)                        Overall: PASS ✓

@@ -1151,7 +1151,25 @@ GROUP BY source_node_type, target_node_type ORDER BY mismatches DESC LIMIT 10;
 
 ---
 
-## How to reproduce
+## How to re-run
+
+### Full matrix (all engines × all schemas)
+
+```bash
+# Runs all 36 combinations (6 engines × 6 schemas), up to 4 in parallel.
+# Starts containers and VMs automatically.
+./benchmarks/run_identity.sh
+
+# Re-run only specific engines/schemas (skipping data load if already present):
+./benchmarks/run_identity.sh --skip-setup --skip-load \
+  --engines postgres,cockroachdb \
+  --schemas tpch,tpcc
+
+# Layer 2 only (no extended stats, ~1 s faster per run):
+./benchmarks/run_identity.sh --no-extended-stats --engines postgres --schemas tpcb,tpcc,tpch
+```
+
+### Single runs (PostgreSQL)
 
 ```bash
 # Start PostgreSQL 18
