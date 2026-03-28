@@ -1,0 +1,5 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'db2'
+  [A] Creating tables in schema 'tpcds_src'… done
+  [A]   loading date_dim                      73,049 rows… 298.07s
+  [A]   loading time_dim                      86,400 rows… 58.93s
+  [A]   loading customer_demographics      1,920,800 rows… 

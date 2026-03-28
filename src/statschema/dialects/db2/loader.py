@@ -46,7 +46,9 @@ def _db2_container_copy(host_path: str, container_path: str, container_spec: str
                 [
                     "limactl", "shell", lima_vm, "bash", "-c",
                     f"sudo podman --root /var/lib/containers/storage cp "
-                    f"{container_path} {inner_container}:{container_path}",
+                    f"{container_path} {inner_container}:{container_path}"
+                    f" && sudo podman --root /var/lib/containers/storage exec {inner_container}"
+                    f" chmod 644 {container_path}",
                 ],
                 capture_output=True, timeout=300,
             )
@@ -116,11 +118,13 @@ def bulk_load_db2(  # pragma: no cover
         row = cur.fetchone()
         schema = (row[0] if row else "").strip().upper()
 
-    full      = f'"{schema}"."{table.upper()}"'
-    rows      = list(_iter_rows(df))
-    count     = len(rows)
-    host_path = os.path.join(
-        staging_dir or tempfile.gettempdir(), f"statschema_{table}.del"
+    full  = f'"{schema}"."{table.upper()}"'
+    rows  = list(_iter_rows(df))
+    count = len(rows)
+    base  = os.path.basename(table)
+    fd, host_path = tempfile.mkstemp(
+        prefix=f"statschema_{base}_", suffix=".del",
+        dir=staging_dir,
     )
 
     def _db2_csv_val(v: Any) -> Any:
@@ -130,17 +134,18 @@ def bulk_load_db2(  # pragma: no cover
             return 1 if v else 0
         return v
 
-    with open(host_path, "w", newline="", encoding="utf-8") as f:
+    with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         for row in rows:
             writer.writerow([_db2_csv_val(v) for v in row])
 
+    suffix = os.path.basename(host_path)
     admin_cmd_path = host_path
     if container_name and not _has_clob:
-        container_path = f"/tmp/statschema_{table}.del"
+        container_path = f"/tmp/{suffix}"
         if _db2_container_copy(host_path, container_path, container_name):
             admin_cmd_path = container_path
-            logger.debug("bulk_load_db2: copied staging file to container %s:%s", container_name, container_path)
+            logger.debug("bulk_load_db2: copied to %s:%s", container_name, container_path)
         else:
             logger.warning("bulk_load_db2: container copy to %s failed; will attempt ADMIN_CMD with host path", container_name)
 

@@ -24,10 +24,11 @@ def bulk_load_mysql(  # pragma: no cover
     cur    = conn.cursor()
     qtable = _quote_id(table, "mysql")
     qcols  = ", ".join(_quote_id(c, "mysql") for c in col_names)
-    path   = os.path.join(staging_dir or tempfile.gettempdir(), f"statschema_{table}.csv")
+    base   = os.path.basename(table)
+    fd, path = tempfile.mkstemp(prefix=f"statschema_{base}_", suffix=".csv", dir=staging_dir)
 
     count = 0
-    with open(path, "w", newline="", encoding="utf-8") as f:
+    with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         for row in _iter_rows(df):
             writer.writerow(["\\N" if v is None else v for v in row])

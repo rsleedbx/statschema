@@ -1,0 +1,26 @@
+WARNING __main__ collect_table_stats failed for web_sales: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for store_returns: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for catalog_returns: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for web_returns: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2483, in <module>
+    main()
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2447, in main
+    result = run_identity_test(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2140, in run_identity_test
+    result.target_row_counts, result.stats_injection_mode = build_target(
+                                                            ^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 1642, in build_target
+    _create_schema(conn, target_schema, dialect)
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 557, in _create_schema
+    _create_schema_sqlserver(conn, schema_name)
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 421, in _create_schema_sqlserver
+    cur.execute(f"CREATE DATABASE [{schema_name}]")
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/mssql_python/cursor.py", line 1397, in execute
+    check_error(ddbc_sql_const.SQL_HANDLE_STMT.value, self.hstmt, ret)
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/mssql_python/helpers.py", line 38, in check_error
+    raise_exception(error_info.sqlState, error_info.ddbcErrorMsg)
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/mssql_python/exceptions.py", line 563, in raise_exception
+    raise exception_class
+mssql_python.exceptions.OperationalError: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure

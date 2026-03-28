@@ -1,0 +1,41 @@
+# Fri Mar 27 02:31:36 CDT 2026
+# engines=postgres,cockroachdb,mysql,sqlserver,oracle,db2
+# schemas=tpcb,tpcc,tpch,tpcdi,tpcds,tpce
+# skip_load=0
+
+PASS  postgres×tpcb(sf=1)                          Overall: PASS ✓
+PASS  postgres×tpcc(sf=1)                          Overall: PASS ✓
+PASS  postgres×tpch(sf=0.1)                        Overall: PASS ✓
+PASS  postgres×tpcdi(sf=5)                         Overall: PASS ✓
+PASS  postgres×tpcds(sf=0.01)                      Overall: PASS ✓
+FAIL  postgres×tpce(sf=0.01)                     exit=1
+PASS  cockroachdb×tpcb(sf=1)                       Overall: PASS ✓
+PASS  cockroachdb×tpcc(sf=1)                       Overall: PASS ✓
+PASS  cockroachdb×tpch(sf=0.1)                     Overall: PASS ✓
+PASS  cockroachdb×tpcdi(sf=5)                      Overall: PASS ✓
+PASS  cockroachdb×tpcds(sf=0.01)                   Overall: PASS ✓
+PASS  cockroachdb×tpce(sf=0.01)                    Overall: PASS ✓
+PASS  mysql×tpcb(sf=1)                             Overall: PASS ✓
+PASS  mysql×tpcc(sf=1)                             Overall: PASS ✓
+PASS  mysql×tpch(sf=0.01)                          Overall: PASS ✓
+PASS  mysql×tpcdi(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcds(sf=0.01)                         Overall: PASS ✓
+PASS  mysql×tpce(sf=0.01)                          Overall: PASS ✓
+PASS  sqlserver×tpcb(sf=1)                         Overall: PASS ✓
+PASS  sqlserver×tpcc(sf=1)                         Overall: PASS ✓
+PASS  sqlserver×tpch(sf=0.01)                      Overall: PASS ✓
+PASS  sqlserver×tpcdi(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcds(sf=0.01)                     Overall: PASS ✓
+FAIL  sqlserver×tpce(sf=0.1)                     exit=1
+PASS  oracle×tpcb(sf=1)                            Overall: PASS ✓
+PASS  oracle×tpcc(sf=1)                            Overall: PASS ✓
+PASS  oracle×tpch(sf=0.01)                         Overall: PASS ✓
+PASS  oracle×tpcdi(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcds(sf=0.01)                        Overall: PASS ✓
+FAIL  oracle×tpce(sf=0.1)                        exit=1
+PASS  db2×tpcb(sf=1)                               Overall: PASS ✓
+PASS  db2×tpcc(sf=1)                               Overall: PASS ✓
+PASS  db2×tpch(sf=0.01)                            Overall: PASS ✓
+PASS  db2×tpcdi(sf=1)                              Overall: PASS ✓
+FAIL  db2×tpcds(sf=0.01)                         exit=1
+PASS  db2×tpce(sf=0.01)                            Overall: PASS ✓

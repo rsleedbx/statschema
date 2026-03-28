@@ -1,0 +1,37 @@
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/5 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/320 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/5 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/102 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/3652 rows; falling back to MULTI_ROW inserts
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/ibm_db_dbi.py", line 1633, in _execute_helper
+    return_value = ibm_db.execute(self.stmt_handler, parameters)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Exception: Binding Error: [IBM][CLI Driver] CLI0102E  Invalid conversion. SQLSTATE=07006 SQLCODE=-99999
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2483, in <module>
+    main()
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2447, in main
+    result = run_identity_test(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 1976, in run_identity_test
+    result.source_row_counts = load_source(
+                               ^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 995, in load_source
+    load_dataframe(
+  File "/Users/robert.lee/github/statschema/src/statschema/data_loader.py", line 245, in load_dataframe
+    inserted = bulk_load_db2(
+               ^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/src/statschema/dialects/db2/loader.py", line 190, in bulk_load_db2
+    inserted = _insert_multi_row(
+               ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/src/statschema/dialects/_loader_shared.py", line 291, in _insert_multi_row
+    cur.execute(sql, params)
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/ibm_db_dbi.py", line 1812, in execute
+    self._execute_helper(parameters)
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/ibm_db_dbi.py", line 1648, in _execute_helper
+    raise self.messages[len(self.messages) - 1]
+ibm_db_dbi.ProgrammingError: ibm_db_dbi::ProgrammingError: Binding Error: [IBM][CLI Driver] CLI0102E  Invalid conversion. SQLSTATE=07006 SQLCODE=-99999

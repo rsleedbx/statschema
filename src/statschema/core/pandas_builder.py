@@ -43,7 +43,7 @@ from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
 
-from .model import CanonicalColumn, CanonicalTableSchema, GenerationRule
+from .model import CanonicalColumn, CanonicalTableSchema, GenerationRule, build_fk_max_map
 from .semantic_hints import infer_format_pattern
 
 # ---------------------------------------------------------------------------
@@ -206,6 +206,10 @@ def _zipf_array(rng: np.random.Generator, a: float, lo: int, hi: int, n: int) ->
     return raw[:n].astype(np.int64)
 
 
+_TEMPORAL_DEFAULT_LO = datetime(2020, 1, 1)
+_TEMPORAL_DEFAULT_HI = datetime(2024, 12, 31)
+
+
 def _temporal_origin_and_span(
     col_type: str,
     lo: Optional[Any],
@@ -216,8 +220,8 @@ def _temporal_origin_and_span(
 
     Default range: 2020-01-01 → 2024-12-31.
     """
-    default_lo = datetime(2020, 1, 1)
-    default_hi = datetime(2024, 12, 31)
+    default_lo = _TEMPORAL_DEFAULT_LO
+    default_hi = _TEMPORAL_DEFAULT_HI
 
     def _parse(v: Any, default: datetime) -> datetime:
         if v is None:
@@ -255,6 +259,10 @@ def _generate_column(
     """
     g: Optional[GenerationRule] = col.generation
     ctype = col.type.lower().strip()
+    if ctype == "bigint":
+        ctype = "long"      # bigint is an alias for long in the canonical type system
+    elif ctype == "smallint":
+        ctype = "integer"   # smallint maps to 32-bit integer generation
 
     # ── Explicit values list (enum / MCV domain override) ────────────────
     values: Optional[list[Any]] = g.values if g else None
@@ -383,6 +391,13 @@ def _generate_column(
     # ── String ────────────────────────────────────────────────────────────
     if ctype in ("string", "varchar", "char", "text", "clob", "nvarchar", "nchar"):
         return _generate_string(col, n, rng, g, col_stats)
+
+    # ── UUID ───────────────────────────────────────────────────────────────
+    if ctype == "uuid":
+        return [
+            str(_uuid_mod.UUID(bytes=bytes(rng.integers(0, 256, size=16).tolist())))
+            for _ in range(n)
+        ]
 
     # ── Binary ────────────────────────────────────────────────────────────
     if ctype == "binary":
@@ -674,33 +689,6 @@ def _enforce_temporal_constraints(
     return df
 
 
-# ---------------------------------------------------------------------------
-# FK range helper (mirrors dbldatagen_builder logic)
-# ---------------------------------------------------------------------------
-
-def _build_fk_ranges(
-    table: CanonicalTableSchema,
-    parent_row_counts: dict[str, int] | None,
-) -> dict[str, int]:
-    fk_ranges: dict[str, int] = {}
-    if not parent_row_counts:
-        return fk_ranges
-
-    if table.fk_constraints:
-        for fk in table.fk_constraints:
-            parent_count = parent_row_counts.get(fk.parent_table)
-            if parent_count:
-                for col_name in fk.columns:
-                    fk_ranges[col_name] = parent_count
-
-    for col in table.columns:
-        if col.references and col.name not in fk_ranges:
-            parent_table, _ = col.references
-            parent_count = parent_row_counts.get(parent_table)
-            if parent_count:
-                fk_ranges[col.name] = parent_count
-
-    return fk_ranges
 
 
 # ---------------------------------------------------------------------------
@@ -748,7 +736,7 @@ def build_rows_from_canonical(
     from .model import GenerationRule
 
     rng = np.random.default_rng(seed)
-    fk_ranges = _build_fk_ranges(table, parent_row_counts)
+    fk_ranges = build_fk_max_map(table, parent_row_counts)
 
     data: dict[str, Any] = {}
     for col in table.columns:

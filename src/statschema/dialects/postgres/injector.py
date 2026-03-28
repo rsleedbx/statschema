@@ -73,22 +73,31 @@ def inject_stats_postgres(  # pragma: no cover
     conn.commit()
     logger.info("PG18 table stats injected: %s.%s rows=%d pages=%d", schema, table, row_count, pages)
 
-    cols_ok = cols_skip = 0
-    for col in table_stats.columns:
-        try:
-            cur.execute("SAVEPOINT _inj_col")
-            _inject_pg_column(conn, schema, table, col, row_count, warnings)
-            cur.execute("RELEASE SAVEPOINT _inj_col")
-            cols_ok += 1
-        except Exception as exc:
-            try:
-                cur.execute("ROLLBACK TO SAVEPOINT _inj_col")
-            except Exception:
-                pass
-            warnings.append(f"{col.name}: {exc}")
-            cols_skip += 1
+    # SAVEPOINTs require an open transaction block.  If the caller set
+    # autocommit=True, temporarily switch to manual-commit mode.
+    _orig_autocommit = getattr(conn, "autocommit", None)
+    if _orig_autocommit:
+        conn.autocommit = False
 
-    conn.commit()
+    cols_ok = cols_skip = 0
+    try:
+        for col in table_stats.columns:
+            try:
+                cur.execute("SAVEPOINT _inj_col")
+                _inject_pg_column(conn, schema, table, col, row_count, warnings)
+                cur.execute("RELEASE SAVEPOINT _inj_col")
+                cols_ok += 1
+            except Exception as exc:
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT _inj_col")
+                except Exception:
+                    pass
+                warnings.append(f"{col.name}: {exc}")
+                cols_skip += 1
+        conn.commit()
+    finally:
+        if _orig_autocommit is not None:
+            conn.autocommit = _orig_autocommit
     return InjectionResult(
         dialect="postgresql",
         table=table,

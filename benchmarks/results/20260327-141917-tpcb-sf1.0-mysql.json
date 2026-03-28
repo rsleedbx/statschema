@@ -1,0 +1,42 @@
+{
+  "benchmark_id": "20260327-141917-tpcb-sf1.0-mysql",
+  "timestamp": "2026-03-27T14:19:17.260196+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "4d101b1",
+  "schema": "tpcb",
+  "scale_factor": 1.0,
+  "append": false,
+  "dialect": "mysql",
+  "driver": "pymysql",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.0958,
+  "tables": {
+    "branch": {
+      "rows": 1,
+      "load_s": 0.0078,
+      "row_offset": 0
+    },
+    "teller": {
+      "rows": 10,
+      "load_s": 0.0061,
+      "row_offset": 0
+    },
+    "account": {
+      "rows": 100000,
+      "load_s": 2.5197,
+      "row_offset": 0
+    },
+    "history": {
+      "rows": 100000,
+      "load_s": 2.7341,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 200011,
+    "load_s": 5.2676,
+    "rows_per_s": 37970.0
+  }
+}

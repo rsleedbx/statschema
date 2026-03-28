@@ -1,0 +1,12 @@
+# 2026-03-27T23:10:06.964755+00:00
+
+PASS  mysql×tpcb(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcc(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcdi(sf=1)                           Overall: PASS ✓
+PASS  mysql×tpcds(sf=0.01)                        Overall: PASS ✓
+PASS  mysql×tpce(sf=0.01)                         Overall: PASS ✓
+PASS  mysql×tpch(sf=0.01)                         Overall: PASS ✓
+
+Passed : 6 / 6
+Failed : 0 / 6
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-230855

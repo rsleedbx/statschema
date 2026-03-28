@@ -1,0 +1,12 @@
+.git
+.venv*
+__pycache__
+*.pyc
+*.egg-info
+.env
+benchmarks/logs/
+benchmarks/results/*.json
+benchmarks/results/*.db
+docs/
+*.md
+.cursor/

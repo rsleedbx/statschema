@@ -100,13 +100,13 @@ tables:
   columns:
     - name: in_id
       type: varchar
-      length: 2
+      length: 3
       not_null: true
       primary_key: true
-      generation: {distribution: sequential, min_value: 1, format_pattern: zero_padded_int, length: 2}
+      generation: {distribution: sequential, min_value: 1, format_pattern: zero_padded_int, length: 3}
     - name: in_name
       type: varchar
-      length: 50
+      length: 60
       generation:
         values:
           - "Aerospace & Defense"
@@ -706,9 +706,9 @@ tables:
       generation: {format_pattern: word}
     - name: co_in_id
       type: varchar
-      length: 2
+      length: 3
       not_null: true
-      generation: {min_value: 1, max_value: 102, format_pattern: zero_padded_int, length: 2}
+      generation: {min_value: 1, max_value: 102, format_pattern: zero_padded_int, length: 3}
     - name: co_sp_rate
       type: varchar
       length: 4
@@ -755,10 +755,10 @@ tables:
       primary_key: true
     - name: cp_in_id
       type: varchar
-      length: 2
+      length: 3
       not_null: true
       primary_key: true
-      generation: {min_value: 1, max_value: 102, format_pattern: zero_padded_int, length: 2}
+      generation: {min_value: 1, max_value: 102, format_pattern: zero_padded_int, length: 3}
   fk_constraints:
     - columns: [cp_co_id]
       parent_table: company

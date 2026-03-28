@@ -32,6 +32,21 @@
 
 arch: "x86_64"
 
+# ── VM resources ─────────────────────────────────────────────────────────────
+# Oracle XE 21c container consumes ~3.1 GB at idle (SGA=1.5 GB + PGA=512 MB
+# + background processes + page cache).  With 4 GB VM RAM and no swap:
+#   available ≈ 1.2 GB  →  safe for 1 concurrent schema load  (schema_workers=1)
+#
+# Upgrade to 8 GB for 2 concurrent schema loads per engine:
+#   memory: "8GiB"    # gives ~4.9 GB headroom; 2 loads × ~500 MB each = OK
+#   Then set LIMA_VM_LARGE_RAM=1 to enable schema_workers=2 in run_matrix.py.
+#
+# NOTE: Oracle XE edition hard-caps SGA at 2 GB and max CPUs at 2 regardless
+# of VM size.  More RAM helps PGA working memory and OS page cache, not SGA.
+cpus: 4
+memory: "4GiB"
+disk: "100GiB"
+
 images:
   - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
 

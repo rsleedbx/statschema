@@ -28,7 +28,7 @@ inject_rare_events  → NOT natively supported; append tail rows (not yet implem
 
 from typing import Any, Callable, Optional
 
-from ..model import CanonicalColumn, CanonicalTableSchema, GenerationRule
+from ..model import CanonicalColumn, CanonicalTableSchema, GenerationRule, build_fk_max_map
 from ..semantic_hints import infer_format_pattern
 
 # ---------------------------------------------------------------------------
@@ -182,9 +182,9 @@ def _cast_stat_value(value: str, canonical_type: str):
     if value is None:
         return None
     try:
-        if canonical_type in ("integer",):
+        if canonical_type in ("integer", "smallint"):
             return int(float(value))
-        if canonical_type in ("long",):
+        if canonical_type in ("long", "bigint"):
             return int(float(value))
         if canonical_type in ("float", "double", "decimal"):
             return float(value)
@@ -219,6 +219,10 @@ def _spark_type_and_options(
       5. distribution control
     """
     canonical_type = col.type.lower().strip()
+    if canonical_type == "bigint":
+        canonical_type = "long"     # bigint is an alias for long in the canonical type system
+    elif canonical_type == "smallint":
+        canonical_type = "integer"  # smallint maps to 32-bit integer generation
     if canonical_type not in _SPARK_TYPES and random_type_choice:
         canonical_type = random_type_choice()
     if canonical_type not in _SPARK_TYPES:
@@ -395,22 +399,7 @@ def to_dbldatagen_specs(
             gen = gen.withColumn(name, col_type, **kwargs)
         df = gen.build()
     """
-    # Build FK column → parent row count mapping for valid-key generation.
-    fk_ranges: dict[str, int] = {}
-    if parent_row_counts:
-        if table.fk_constraints:
-            for fk in table.fk_constraints:
-                parent_count = parent_row_counts.get(fk.parent_table)
-                if parent_count:
-                    for col_name in fk.columns:
-                        fk_ranges[col_name] = parent_count
-        # Column-level references are the fallback when fk_constraints is absent.
-        for col in table.columns:
-            if col.references and col.name not in fk_ranges:
-                parent_table, _ = col.references
-                parent_count = parent_row_counts.get(parent_table)
-                if parent_count:
-                    fk_ranges[col.name] = parent_count
+    fk_ranges = build_fk_max_map(table, parent_row_counts)
 
     result: list[tuple[str, Any, dict[str, Any]]] = []
     for col in table.columns:

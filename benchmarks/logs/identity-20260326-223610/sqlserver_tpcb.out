@@ -1,0 +1,60 @@
+  [C] Auto-selected profile 'standard' for source dialect 'sqlserver'
+  [A] Creating tables in schema 'tpcb_src'… done
+  [A]   loading branch                             1 rows… 1.78s
+  [A]   loading teller                            10 rows… 1.41s
+  [A]   loading account                      100,000 rows… 2.87s
+  [A]   loading history                      100,000 rows… 2.76s
+  [A] Running ANALYZE on 'tpcb_src'… done
+  [B] EXPLAIN tpcb-q01… ok
+  [B] EXPLAIN tpcb-q02… ok
+  [B] EXPLAIN tpcb-q03… ok
+  [B] EXPLAIN tpcb-q04… ok
+  [C] pred_cols: 9 predicate columns from workload YAML across 4 tables
+  [C] collecting stats branch… ok  (row_count=1)
+  [C] collecting stats teller… ok  (row_count=10)
+  [C] collecting stats account… ok  (row_count=100,000)
+  [C] collecting stats history… ok  (row_count=100,000)
+  [D] Creating tables in schema 'tpcb_tgt'… done
+  [D]   synthetic branch                             1 rows… 3.51s
+  [D]   synthetic teller                            10 rows… 1.31s
+  [D]   synthetic account                      100,000 rows… 5.02s
+  [D]   synthetic history                      100,000 rows… 6.28s
+  [D] Updating statistics in 'tpcb_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats branch… ok  (row_count=1)
+  [C] collecting stats teller… ok  (row_count=10)
+  [C] collecting stats account… ok  (row_count=100,000)
+  [C] collecting stats history… ok  (row_count=100,000)
+  [C.5] stats fidelity: ndistinct_w2x=1.000  range_covered=0.769  null_match=1.000
+  [B] EXPLAIN tpcb-q01… ok
+  [B] EXPLAIN tpcb-q02… ok
+  [B] EXPLAIN tpcb-q03… ok
+  [B] EXPLAIN tpcb-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcb  dialect=sqlserver  sf=1.0
+  source=tpcb_src  target=tpcb_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=1.000  range_covered=0.769  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcb-q01              jaccard=1.00  within_2x=1.00  nodes: 4→4
+  tpcb-q02              jaccard=1.00  within_2x=1.00  nodes: 8→8
+  tpcb-q03              jaccard=1.00  within_2x=1.00  nodes: 10→10
+  tpcb-q04              jaccard=1.00  within_2x=1.00  nodes: 5→5
+
+  Overall: PASS ✓
+    A_load_source             14.13s
+    B_baseline_explain        9.17s
+    C_collect_stats           51.20s
+    D_build_target            27.00s
+    C5_target_stats_fidelity  83.14s
+    E_replay_explain          2.37s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-033918-identity-tpcb-sf1.0-sqlserver.json
+

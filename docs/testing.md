@@ -178,7 +178,17 @@ python3.11 -m venv .venv_test
 | `tests/test_cli.py` | 26 | No | No |
 | `tests/test_ddl_roundtrip.py` | ~185 | No | No |
 | `tests/test_schema_parser.py` | ~124 | 3 tests | No |
-| `tests/test_v1_bridge.py` | 105 | No | No — but requires `dbldatagen.v1` (not on PyPI; see `make venv-test-v1`) |
+| `tests/test_canonical_generation.py` | 43 | No | No — row counts, load order, FK range injection, `generate_rows()` |
+| `tests/test_coverage_gaps.py` | 200 | No | No — DDL emitter all 6 dialects, model serialisation, schema IO, stats model, dbldatagen helpers, loader edge paths |
+| `tests/test_loader_dtype_coverage.py` | 103 | No | No — coercion for every canonical type across all loaders; write-1 → stats → write-2 identity pipeline |
+| `tests/test_semantic_hints.py` | 53 | No | No — `infer_format_pattern()`, locale loading (en_US + de_DE), `apply_hints()` |
+| `tests/test_table_instances.py` | 36 | No | No — `instance_count` / `aliases` expansion, YAML round-trip |
+| `tests/test_query_workload.py` | 22 | No | No — query model, transpiler, replayer with mocked connections |
+| `tests/test_migration_roundtrip.py` | 5 | No | No — Northwind, Sakila, Django Auth, WordPress, Chinook migration stories |
+| `tests/test_pandas_builder.py` | 37 | No | No — `build_rows_from_canonical()` pure-Python path |
+| `tests/test_tpcds_workload.py` | 2 | No | No — generates all 24 TPC-DS tables into DuckDB, runs all 99 queries (`pytest -k tpcds`) |
+| `tests/test_tpce_workload.py` | 2 | No | No — generates all 32 TPC-E tables into DuckDB, queries 10 transaction types (`pytest -k tpce`) |
+| `tests/test_v1_bridge.py` | 105 | No | No — requires `dbldatagen.v1` (not on PyPI; see `make venv-test-v1`) |
 | `tests/test_live_sqlserver.py` | 14 | No | **Yes** – SQL Server via Lima VM |
 | `tests/test_live_mysql.py` | ~18 | No | **Yes** – MySQL 5.7 + 8.x via Podman |
 | `tests/test_live_mariadb.py` | ~20 | No | **Yes** – MariaDB 10.11 + 11.4 via Podman |
@@ -190,6 +200,10 @@ python3.11 -m venv .venv_test
 | `tests/test_live_mautic.py` | 19 | No | **Yes** – Mautic 5 + MySQL 8 via Podman |
 | `tests/test_live_roundtrip.py` | ~300 | No | **Yes** – MySQL + PG + SQL Server |
 | `tests/test_live_synth.py` | 17 | **Yes** | **Yes** – MySQL 8 + PG 16 + SQL Server |
+| `tests/test_live_identity.py` | 7 | No | **Yes** – PG 16; full collect → generate → inject plan-fidelity pipeline (`make test-live-identity`) |
+| `tests/test_live_stats_transpiler.py` | 26 | No | **Yes** – MySQL 8 → PG 18; stats from MySQL injected into PostgreSQL, EXPLAIN estimates verified (`make test-live-stats-transpiler`) |
+| `tests/test_live_stats_minmax.py` | 9 | No | **Yes** – PG 16 + MySQL 8 + SQL Server; MIN/MAX collection for every significant data type |
+| `tests/test_live_lakebase.py` | 10 | No | **Yes** – Databricks Lakebase; DDL, schema read-back, collect → inject, BULK COPY (`make test-live-lakebase`) |
 
 ### Tests that are always skipped (expected)
 
@@ -216,6 +230,10 @@ required credentials are not set, so `make test` always completes cleanly:
 | `test_live_mautic.py` | `mautic` DB unreachable on port 3384 |
 | `test_live_roundtrip.py` | any required port closed |
 | `test_live_synth.py` | any required DB port or Spark unavailable |
+| `test_live_identity.py` | port 5416 closed |
+| `test_live_stats_transpiler.py` | port 3384 (MySQL 8) or 5418 (PG 18) closed |
+| `test_live_stats_minmax.py` | all three DB ports closed |
+| `test_live_lakebase.py` | `STATSCHEMA_LAKEBASE_HOST` not set |
 
 ---
 
@@ -725,6 +743,185 @@ make test-live-synth SQLSERVER_PASS=<password>
 # or directly
 SQLSERVER_PASS=<pw> .venv_test/bin/python -m pytest tests/test_live_synth.py -v
 ```
+
+---
+
+---
+
+## Benchmark test scripts
+
+The scripts in `benchmarks/` run end-to-end tests against live databases.  They share common helpers via `benchmarks/_common.sh` (DB startup, DSN builders, scale factors).
+
+### Identity tests — `benchmarks/run_identity.sh`
+
+Validates query-plan fidelity across all six engines and six TPC schemas.
+
+```
+A. load source data (TPC schema at scale factor)
+B. baseline EXPLAIN on source schema
+C. collect statistics from source
+D. build synthetic copy + inject statistics
+E. replay EXPLAIN on copy
+F. score: node_jaccard (plan operator overlap), within_2x (row estimates)
+```
+
+All 36 combinations (6 engines × 6 schemas) pass. See [`benchmarks/results/identity_results.md`](../benchmarks/results/identity_results.md) for per-engine scores.
+
+```bash
+# All engines and schemas (starts DBs automatically)
+bash benchmarks/run_identity.sh
+
+# Skip DB startup (already running)
+bash benchmarks/run_identity.sh --skip-setup
+
+# Single engine, single schema
+bash benchmarks/run_identity.sh --engines postgres --schemas tpch
+
+# Override per-engine schema parallelism (default values shown below)
+bash benchmarks/run_identity.sh --skip-setup --schema-workers 4
+```
+
+#### Schema parallelism (`--schema-workers`)
+
+`benchmarks/run_matrix.py` runs schemas within each engine in parallel via `ThreadPoolExecutor`.  The per-engine defaults in `_SCHEMA_WORKERS` were validated empirically on 2026-03-27 across all 6 TPC schemas (collect_stats + load_target phases):
+
+| Engine | Type | Default workers | Validated range | Notes |
+|--------|------|-----------------|-----------------|-------|
+| `postgres` | Podman ARM64 | **6** | 4–6 ✓ | 59 s at sw=6 vs 112 s at sw=4 |
+| `mysql` | Podman ARM64 | **5** | 3–6 ✓ | marginal gain above 5 |
+| `cockroachdb` | Podman ARM64 | **5** | 4–6 ✓ | sw=3 had a plan-quality score miss; requires `crdb-single` launched with `--memory=2g` |
+| `sqlserver` | Lima QEMU 4 GiB | **1** (2 with `LIMA_VM_LARGE_RAM=1`) | 1 safe | ~755 MB free after 3072 MB buffer pool cap |
+| `oracle` | Lima QEMU 4 GiB | **1** (2 with `LIMA_VM_LARGE_RAM=1`) | 1 safe | ~1.3 GB free; Oracle XE SGA fixed at 2 GB |
+| `db2` | Lima QEMU 4 GiB | **1** (2 with `LIMA_VM_LARGE_RAM=1`) | 1 safe | STMM capped at 2 GB via DATABASE_MEMORY |
+| `neon` | remote cloud | 2 | — | rate-limit headroom |
+| `lakebase` | remote cloud | 2 | — | rate-limit headroom |
+
+**Lima VMs and memory:** The 4 GiB Lima VMs have no swap — a single OOM kills the database process.  Memory caps are set persistently in the Lima provision scripts (`config/lima/*.yaml`).  To unlock 2 parallel schemas, upgrade to 8 GiB and set `LIMA_VM_LARGE_RAM=1`:
+
+```bash
+# Edit config/lima/{oracle,sqlserver,db2}.yaml: change memory: "8GiB"
+# SQL Server only: also raise memorylimitmb to 5632 in mssql.conf
+limactl stop sqlserver22 oracle db2 && limactl start sqlserver22 oracle db2
+LIMA_VM_LARGE_RAM=1 bash benchmarks/run_identity.sh --skip-setup
+```
+
+**CockroachDB and shared Podman VM memory:** The single-node container (`crdb-single`) shares the ~8.3 GB Podman VM with the 3-node cluster (`crdb1/2/3`), which consumes ~5.1 GB at idle.  Without a hard container memory limit, `crdb-single` defaults to 25%+25% of VM RAM ≈ 4 GB and gets OOM-killed under concurrent loads.  The setup in [`docs/databases/cockroachdb.md`](databases/cockroachdb.md) includes `--memory=2g --cache=512MiB --max-sql-memory=512MiB`.  Under peak load the container reaches ~1.82 GB / 2 GB hard cap without crashing.
+
+**Running all three Podman engines simultaneously (18-way test):** Validated 2026-03-27 — `postgres + mysql + cockroachdb`, each at `--schema-workers 6` across all 6 TPC schemas (18 total concurrent loads).  Result: **17/18 pass** in ~150 s; the one miss (`cockroachdb×tpce`) was a plan-quality score failure (not a crash), same intermittent behaviour seen at sw=3 for tpce.  crdb-single memory peaked at 1.82 GB / 2 GB hard cap and survived.  Running sequentially would take ~223 s (postgres 59 s + mysql 80 s + cockroachdb 84 s), so the 18-way run is ~33% faster.
+
+#### Full 6-engine run: timing and hardware requirements
+
+Validated 2026-03-28 — all 6 engines running simultaneously (`collect_stats + load_target`, 6 TPC schemas each, 36 total combinations):
+
+```
+Result: 35/36 PASS in 59 min 26 s wall time
+Sole failure: cockroachdb×tpch — intermittent plan-quality score miss (not a crash)
+```
+
+Per-engine completion times (all start simultaneously):
+
+| Engine | Type | Workers | Completes at | Wall time |
+|--------|------|---------|-------------|-----------|
+| postgres | Podman ARM64 | 6 | +3 min | 3 min 24 s |
+| mysql | Podman ARM64 | 5 | +4 min | 3 min 38 s |
+| cockroachdb | Podman ARM64 | 5 | +4 min | 3 min 59 s |
+| oracle | Lima QEMU | 1 | +10 min | 10 min 20 s |
+| sqlserver | Lima QEMU | 1 | +33 min | 32 min 50 s |
+| **db2** | **Lima QEMU** | **1** | **+60 min** | **59 min 26 s ← bottleneck** |
+
+DB2 dominates because `RUNSTATS` (statistics collection) is CPU-intensive and the DB2 VM runs under QEMU x86_64 emulation on Apple Silicon, where integer-heavy workloads run at roughly 10–20% of native speed.
+
+**Minimum hardware for the full parallel run:**
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| Host RAM | 32 GB | 64 GB |
+| Host CPU | Apple M2 (8 cores) | Apple M3 Pro (12 cores) |
+| Host storage | 50 GB free SSD | 100 GB NVMe |
+| Podman VM RAM | 8 GB (shared by all containers) | 12 GB |
+| Lima VM RAM | 4 GiB per VM × 3 = 12 GiB | 8 GiB per VM × 3 = 24 GiB |
+
+The Lima VMs each reserve 4 GiB host RAM whether running or not.  Total Lima
+overhead at idle: **~12 GiB**.  The Podman VM adds ~6.5 GB in active use.
+On a 32 GB machine this leaves ~13.5 GB for the host OS and Python workers.
+
+To run the full parallel suite:
+
+```bash
+# All DBs already running and source schemas loaded
+cd /path/to/statschema && source .env
+python -u benchmarks/run_matrix.py identity \
+    --engines postgres,mysql,cockroachdb,sqlserver,oracle,db2 \
+    --schemas tpcb,tpcc,tpch,tpcdi,tpcds,tpce \
+    --skip-load \
+    --phases collect_stats,load_target
+```
+
+See [`docs/databases/`](databases/) for per-database setup.  The agent skills
+`.cursor/skills/setup-podman-databases/` and `.cursor/skills/setup-lima-databases/`
+contain quick-start commands for all containers and VMs.
+
+After each test completes, `benchmarks/check_run.py` verifies that live row counts in the database match the counts recorded in the result JSON (see [Row-count verification](#row-count-verification) below).
+
+### Target tests — `benchmarks/run_lakebase_target.sh`
+
+Runs the full cross-database → Lakebase target matrix: 6 source engines × 6 TPC schemas = 36 runs.  Each run loads data into the source engine, collects its statistics, then injects those statistics into a Lakebase endpoint and scores EXPLAIN plan fidelity.
+
+```bash
+bash benchmarks/run_lakebase_target.sh --skip-setup   # source DBs already running
+bash benchmarks/run_lakebase_target.sh --skip-load    # reuse existing source schemas
+```
+
+Requires `STATSCHEMA_LAKEBASE_ENDPOINT` and `STATSCHEMA_LAKEBASE_HOST` in `.env` (run `./scripts/lakebase-up.sh` once to populate them).  See [`benchmarks/results/target_lakebase.md`](../benchmarks/results/target_lakebase.md) for scores.
+
+### Load benchmarks — `benchmarks/run_bench.sh`
+
+Measures bulk-load throughput for TPC-B, TPC-C, and TPC-H across every reachable database.
+
+| Phase | Script | Output |
+|-------|--------|--------|
+| TPC-C SF=1 + TPC-H SF=0.1 | `benchmarks/run_all_bench.py` | `benchmarks/results/benchmark_table.md` |
+| TPC-B SF=1 + pgbench TPS | `benchmarks/run_tpcb_bench.py` | appended to `benchmark_table.md` |
+
+```bash
+bash benchmarks/run_bench.sh               # all phases, start DBs
+bash benchmarks/run_bench.sh --skip-setup  # DBs already running
+bash benchmarks/run_bench.sh --tpcb-only   # only TPC-B + pgbench
+bash benchmarks/run_bench.sh --bench-only  # only TPC-C + TPC-H
+```
+
+pgbench TPS is measured only for PostgreSQL 18 and CockroachDB (the two engines that support the pgbench wire protocol).
+
+### Row-count verification — `benchmarks/check_run.py`
+
+Post-run integrity checker for any `identity_test.py` result JSON.  Reads the saved JSON, optionally scans the log for genuine errors, then reconnects to the live database and verifies `COUNT(*)` per table matches the recorded counts.
+
+Supports all six engines plus Lakebase.  For cross-database runs (e.g. source = cockroachdb, target = Lakebase) pass `--target-dialect lakebase`.
+
+```bash
+# Same-engine identity test
+python benchmarks/check_run.py \
+    benchmarks/results/20260327-154446-identity-tpch-sf0.1-postgres.json \
+    benchmarks/logs/identity-20260327/postgres_tpch.out \
+    --dialect postgres \
+    --dsn "host=127.0.0.1 port=5418 dbname=postgres user=postgres password=postgres"
+
+# Lakebase target test (source = cockroachdb, target = Lakebase)
+python benchmarks/check_run.py result.json \
+    --dialect cockroachdb \
+    --dsn "host=127.0.0.1 port=26257 dbname=defaultdb user=root sslmode=disable" \
+    --target-dialect lakebase
+```
+
+`run_identity.sh` and `run_lakebase_target.sh` call `check_run.py` automatically after each passing test.  A row-count mismatch prints a warning but does not abort the run.
+
+The validated row counts for all six TPC schemas across all engines are recorded in [`benchmarks/results/row_count_report.md`](../benchmarks/results/row_count_report.md).  To regenerate it from the current result files:
+
+```bash
+python benchmarks/build_row_count_report.py
+```
+
+The script reads every `benchmarks/results/*identity*.json`, selects the most recent passing result per (schema, dialect), and groups tables by `(schema, scale-factor)` so cross-engine comparisons are only drawn between engines that ran at the same SF.
 
 ---
 

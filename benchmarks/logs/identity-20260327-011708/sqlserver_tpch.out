@@ -1,0 +1,77 @@
+  [C] Auto-selected profile 'standard' for source dialect 'sqlserver'
+  [A] Creating tables in schema 'tpch_src'… done
+  [A]   loading region                             5 rows… 1.51s
+  [A]   loading part                           2,000 rows… 0.71s
+  [A]   loading nation                            25 rows… 0.56s
+  [A]   loading supplier                         100 rows… 0.55s
+  [A]   loading customer                       1,500 rows… 0.70s
+  [A]   loading partsupp                       8,000 rows… 0.72s
+  [A]   loading orders                        15,000 rows… 1.17s
+  [A]   loading lineitem                      60,000 rows… 4.14s
+  [A] Running ANALYZE on 'tpch_src'… done
+  [B] EXPLAIN tpch-q01… ok
+  [B] EXPLAIN tpch-q03… ok
+  [B] EXPLAIN tpch-q06… ok
+  [B] EXPLAIN tpch-q14… ok
+  [C] pred_cols: 33 predicate columns from workload YAML across 8 tables
+  [C] collecting stats region… ok  (row_count=5)
+  [C] collecting stats part… ok  (row_count=2,000)
+  [C] collecting stats nation… ok  (row_count=25)
+  [C] collecting stats supplier… ok  (row_count=100)
+  [C] collecting stats customer… ok  (row_count=1,500)
+  [C] collecting stats partsupp… ok  (row_count=8,000)
+  [C] collecting stats orders… ok  (row_count=15,000)
+  [C] collecting stats lineitem… ok  (row_count=60,000)
+  [D] Creating tables in schema 'tpch_tgt'… done
+  [D]   synthetic region                             5 rows… 1.19s
+  [D]   synthetic part                           2,000 rows… 0.93s
+  [D]   synthetic nation                            25 rows… 0.48s
+  [D]   synthetic supplier                         100 rows… 0.47s
+  [D]   synthetic customer                       1,500 rows… 0.54s
+  [D]   synthetic partsupp                       8,000 rows… 0.98s
+  [D]   synthetic orders                        15,000 rows… 0.83s
+  [D]   synthetic lineitem                      60,000 rows… 
+    WARN lineitem: stats-driven generator failed, using simple generator (TypeError)3.09s
+  [D] Updating statistics in 'tpch_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats region… ok  (row_count=5)
+  [C] collecting stats part… ok  (row_count=2,000)
+  [C] collecting stats nation… ok  (row_count=25)
+  [C] collecting stats supplier… ok  (row_count=100)
+  [C] collecting stats customer… ok  (row_count=1,500)
+  [C] collecting stats partsupp… ok  (row_count=8,000)
+  [C] collecting stats orders… ok  (row_count=15,000)
+  [C] collecting stats lineitem… ok  (row_count=60,000)
+  [C.5] stats fidelity: ndistinct_w2x=0.984  range_covered=1.000  null_match=1.000
+  [B] EXPLAIN tpch-q01… ok
+  [B] EXPLAIN tpch-q03… ok
+  [B] EXPLAIN tpch-q06… ok
+  [B] EXPLAIN tpch-q14… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpch  dialect=sqlserver  sf=0.01
+  source=tpch_src  target=tpch_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.984  range_covered=1.000  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpch-q01              jaccard=1.00  within_2x=1.00  nodes: 5→5
+  tpch-q03              jaccard=1.00  within_2x=1.00  nodes: 9→9
+  tpch-q06              jaccard=1.00  within_2x=1.00  nodes: 4→4
+  tpch-q14              jaccard=1.00  within_2x=1.00  nodes: 7→7
+
+  Overall: PASS ✓
+    A_load_source             14.92s
+    B_baseline_explain        6.50s
+    C_collect_stats           65.00s
+    D_build_target            13.51s
+    C5_target_stats_fidelity  116.58s
+    E_replay_explain          1.85s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-063039-identity-tpch-sf0.01-sqlserver.json
+

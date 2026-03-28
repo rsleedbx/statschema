@@ -1,0 +1,10 @@
+  [C] Auto-selected profile 'standard' for source dialect 'cockroachdb'
+  [A] Creating tables in schema 'tpch_src'… done
+  [A]   loading region                             5 rows… 0.03s
+  [A]   loading part                          20,000 rows… 2.64s
+  [A]   loading nation                            25 rows… 0.21s
+  [A]   loading supplier                       1,000 rows… 0.47s
+  [A]   loading customer                      15,000 rows… 1.35s
+  [A]   loading partsupp                      80,000 rows… 3.42s
+  [A]   loading orders                       150,000 rows… 14.68s
+  [A]   loading lineitem                     600,000 rows… 

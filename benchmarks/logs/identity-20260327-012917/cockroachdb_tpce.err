@@ -1,0 +1,21 @@
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2483, in <module>
+    main()
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2447, in main
+    result = run_identity_test(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 1947, in run_identity_test
+    conn = _connect(dialect, dsn)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 348, in _connect
+    return _pg_connect(dsn)
+           ^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 240, in _pg_connect
+    return psycopg2.connect(dsn)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+psycopg2.OperationalError: connection to server at "127.0.0.1", port 26257 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+

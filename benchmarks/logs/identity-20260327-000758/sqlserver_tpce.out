@@ -1,0 +1,26 @@
+  [C] Auto-selected profile 'standard' for source dialect 'sqlserver'
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 1.86s
+  [A]   loading sector                            12 rows… 0.69s
+  [A]   loading status_type                        5 rows… 0.62s
+  [A]   loading trade_type                         5 rows… 0.67s
+  [A]   loading taxrate                          320 rows… 0.58s
+  [A]   loading charge                            15 rows… 0.63s
+  [A]   loading commission_rate                  240 rows… 0.52s
+  [A]   loading zip_code                      14,741 rows… 2.18s
+  [A]   loading address                      133,333 rows… 22.67s
+  [A]   loading news_item                      2,000 rows… 1.79s
+  [A]   loading industry                         102 rows… 0.70s
+  [A]   loading broker                           100 rows… 0.75s
+  [A]   loading customer                     100,000 rows… 67.19s
+  [A]   loading company                          500 rows… 1.29s
+  [A]   loading customer_taxrate             300,000 rows… 11.50s
+  [A]   loading customer_account             500,000 rows… 52.78s
+  [A]   loading watch_list                   100,000 rows… 2.91s
+  [A]   loading company_competitor             1,500 rows… 0.75s
+  [A]   loading security                         685 rows… 0.88s
+  [A]   loading financial                     10,000 rows… 1.83s
+  [A]   loading news_xref                      6,000 rows… 1.65s
+  [A]   loading account_permission           750,000 rows… 121.07s
+  [A]   loading watch_item                 1,500,000 rows… 61.73s
+  [A]   loading daily_market               1,250,275 rows… 

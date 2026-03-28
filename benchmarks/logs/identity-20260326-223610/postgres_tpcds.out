@@ -1,0 +1,147 @@
+  [A] Creating tables in schema 'tpcds_src'… done
+  [A]   loading date_dim                      73,049 rows… 3.83s
+  [A]   loading time_dim                      86,400 rows… 1.28s
+  [A]   loading customer_demographics      1,920,800 rows… 20.13s
+  [A]   loading income_band                       20 rows… 0.04s
+  [A]   loading reason                            55 rows… 0.02s
+  [A]   loading ship_mode                         20 rows… 0.01s
+  [A]   loading item                             180 rows… 0.05s
+  [A]   loading warehouse                          5 rows… 0.01s
+  [A]   loading store                             12 rows… 0.01s
+  [A]   loading call_center                        6 rows… 0.01s
+  [A]   loading customer_address                 500 rows… 0.07s
+  [A]   loading catalog_page                     117 rows… 0.02s
+  [A]   loading web_site                          54 rows… 0.02s
+  [A]   loading web_page                          20 rows… 0.01s
+  [A]   loading household_demographics         7,200 rows… 0.13s
+  [A]   loading promotion                          3 rows… 0.01s
+  [A]   loading inventory                    117,450 rows… 1.12s
+  [A]   loading customer                       1,000 rows… 0.06s
+  [A]   loading store_sales                   28,804 rows… 1.89s
+  [A]   loading catalog_sales                 14,415 rows… 1.42s
+  [A]   loading web_sales                      7,193 rows… 0.78s
+  [A]   loading store_returns                  2,875 rows… 0.22s
+  [A]   loading catalog_returns                1,440 rows… 0.12s
+  [A]   loading web_returns                      717 rows… 0.04s
+  [A] Running ANALYZE on 'tpcds_src'… done
+  [A.5] Found 5 column pairs across 3 tables; creating statistics… done (5 created)
+  [A.5] Running ANALYZE for extended stats… done
+  [A.6] 1 dimension predicates extracted; resolving FK ranges… done (1 FK column overrides)
+  [B] EXPLAIN tpcds-q01… ok
+  [B] EXPLAIN tpcds-q02… ok
+  [B] EXPLAIN tpcds-q03… ok
+  [B] EXPLAIN tpcds-q04… ok
+  [C] collecting stats date_dim… ok  (row_count=73,049)
+  [C] collecting stats time_dim… ok  (row_count=86,400)
+  [C] collecting stats customer_demographics… ok  (row_count=1,920,800)
+  [C] collecting stats income_band… ok  (row_count=20)
+  [C] collecting stats reason… ok  (row_count=55)
+  [C] collecting stats ship_mode… ok  (row_count=20)
+  [C] collecting stats item… ok  (row_count=180)
+  [C] collecting stats warehouse… ok  (row_count=5)
+  [C] collecting stats store… ok  (row_count=12)
+  [C] collecting stats call_center… ok  (row_count=6)
+  [C] collecting stats customer_address… ok  (row_count=500)
+  [C] collecting stats catalog_page… ok  (row_count=117)
+  [C] collecting stats web_site… ok  (row_count=54)
+  [C] collecting stats web_page… ok  (row_count=20)
+  [C] collecting stats household_demographics… ok  (row_count=7,200)
+  [C] collecting stats promotion… ok  (row_count=3)
+  [C] collecting stats inventory… ok  (row_count=117,450)
+  [C] collecting stats customer… ok  (row_count=1,000)
+  [C] collecting stats store_sales… ok  (row_count=28,804)
+  [C] collecting stats catalog_sales… ok  (row_count=14,415)
+  [C] collecting stats web_sales… ok  (row_count=7,193)
+  [C] collecting stats store_returns… ok  (row_count=2,875)
+  [C] collecting stats catalog_returns… ok  (row_count=1,440)
+  [C] collecting stats web_returns… ok  (row_count=717)
+  [D] Creating tables in schema 'tpcds_tgt'… done
+  [D]   synthetic date_dim                      73,049 rows… 3.22s
+  [D]   synthetic time_dim                      86,400 rows… 1.44s
+  [D]   synthetic customer_demographics      1,920,800 rows… 27.51s
+  [D]   synthetic income_band                       20 rows… 0.04s
+  [D]   synthetic reason                            55 rows… 0.06s
+  [D]   synthetic ship_mode                         20 rows… 0.02s
+  [D]   synthetic item                             180 rows… 0.08s
+  [D]   synthetic warehouse                          5 rows… 0.02s
+  [D]   synthetic store                             12 rows… 0.02s
+  [D]   synthetic call_center                        6 rows… 0.01s
+  [D]   synthetic customer_address                 500 rows… 0.06s
+  [D]   synthetic catalog_page                     117 rows… 0.02s
+  [D]   synthetic web_site                          54 rows… 0.07s
+  [D]   synthetic web_page                          20 rows… 0.02s
+  [D]   synthetic household_demographics         7,200 rows… 0.03s
+  [D]   synthetic promotion                          3 rows… 0.01s
+  [D]   synthetic inventory                    117,450 rows… 0.54s
+  [D]   synthetic customer                       1,000 rows… 0.08s
+  [D]   synthetic store_sales                   28,804 rows… 1.05s
+  [D]   synthetic catalog_sales                 14,415 rows… 0.52s
+  [D]   synthetic web_sales                      7,193 rows… 0.25s
+  [D]   synthetic store_returns                  2,875 rows… 0.06s
+  [D]   synthetic catalog_returns                1,440 rows… 0.05s
+  [D]   synthetic web_returns                      717 rows… 0.02s
+  [D] Updating statistics in 'tpcds_tgt'… done
+  [D.5] Creating extended statistics in 'tpcds_tgt'… done (5 created)
+  [D.5] Analyzing target tables for extended stats… done
+  [D.5] Re-injecting single-column stats after ANALYZE… done
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats date_dim… ok  (row_count=73,049)
+  [C] collecting stats time_dim… ok  (row_count=86,400)
+  [C] collecting stats customer_demographics… ok  (row_count=1,920,800)
+  [C] collecting stats income_band… ok  (row_count=20)
+  [C] collecting stats reason… ok  (row_count=55)
+  [C] collecting stats ship_mode… ok  (row_count=20)
+  [C] collecting stats item… ok  (row_count=180)
+  [C] collecting stats warehouse… ok  (row_count=5)
+  [C] collecting stats store… ok  (row_count=12)
+  [C] collecting stats call_center… ok  (row_count=6)
+  [C] collecting stats customer_address… ok  (row_count=500)
+  [C] collecting stats catalog_page… ok  (row_count=117)
+  [C] collecting stats web_site… ok  (row_count=54)
+  [C] collecting stats web_page… ok  (row_count=20)
+  [C] collecting stats household_demographics… ok  (row_count=7,200)
+  [C] collecting stats promotion… ok  (row_count=3)
+  [C] collecting stats inventory… ok  (row_count=117,450)
+  [C] collecting stats customer… ok  (row_count=1,000)
+  [C] collecting stats store_sales… ok  (row_count=28,804)
+  [C] collecting stats catalog_sales… ok  (row_count=14,415)
+  [C] collecting stats web_sales… ok  (row_count=7,193)
+  [C] collecting stats store_returns… ok  (row_count=2,875)
+  [C] collecting stats catalog_returns… ok  (row_count=1,440)
+  [C] collecting stats web_returns… ok  (row_count=717)
+  [C.5] stats fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+  [B] EXPLAIN tpcds-q01… ok
+  [B] EXPLAIN tpcds-q02… ok
+  [B] EXPLAIN tpcds-q03… ok
+  [B] EXPLAIN tpcds-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcds  dialect=postgres  sf=0.01
+  source=tpcds_src  target=tpcds_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 0.900  (threshold ≥ 0.5)
+  within_10x    : 0.900
+
+  tpcds-q01             jaccard=1.00  within_2x=1.00  nodes: 6→6
+  tpcds-q02             jaccard=1.00  within_2x=1.00  nodes: 4→4
+  tpcds-q03             jaccard=1.00  within_2x=1.00  nodes: 7→7
+  tpcds-q04             jaccard=1.00  within_2x=0.60  nodes: 10→10
+
+  Overall: PASS ✓
+    A_load_source             32.93s
+    A5_source_extended_stats  0.47s
+    A6_fk_range_inference     0.01s
+    B_baseline_explain        0.01s
+    C_collect_stats           11.96s
+    D_build_target            36.83s
+    D5_target_extended_stats  0.51s
+    C5_target_stats_fidelity  9.90s
+    E_replay_explain          0.02s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-035313-identity-tpcds-sf0.01-postgres.json
+

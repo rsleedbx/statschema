@@ -76,6 +76,10 @@ def _detect_paramstyle(conn: Any) -> str:
 
 
 def _quote_id(name: str, dialect: str) -> str:
+    """Quote a SQL identifier, handling schema-qualified names (schema.table)."""
+    if "." in name:
+        schema, ident = name.split(".", 1)
+        return f"{_quote_id(schema, dialect)}.{_quote_id(ident, dialect)}"
     if dialect == "sqlserver":
         return f"[{name}]"
     if dialect in ("mysql", "mariadb", "databricks"):

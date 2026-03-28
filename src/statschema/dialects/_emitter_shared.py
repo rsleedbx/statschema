@@ -47,7 +47,7 @@ def build_col_type(
     key = col.type.lower().strip()
 
     # ── string / character types ──────────────────────────────────────────
-    if key == "string":
+    if key in ("string", "varchar"):
         if col.length is not None:
             if dialect == "mysql":
                 return f"VARCHAR({col.length})"
@@ -59,8 +59,15 @@ def build_col_type(
                 return f"VARCHAR2({col.length})"
             if dialect == "db2":
                 return f"VARCHAR({col.length})"
-            return defaults.get(key, "STRING")
-        return defaults.get(key, "TEXT")
+            return defaults.get(key, defaults.get("string", "STRING"))
+        return defaults.get(key, defaults.get("string", "TEXT"))
+
+    if key == "char":
+        if col.length is not None:
+            if dialect == "sqlserver":
+                return f"NCHAR({col.length})"
+            return f"CHAR({col.length})"
+        return defaults.get(key, "CHAR(1)")
 
     # ── binary / blob types ───────────────────────────────────────────────
     if key == "binary":

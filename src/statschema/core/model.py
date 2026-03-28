@@ -725,3 +725,34 @@ def _expand_one(table: "CanonicalTableSchema") -> list["CanonicalTableSchema"]:
         )
         for new_name in names
     ]
+
+
+def build_fk_max_map(
+    table: "CanonicalTableSchema",
+    parent_row_counts: dict[str, int] | None,
+) -> dict[str, int]:
+    """Return ``{col_name: parent_row_count}`` for every FK column in *table*.
+
+    Walks ``fk_constraints`` first (preferred — multi-column FKs); falls back to
+    ``column.references`` tuples for schemas that omit table-level FK blocks.
+    Used by all three generation backends to constrain child keys to valid ranges.
+    """
+    result: dict[str, int] = {}
+    if not parent_row_counts:
+        return result
+
+    if table.fk_constraints:
+        for fk in table.fk_constraints:
+            n = parent_row_counts.get(fk.parent_table)
+            if n:
+                for col_name in fk.columns:
+                    result[col_name] = n
+
+    for col in table.columns:
+        if col.references and col.name not in result:
+            parent_table, _ = col.references
+            n = parent_row_counts.get(parent_table)
+            if n:
+                result[col.name] = n
+
+    return result

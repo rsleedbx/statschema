@@ -1,0 +1,80 @@
+  [C] Auto-selected profile 'standard' for source dialect 'mysql'
+  [A] Creating tables in schema 'tpcc_src'… done
+  [A]   loading item                         100,000 rows… 3.71s
+  [A]   loading warehouse                          1 rows… 0.01s
+  [A]   loading district                          10 rows… 0.01s
+  [A]   loading stock                        100,000 rows… 31.58s
+  [A]   loading customer                      30,000 rows… 4.51s
+  [A]   loading history                       30,000 rows… 2.34s
+  [A]   loading orders                        30,000 rows… 1.83s
+  [A]   loading new_order                      9,000 rows… 0.26s
+  [A]   loading order_line                   300,000 rows… 11.42s
+  [A] Running ANALYZE on 'tpcc_src'… done
+  [B] EXPLAIN tpcc-q01… ok
+  [B] EXPLAIN tpcc-q02… ok
+  [B] EXPLAIN tpcc-q03… ok
+  [B] EXPLAIN tpcc-q04… ok
+  [C] pred_cols: 14 predicate columns from workload YAML across 9 tables
+  [C] collecting stats item… ok  (row_count=100,000)
+  [C] collecting stats warehouse… ok  (row_count=1)
+  [C] collecting stats district… ok  (row_count=10)
+  [C] collecting stats stock… ok  (row_count=100,000)
+  [C] collecting stats customer… ok  (row_count=30,000)
+  [C] collecting stats history… ok  (row_count=30,000)
+  [C] collecting stats orders… ok  (row_count=30,000)
+  [C] collecting stats new_order… ok  (row_count=9,000)
+  [C] collecting stats order_line… ok  (row_count=300,000)
+  [D] Creating tables in schema 'tpcc_tgt'… done
+  [D]   synthetic item                         100,000 rows… 4.92s
+  [D]   synthetic warehouse                          1 rows… 0.04s
+  [D]   synthetic district                          10 rows… 0.05s
+  [D]   synthetic stock                        100,000 rows… 17.99s
+  [D]   synthetic customer                      30,000 rows… 2.97s
+  [D]   synthetic history                       30,000 rows… 0.99s
+  [D]   synthetic orders                        30,000 rows… 0.89s
+  [D]   synthetic new_order                      9,000 rows… 0.09s
+  [D]   synthetic order_line                   300,000 rows… 10.62s
+  [D] Updating statistics in 'tpcc_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats item… ok  (row_count=100,000)
+  [C] collecting stats warehouse… ok  (row_count=1)
+  [C] collecting stats district… ok  (row_count=10)
+  [C] collecting stats stock… ok  (row_count=100,000)
+  [C] collecting stats customer… ok  (row_count=30,000)
+  [C] collecting stats history… ok  (row_count=30,000)
+  [C] collecting stats orders… ok  (row_count=30,000)
+  [C] collecting stats new_order… ok  (row_count=9,000)
+  [C] collecting stats order_line… ok  (row_count=300,000)
+  [C.5] stats fidelity: ndistinct_w2x=0.946  range_covered=0.965  null_match=1.000
+  [B] EXPLAIN tpcc-q01… ok
+  [B] EXPLAIN tpcc-q02… ok
+  [B] EXPLAIN tpcc-q03… ok
+  [B] EXPLAIN tpcc-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcc  dialect=mysql  sf=1.0
+  source=tpcc_src  target=tpcc_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.946  range_covered=0.965  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcc-q01              jaccard=1.00  within_2x=1.00  nodes: 3→3
+  tpcc-q02              jaccard=1.00  within_2x=1.00  nodes: 5→5
+  tpcc-q03              jaccard=1.00  within_2x=1.00  nodes: 3→3
+  tpcc-q04              jaccard=1.00  within_2x=1.00  nodes: 6→6
+
+  Overall: PASS ✓
+    A_load_source             56.44s
+    B_baseline_explain        0.06s
+    C_collect_stats           7.26s
+    D_build_target            39.14s
+    C5_target_stats_fidelity  257.97s
+    E_replay_explain          0.20s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-063550-identity-tpcc-sf1.0-mysql.json
+

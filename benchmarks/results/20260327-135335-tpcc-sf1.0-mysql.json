@@ -1,0 +1,67 @@
+{
+  "benchmark_id": "20260327-135335-tpcc-sf1.0-mysql",
+  "timestamp": "2026-03-27T13:53:35.923864+00:00",
+  "host": "L9P0RQPHY7",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.11.13",
+  "git_sha": "4d101b1",
+  "schema": "tpcc",
+  "scale_factor": 1.0,
+  "append": false,
+  "dialect": "mysql",
+  "driver": "pymysql",
+  "strategy": "bulk_copy",
+  "ddl_s": 0.217,
+  "tables": {
+    "item": {
+      "rows": 100000,
+      "load_s": 1.6313,
+      "row_offset": 0
+    },
+    "warehouse": {
+      "rows": 1,
+      "load_s": 0.0049,
+      "row_offset": 0
+    },
+    "district": {
+      "rows": 10,
+      "load_s": 0.0046,
+      "row_offset": 0
+    },
+    "stock": {
+      "rows": 100000,
+      "load_s": 6.2575,
+      "row_offset": 0
+    },
+    "customer": {
+      "rows": 30000,
+      "load_s": 1.3351,
+      "row_offset": 0
+    },
+    "history": {
+      "rows": 30000,
+      "load_s": 0.4138,
+      "row_offset": 0
+    },
+    "orders": {
+      "rows": 30000,
+      "load_s": 0.3016,
+      "row_offset": 0
+    },
+    "new_order": {
+      "rows": 9000,
+      "load_s": 0.0527,
+      "row_offset": 0
+    },
+    "order_line": {
+      "rows": 300000,
+      "load_s": 4.1631,
+      "row_offset": 0
+    }
+  },
+  "totals": {
+    "rows": 599011,
+    "load_s": 14.1646,
+    "rows_per_s": 42289.0
+  }
+}

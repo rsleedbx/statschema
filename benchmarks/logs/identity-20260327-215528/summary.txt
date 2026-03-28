@@ -1,0 +1,18 @@
+# 2026-03-27T22:01:16.207493+00:00
+
+PASS  cockroachdb×tpcb(sf=1)                      Overall: PASS ✓
+FAIL  cockroachdb×tpcc(sf=1)                      exit=1
+PASS  cockroachdb×tpcdi(sf=5)                     Overall: PASS ✓
+FAIL  cockroachdb×tpcds(sf=0.01)                  exit=1
+PASS  cockroachdb×tpce(sf=0.01)                   Overall: PASS ✓
+PASS  cockroachdb×tpch(sf=0.1)                    Overall: PASS ✓
+PASS  mysql×tpcb(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcc(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcdi(sf=1)                           Overall: PASS ✓
+PASS  mysql×tpcds(sf=0.01)                        Overall: PASS ✓
+PASS  mysql×tpce(sf=0.01)                         Overall: PASS ✓
+PASS  mysql×tpch(sf=0.01)                         Overall: PASS ✓
+
+Passed : 10 / 12
+Failed : 2 / 12
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-215528

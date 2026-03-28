@@ -1,0 +1,8 @@
+# 2026-03-27T23:39:20.242763+00:00
+
+PASS  mysql×tpcb(sf=1)                            Overall: PASS ✓
+PASS  postgres×tpcb(sf=1)                         Overall: PASS ✓
+
+Passed : 2 / 2
+Failed : 0 / 2
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-233914

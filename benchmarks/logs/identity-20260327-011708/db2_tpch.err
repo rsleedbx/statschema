@@ -1,0 +1,17 @@
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/5 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/2000 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/25 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/100 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/1500 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/8000 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/15000 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/60000 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/5 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/2000 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/25 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/100 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/1500 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/8000 rows; falling back to MULTI_ROW inserts
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/15000 rows; falling back to MULTI_ROW inserts
+WARNING __main__ build_rows_from_canonical failed for lineitem (Invalid comparison between dtype=str and ndarray); falling back to simple generate_rows — stats-driven generation was NOT used for this table
+WARNING src.statschema.dialects.db2.loader bulk_load_db2: ADMIN_CMD loaded 0/60000 rows; falling back to MULTI_ROW inserts

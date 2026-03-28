@@ -1,0 +1,14 @@
+# Fri Mar 27 02:06:22 CDT 2026
+# engines=oracle,db2,sqlserver
+# schemas=tpcdi,tpcds,tpce
+# skip_load=0
+
+PASS  oracle×tpcdi(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcds(sf=0.01)                        Overall: PASS ✓
+FAIL  oracle×tpce(sf=0.1)                        exit=1
+PASS  db2×tpcdi(sf=1)                              Overall: PASS ✓
+FAIL  db2×tpcds(sf=0.01)                         exit=1
+FAIL  db2×tpce(sf=0.01)                          exit=1
+PASS  sqlserver×tpcdi(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcds(sf=0.01)                     Overall: PASS ✓
+PASS  sqlserver×tpce(sf=0.1)                       Overall: PASS ✓

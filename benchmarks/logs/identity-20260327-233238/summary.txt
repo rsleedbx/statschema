@@ -1,0 +1,7 @@
+# 2026-03-27T23:33:10.841348+00:00
+
+PASS  oracle×tpcb(sf=1)                           Overall: PASS ✓
+
+Passed : 1 / 1
+Failed : 0 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-233238

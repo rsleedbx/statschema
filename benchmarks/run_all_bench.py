@@ -21,14 +21,9 @@ _REPO_ROOT = Path(__file__).parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from benchmarks.bench_config import BENCH_TPCC_SF as TPCC_SF, BENCH_TPCH_SF as TPCH_SF
 from benchmarks.run_bench import run_benchmark, connect, RESULTS_DIR
 from src.statschema.data_loader import LoadStrategy
-
-# ---------------------------------------------------------------------------
-# Scale factors
-# ---------------------------------------------------------------------------
-TPCC_SF = 1.0     # ~599 K rows total
-TPCH_SF = 0.1     # ~  87 K rows total  (keeps QEMU dbs under ~30 s)
 
 # ---------------------------------------------------------------------------
 # Database matrix
@@ -42,6 +37,18 @@ class DbTarget:
     env: dict[str, str]  # env vars to set before connecting
     db_name: str = "bench"  # logical name for display
     skip: bool = False
+
+def _crdb(label: str, port: int) -> DbTarget:
+    return DbTarget(
+        label=label, dialect="cockroachdb",
+        strategy=LoadStrategy.BULK_COPY,
+        env={
+            "BENCH_PG_DSN": (
+                f"host=127.0.0.1 port={port} dbname=defaultdb "
+                "user=root sslmode=disable"
+            ),
+        },
+    )
 
 def _pg(label: str, port: int) -> DbTarget:
     return DbTarget(
@@ -82,21 +89,24 @@ def _mariadb(label: str, port: int) -> DbTarget:
     )
 
 TARGETS: list[DbTarget] = [
-    _pg("PostgreSQL 14",   5414),
-    _pg("PostgreSQL 16",   5416),
-    _pg("PostgreSQL 18",   5418),
-    _mysql("MySQL 5.7",    3357),
-    _mysql("MySQL 8.0",    3384),
-    _mariadb("MariaDB 10.11", 3310),
-    _mariadb("MariaDB 11.4",  3311),
+    _pg("PostgreSQL 14",       5414),
+    _pg("PostgreSQL 16",       5416),
+    _pg("PostgreSQL 18",       5418),
+    _crdb("CockroachDB",       26257),
+    _mysql("MySQL 5.7",        3357),
+    _mysql("MySQL 8.0",        3384),
+    _mariadb("MariaDB 10.11",  3310),
+    _mariadb("MariaDB 11.4",   3311),
     DbTarget(
         label="SQL Server 2022", dialect="sqlserver",
         strategy=LoadStrategy.MULTI_ROW,
         env={
-            # pymssql parses SERVER=host,port — split handled in connect()
-            "BENCH_SQLSERVER_DSN": (
-                "SERVER=127.0.0.1,14330;DATABASE=master;"
-                "UID=sa;PWD=Iedebaxoodoogee9choht7je1quohmuR"
+            # Password resolved at runtime via BENCH_SQLSERVER_DSN env var
+            # (set by run_bench.sh from the Lima VM log).  Falls back to a
+            # placeholder so probe() fails gracefully if not set.
+            "BENCH_SQLSERVER_DSN": os.environ.get(
+                "BENCH_SQLSERVER_DSN",
+                "SERVER=127.0.0.1,14330;DATABASE=master;UID=sa;PWD=",
             ),
         },
     ),

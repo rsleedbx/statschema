@@ -1,0 +1,83 @@
+  [A] Creating tables in schema 'tpch_src'… done
+  [A]   loading region                             5 rows… 0.04s
+  [A]   loading part                          20,000 rows… 1.28s
+  [A]   loading nation                            25 rows… 0.01s
+  [A]   loading supplier                       1,000 rows… 0.04s
+  [A]   loading customer                      15,000 rows… 0.57s
+  [A]   loading partsupp                      80,000 rows… 1.47s
+  [A]   loading orders                       150,000 rows… 5.50s
+  [A]   loading lineitem                     600,000 rows… 102.86s
+  [A] Running ANALYZE on 'tpch_src'… done
+  [A.5] Found 6 column pairs across 1 tables; creating statistics… done (6 created)
+  [A.5] Running ANALYZE for extended stats… done
+  [A.6] 2 dimension predicates extracted; resolving FK ranges… done (0 FK column overrides)
+  [B] EXPLAIN tpch-q01… ok
+  [B] EXPLAIN tpch-q03… ok
+  [B] EXPLAIN tpch-q06… ok
+  [B] EXPLAIN tpch-q14… ok
+  [C] collecting stats region… ok  (row_count=5)
+  [C] collecting stats part… ok  (row_count=20,000)
+  [C] collecting stats nation… ok  (row_count=25)
+  [C] collecting stats supplier… ok  (row_count=1,000)
+  [C] collecting stats customer… ok  (row_count=15,000)
+  [C] collecting stats partsupp… ok  (row_count=80,000)
+  [C] collecting stats orders… ok  (row_count=150,000)
+  [C] collecting stats lineitem… ok  (row_count=600,000)
+  [D] Creating tables in schema 'tpch_tgt'… done
+  [D]   synthetic region                             5 rows… 0.04s
+  [D]   synthetic part                          20,000 rows… 5.03s
+  [D]   synthetic nation                            25 rows… 0.01s
+  [D]   synthetic supplier                       1,000 rows… 0.10s
+  [D]   synthetic customer                      15,000 rows… 2.10s
+  [D]   synthetic partsupp                      80,000 rows… 7.25s
+  [D]   synthetic orders                       150,000 rows… 29.22s
+  [D]   synthetic lineitem                     600,000 rows… 75.57s
+  [D] Updating statistics in 'tpch_tgt'… done
+  [D.5] Creating extended statistics in 'tpch_tgt'… done (6 created)
+  [D.5] Analyzing target tables for extended stats… done
+  [D.5] Re-injecting single-column stats after ANALYZE… done
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats region… ok  (row_count=5)
+  [C] collecting stats part… ok  (row_count=20,000)
+  [C] collecting stats nation… ok  (row_count=25)
+  [C] collecting stats supplier… ok  (row_count=1,000)
+  [C] collecting stats customer… ok  (row_count=15,000)
+  [C] collecting stats partsupp… ok  (row_count=80,000)
+  [C] collecting stats orders… ok  (row_count=150,000)
+  [C] collecting stats lineitem… ok  (row_count=600,000)
+  [C.5] stats fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+  [B] EXPLAIN tpch-q01… ok
+  [B] EXPLAIN tpch-q03… ok
+  [B] EXPLAIN tpch-q06… ok
+  [B] EXPLAIN tpch-q14… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpch  dialect=postgres  sf=0.1
+  source=tpch_src  target=tpch_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 0.929  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpch-q01              jaccard=1.00  within_2x=1.00  nodes: 5→5
+  tpch-q03              jaccard=1.00  within_2x=1.00  nodes: 11→11
+  tpch-q06              jaccard=1.00  within_2x=1.00  nodes: 4→4
+  tpch-q14              jaccard=1.00  within_2x=0.71  nodes: 7→7
+
+  Overall: PASS ✓
+    A_load_source             113.94s
+    A5_source_extended_stats  1.60s
+    A6_fk_range_inference     0.03s
+    B_baseline_explain        0.37s
+    C_collect_stats           17.66s
+    D_build_target            126.20s
+    D5_target_extended_stats  1.76s
+    C5_target_stats_fidelity  20.82s
+    E_replay_explain          0.45s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-034451-identity-tpch-sf0.1-postgres.json
+

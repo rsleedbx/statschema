@@ -1,0 +1,9 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'db2'
+  [A] Creating tables in schema 'tpcdi_src'… done
+  [A]   loading StatusType                         5 rows… 0.04s
+  [A]   loading TaxRate                          320 rows… 0.12s
+  [A]   loading TradeType                          5 rows… 0.03s
+  [A]   loading Industry                         102 rows… 0.06s
+  [A]   loading DimDate                        3,652 rows… 9.55s
+  [A]   loading DimTime                       86,400 rows… 48.20s
+  [A]   loading DimCompany                       400 rows… 

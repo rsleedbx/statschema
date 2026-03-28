@@ -1,0 +1,10 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'oracle'
+  [A] Creating tables in schema 'tpcdi_src'… done
+  [A]   loading StatusType                         5 rows… 0.36s
+  [A]   loading TaxRate                          320 rows… 0.10s
+  [A]   loading TradeType                          5 rows… 0.09s
+  [A]   loading Industry                         102 rows… 0.10s
+  [A]   loading DimDate                        3,652 rows… 0.83s
+  [A]   loading DimTime                       86,400 rows… 9.39s
+  [A]   loading DimCompany                       400 rows… 0.24s
+  [A]   loading DimBroker                        100 rows… 

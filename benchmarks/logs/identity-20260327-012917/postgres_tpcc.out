@@ -1,0 +1,87 @@
+  [A] Creating tables in schema 'tpcc_src'… done
+  [A]   loading item                         100,000 rows… 3.33s
+  [A]   loading warehouse                          1 rows… 0.02s
+  [A]   loading district                          10 rows… 0.02s
+  [A]   loading stock                        100,000 rows… 28.37s
+  [A]   loading customer                      30,000 rows… 5.43s
+  [A]   loading history                       30,000 rows… 1.77s
+  [A]   loading orders                        30,000 rows… 1.03s
+  [A]   loading new_order                      9,000 rows… 0.06s
+  [A]   loading order_line                   300,000 rows… 13.36s
+  [A] Running ANALYZE on 'tpcc_src'… done
+  [A.5] Found 15 column pairs across 4 tables; creating statistics… done (15 created)
+  [A.5] Running ANALYZE for extended stats… done
+  [A.6] No literal predicates on dimension columns found — skipping FK range inference
+  [B] EXPLAIN tpcc-q01… ok
+  [B] EXPLAIN tpcc-q02… ok
+  [B] EXPLAIN tpcc-q03… ok
+  [B] EXPLAIN tpcc-q04… ok
+  [C] collecting stats item… ok  (row_count=100,000)
+  [C] collecting stats warehouse… ok  (row_count=1)
+  [C] collecting stats district… ok  (row_count=10)
+  [C] collecting stats stock… ok  (row_count=100,000)
+  [C] collecting stats customer… ok  (row_count=30,000)
+  [C] collecting stats history… ok  (row_count=30,000)
+  [C] collecting stats orders… ok  (row_count=30,000)
+  [C] collecting stats new_order… ok  (row_count=9,000)
+  [C] collecting stats order_line… ok  (row_count=300,000)
+  [D] Creating tables in schema 'tpcc_tgt'… done
+  [D]   synthetic item                         100,000 rows… 5.38s
+  [D]   synthetic warehouse                          1 rows… 0.02s
+  [D]   synthetic district                          10 rows… 0.01s
+  [D]   synthetic stock                        100,000 rows… 19.38s
+  [D]   synthetic customer                      30,000 rows… 3.96s
+  [D]   synthetic history                       30,000 rows… 0.89s
+  [D]   synthetic orders                        30,000 rows… 0.90s
+  [D]   synthetic new_order                      9,000 rows… 0.09s
+  [D]   synthetic order_line                   300,000 rows… 11.19s
+  [D] Updating statistics in 'tpcc_tgt'… done
+  [D.5] Creating extended statistics in 'tpcc_tgt'… done (15 created)
+  [D.5] Analyzing target tables for extended stats… done
+  [D.5] Re-injecting single-column stats after ANALYZE… done
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats item… ok  (row_count=100,000)
+  [C] collecting stats warehouse… ok  (row_count=1)
+  [C] collecting stats district… ok  (row_count=10)
+  [C] collecting stats stock… ok  (row_count=100,000)
+  [C] collecting stats customer… ok  (row_count=30,000)
+  [C] collecting stats history… ok  (row_count=30,000)
+  [C] collecting stats orders… ok  (row_count=30,000)
+  [C] collecting stats new_order… ok  (row_count=9,000)
+  [C] collecting stats order_line… ok  (row_count=300,000)
+  [C.5] stats fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+  [B] EXPLAIN tpcc-q01… ok
+  [B] EXPLAIN tpcc-q02… ok
+  [B] EXPLAIN tpcc-q03… ok
+  [B] EXPLAIN tpcc-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcc  dialect=postgres  sf=1.0
+  source=tpcc_src  target=tpcc_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 0.977  (threshold ≥ 0.5)
+  within_10x    : 0.977
+
+  tpcc-q01              jaccard=1.00  within_2x=1.00  nodes: 3→3
+  tpcc-q02              jaccard=1.00  within_2x=1.00  nodes: 6→6
+  tpcc-q03              jaccard=1.00  within_2x=1.00  nodes: 5→5
+  tpcc-q04              jaccard=1.00  within_2x=0.91  nodes: 11→11
+
+  Overall: PASS ✓
+    A_load_source             54.64s
+    A5_source_extended_stats  0.77s
+    A6_fk_range_inference     0.01s
+    B_baseline_explain        0.07s
+    C_collect_stats           6.85s
+    D_build_target            43.41s
+    D5_target_extended_stats  1.52s
+    C5_target_stats_fidelity  26.31s
+    E_replay_explain          1.35s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-063203-identity-tpcc-sf1.0-postgres.json
+

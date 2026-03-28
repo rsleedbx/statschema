@@ -21,7 +21,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase test-live-identity lakebase-up lakebase-down lakebase-destroy lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase test-live-identity test-live-distribution test-live-type-coverage lakebase-up lakebase-down lakebase-destroy test-obj1 test-obj2 test-obj3 test-obj4 test-obj5 test-obj6 test-obj7 test-obj8 test-obj9 test-obj10 lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -277,6 +277,55 @@ test-live-synth:
 # Usage: make test-file FILE=tests/test_ddl_roundtrip.py
 test-file:
 	$(PYTEST_TEST) $(FILE) -v
+
+## Run live distribution fidelity tests (non-Spark; requires live DBs)
+test-live-distribution:
+	$(PYTEST_LIVE) tests/test_live_distribution.py -v
+
+## Run live type coverage tests across all engines
+test-live-type-coverage:
+	$(PYTEST_LIVE) tests/test_live_type_coverage.py -v
+
+# ── Objective-aligned test targets ────────────────────────────────────────────
+## Obj 1: Schema correctness — DDL round-trips
+test-obj1:
+	$(PYTEST_TEST) tests/ -v -m obj1 -k "not live"
+
+## Obj 2: Source type coverage — every SQL type round-trips without loss
+test-obj2:
+	$(PYTEST_LIVE) tests/test_live_type_coverage.py -v
+
+## Obj 3: Row count correctness — loaded rows match expected counts
+test-obj3:
+	$(PYTEST_TEST) tests/ -v -m obj3
+
+## Obj 4: Distribution fidelity — null fractions, ranges, cardinality
+test-obj4:
+	$(PYTEST_LIVE) tests/test_live_distribution.py tests/test_live_synth.py -v
+
+## Obj 5: Stats injection fidelity — injected stats match source
+test-obj5:
+	$(PYTEST_LIVE) tests/test_live_stats_transpiler.py tests/test_live_stats_minmax.py -v
+
+## Obj 6: Semantic correctness — generated values are semantically valid
+test-obj6:
+	$(PYTEST_TEST) tests/test_semantic_hints.py tests/test_live_mautic.py -v
+
+## Obj 7: Plan fidelity — EXPLAIN plans match (identity test)
+test-obj7:
+	./benchmarks/run_identity.sh --schemas tpch --engines postgres --skip-setup
+
+## Obj 8: Cross-engine portability — any source → Lakebase target
+test-obj8:
+	./benchmarks/run_lakebase_target.sh --schemas tpch --engines postgres --skip-setup
+
+## Obj 9: Benchmark compatibility — synthetic data drives pgbench/TPC-C/TPC-H
+test-obj9:
+	./benchmarks/run_bench.sh --skip-setup
+
+## Obj 10: Step-level testability — individual pipeline phases
+test-obj10:
+	$(PYTEST_TEST) tests/ -v -m obj10
 
 lint:
 	$(VENV_TEST)/bin/ruff check src/ tests/ || true

@@ -1,0 +1,6 @@
+PASS  db2×tpcb(sf=1)                               Overall: PASS ✓
+PASS  db2×tpcc(sf=1)                               Overall: PASS ✓
+PASS  db2×tpch(sf=0.01)                            Overall: PASS ✓
+FAIL  db2×tpcdi(sf=1)                            exit=1
+FAIL  db2×tpcds(sf=0.01)                         exit=1
+FAIL  db2×tpce(sf=0.01)                          exit=1

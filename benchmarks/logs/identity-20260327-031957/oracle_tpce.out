@@ -1,0 +1,187 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'oracle'
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 0.83s
+  [A]   loading sector                            12 rows… 0.15s
+  [A]   loading status_type                        5 rows… 0.18s
+  [A]   loading trade_type                         5 rows… 0.15s
+  [A]   loading taxrate                          320 rows… 0.15s
+  [A]   loading charge                            15 rows… 0.15s
+  [A]   loading commission_rate                  240 rows… 0.17s
+  [A]   loading zip_code                      14,741 rows… 0.38s
+  [A]   loading address                      133,333 rows… 5.48s
+  [A]   loading news_item                      2,000 rows… 0.33s
+  [A]   loading industry                         102 rows… 0.15s
+  [A]   loading broker                           100 rows… 0.14s
+  [A]   loading customer                     100,000 rows… 8.89s
+  [A]   loading company                          500 rows… 0.19s
+  [A]   loading customer_taxrate             300,000 rows… 2.11s
+  [A]   loading customer_account             500,000 rows… 8.84s
+  [A]   loading watch_list                   100,000 rows… 0.79s
+  [A]   loading company_competitor             1,500 rows… 0.14s
+  [A]   loading security                         685 rows… 0.25s
+  [A]   loading financial                     10,000 rows… 0.49s
+  [A]   loading news_xref                      6,000 rows… 0.19s
+  [A]   loading account_permission           750,000 rows… 15.99s
+  [A]   loading watch_item                 1,500,000 rows… 10.87s
+  [A]   loading daily_market               1,250,275 rows… 15.78s
+  [A]   loading last_trade                       685 rows… 0.12s
+  [A]   loading trade                        333,876 rows… 12.86s
+  [A]   loading holding_summary              380,000 rows… 2.81s
+  [A]   loading trade_history              1,000,000 rows… 8.20s
+  [A]   loading trade_request                 10,000 rows… 0.25s
+  [A]   loading holding                      500,000 rows… 5.92s
+  [A]   loading cash_transaction             333,876 rows… 5.98s
+  [A]   loading holding_history            1,000,000 rows… 6.63s
+  [A] Running ANALYZE on 'tpce_src'… done
+  [B] EXPLAIN tpce-q01… ok
+  [B] EXPLAIN tpce-q02… ok
+  [B] EXPLAIN tpce-q03… ok
+  [B] EXPLAIN tpce-q04… ok
+  [C] pred_cols: 15 predicate columns from workload YAML across 32 tables
+  [C] collecting stats exchange… ok  (row_count=4)
+  [C] collecting stats sector… ok  (row_count=12)
+  [C] collecting stats status_type… ok  (row_count=5)
+  [C] collecting stats trade_type… ok  (row_count=5)
+  [C] collecting stats taxrate… ok  (row_count=320)
+  [C] collecting stats charge… ok  (row_count=15)
+  [C] collecting stats commission_rate… ok  (row_count=240)
+  [C] collecting stats zip_code… ok  (row_count=14,741)
+  [C] collecting stats address… ok  (row_count=133,333)
+  [C] collecting stats news_item… ok  (row_count=2,000)
+  [C] collecting stats industry… ok  (row_count=102)
+  [C] collecting stats broker… ok  (row_count=100)
+  [C] collecting stats customer… ok  (row_count=100,000)
+  [C] collecting stats company… ok  (row_count=500)
+  [C] collecting stats customer_taxrate… ok  (row_count=300,000)
+  [C] collecting stats customer_account… ok  (row_count=500,000)
+  [C] collecting stats watch_list… ok  (row_count=100,000)
+  [C] collecting stats company_competitor… ok  (row_count=1,500)
+  [C] collecting stats security… ok  (row_count=685)
+  [C] collecting stats financial… ok  (row_count=10,000)
+  [C] collecting stats news_xref… ok  (row_count=6,000)
+  [C] collecting stats account_permission… ok  (row_count=750,000)
+  [C] collecting stats watch_item… ok  (row_count=1,500,000)
+  [C] collecting stats daily_market… ok  (row_count=1,250,275)
+  [C] collecting stats last_trade… ok  (row_count=685)
+  [C] collecting stats trade… ok  (row_count=333,876)
+  [C] collecting stats holding_summary… ok  (row_count=380,000)
+  [C] collecting stats trade_history… ok  (row_count=1,000,000)
+  [C] collecting stats trade_request… ok  (row_count=10,000)
+  [C] collecting stats holding… ok  (row_count=500,000)
+  [C] collecting stats cash_transaction… ok  (row_count=333,876)
+  [C] collecting stats holding_history… ok  (row_count=1,000,000)
+  [D] Creating tables in schema 'tpce_tgt'… done
+  [D]   synthetic exchange                           4 rows… 0.14s
+  [D]   synthetic sector                            12 rows… 0.10s
+  [D]   synthetic status_type                        5 rows… 0.10s
+  [D]   synthetic trade_type                         5 rows… 0.10s
+  [D]   synthetic taxrate                          320 rows… 0.10s
+  [D]   synthetic charge                            15 rows… 0.09s
+  [D]   synthetic commission_rate                  240 rows… 0.10s
+  [D]   synthetic zip_code                      14,741 rows… 0.23s
+  [D]   synthetic address                      133,333 rows… 3.64s
+  [D]   synthetic news_item                      2,000 rows… 0.20s
+  [D]   synthetic industry                         102 rows… 0.11s
+  [D]   synthetic broker                           100 rows… 0.15s
+  [D]   synthetic customer                     100,000 rows… 11.41s
+  [D]   synthetic company                          500 rows… 0.17s
+  [D]   synthetic customer_taxrate             300,000 rows… 3.50s
+  [D]   synthetic customer_account             500,000 rows… 8.09s
+  [D]   synthetic watch_list                   100,000 rows… 0.70s
+  [D]   synthetic company_competitor             1,500 rows… 0.17s
+  [D]   synthetic security                         685 rows… 0.21s
+  [D]   synthetic financial                     10,000 rows… 0.45s
+  [D]   synthetic news_xref                      6,000 rows… 0.16s
+  [D]   synthetic account_permission           750,000 rows… 18.01s
+  [D]   synthetic watch_item                 1,500,000 rows… 16.40s
+  [D]   synthetic daily_market               1,250,275 rows… 19.31s
+  [D]   synthetic last_trade                       685 rows… 0.14s
+  [D]   synthetic trade                        333,876 rows… 10.91s
+  [D]   synthetic holding_summary              380,000 rows… 3.76s
+  [D]   synthetic trade_history              1,000,000 rows… 7.52s
+  [D]   synthetic trade_request                 10,000 rows… 0.26s
+  [D]   synthetic holding                      500,000 rows… 7.16s
+  [D]   synthetic cash_transaction             333,876 rows… 4.40s
+  [D]   synthetic holding_history            1,000,000 rows… 4.62s
+  [D] Updating statistics in 'tpce_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats exchange… ok  (row_count=4)
+  [C] collecting stats sector… ok  (row_count=12)
+  [C] collecting stats status_type… ok  (row_count=5)
+  [C] collecting stats trade_type… ok  (row_count=5)
+  [C] collecting stats taxrate… ok  (row_count=320)
+  [C] collecting stats charge… ok  (row_count=15)
+  [C] collecting stats commission_rate… ok  (row_count=240)
+  [C] collecting stats zip_code… ok  (row_count=14,741)
+  [C] collecting stats address… ok  (row_count=133,333)
+  [C] collecting stats news_item… ok  (row_count=2,000)
+  [C] collecting stats industry… ok  (row_count=102)
+  [C] collecting stats broker… ok  (row_count=100)
+  [C] collecting stats customer… ok  (row_count=100,000)
+  [C] collecting stats company… ok  (row_count=500)
+  [C] collecting stats customer_taxrate… ok  (row_count=300,000)
+  [C] collecting stats customer_account… ok  (row_count=500,000)
+  [C] collecting stats watch_list… ok  (row_count=100,000)
+  [C] collecting stats company_competitor… ok  (row_count=1,500)
+  [C] collecting stats security… ok  (row_count=685)
+  [C] collecting stats financial… ok  (row_count=10,000)
+  [C] collecting stats news_xref… ok  (row_count=6,000)
+  [C] collecting stats account_permission… ok  (row_count=750,000)
+  [C] collecting stats watch_item… ok  (row_count=1,500,000)
+  [C] collecting stats daily_market… ok  (row_count=1,250,275)
+  [C] collecting stats last_trade… ok  (row_count=685)
+  [C] collecting stats trade… ok  (row_count=333,876)
+  [C] collecting stats holding_summary… ok  (row_count=380,000)
+  [C] collecting stats trade_history… ok  (row_count=1,000,000)
+  [C] collecting stats trade_request… ok  (row_count=10,000)
+  [C] collecting stats holding… ok  (row_count=500,000)
+  [C] collecting stats cash_transaction… ok  (row_count=333,876)
+  [C] collecting stats holding_history… ok  (row_count=1,000,000)
+  [C.5] stats fidelity: ndistinct_w2x=0.654  range_covered=0.982  null_match=1.000
+  [B] EXPLAIN tpce-q01… ok
+  [B] EXPLAIN tpce-q02… ok
+  [B] EXPLAIN tpce-q03… ok
+  [B] EXPLAIN tpce-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpce  dialect=oracle  sf=0.1
+  source=tpce_src  target=tpce_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.654  range_covered=0.982  null_match=1.000
+    ⚠  customer: only 36% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  customer_taxrate: only 0% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  customer_account: only 67% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  watch_list: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  company_competitor: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  news_xref: only 50% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  account_permission: only 60% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  watch_item: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  daily_market: only 17% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  trade: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  holding_summary: only 0% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  trade_history: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  trade_request: only 67% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  holding: only 17% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  holding_history: only 0% of columns have matching n_distinct (target stats may not reflect source)
+
+  node_jaccard  : 0.950  (threshold ≥ 0.7)
+  within_2x     : 0.781  (threshold ≥ 0.5)
+  within_10x    : 0.875
+
+  tpce-q01              jaccard=1.00  within_2x=1.00  nodes: 8→8
+  tpce-q02              jaccard=1.00  within_2x=0.62  nodes: 8→8
+  tpce-q03              jaccard=0.80  within_2x=0.50  nodes: 10→8
+  tpce-q04              jaccard=1.00  within_2x=1.00  nodes: 10→10
+
+  Overall: PASS ✓
+    A_load_source             155.70s
+    B_baseline_explain        0.44s
+    C_collect_stats           38.38s
+    D_build_target            159.67s
+    C5_target_stats_fidelity  57.97s
+    E_replay_explain          0.36s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-082652-identity-tpce-sf0.1-oracle.json
+

@@ -30,6 +30,13 @@ def pytest_configure(config):
     )
 
 _CANDIDATE_JAVA_HOMES = [
+    # Linux / Docker (Debian/Ubuntu, Alpine, RHEL)
+    "/usr/lib/jvm/java-17-openjdk-amd64",
+    "/usr/lib/jvm/java-17-openjdk-arm64",
+    "/usr/lib/jvm/java-17-openjdk",
+    "/usr/lib/jvm/java-21-openjdk-amd64",
+    "/usr/lib/jvm/java-21-openjdk",
+    # macOS Homebrew
     "/opt/homebrew/opt/openjdk@17",
     "/opt/homebrew/opt/openjdk@21",
     "/opt/homebrew/opt/openjdk@11",

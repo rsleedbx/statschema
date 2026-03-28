@@ -1,0 +1,14 @@
+WARNING __main__ collect_table_stats failed for watch_item: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for daily_market: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for last_trade: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for trade: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for holding_summary: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for trade_history: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for trade_request: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for holding: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for cash_transaction: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ collect_table_stats failed for holding_history: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+WARNING __main__ EXPLAIN failed for tpce-q01: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+WARNING __main__ EXPLAIN failed for tpce-q02: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+WARNING __main__ EXPLAIN failed for tpce-q03: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+WARNING __main__ EXPLAIN failed for tpce-q04: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.

@@ -1,0 +1,13 @@
+  [C] Auto-selected profile 'standard' for source dialect 'sqlserver'
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 1.16s
+  [A]   loading sector                            12 rows… 0.46s
+  [A]   loading status_type                        5 rows… 0.49s
+  [A]   loading trade_type                         5 rows… 0.45s
+  [A]   loading taxrate                          320 rows… 0.46s
+  [A]   loading charge                            15 rows… 0.49s
+  [A]   loading commission_rate                  240 rows… 0.47s
+  [A]   loading zip_code                      14,741 rows… 0.62s
+  [A]   loading address                      133,333 rows… 2.84s
+  [A]   loading news_item                      2,000 rows… 0.85s
+  [A]   loading industry                         102 rows… 

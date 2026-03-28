@@ -1,0 +1,8 @@
+# 2026-03-27T21:03:37.901458+00:00
+
+PASS  sqlserver×tpcb(sf=1)                        Overall: PASS ✓
+FAIL  sqlserver×tpcc(sf=1)                        Overall: FAIL ✗  (mean_node_jaccard 0.000 < threshold 0.7)
+
+Passed : 1 / 2
+Failed : 1 / 2
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-210025

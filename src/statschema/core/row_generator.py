@@ -35,10 +35,13 @@ import math
 import random
 import string
 from datetime import date, datetime, timedelta
+
+_TEMPORAL_DEFAULT_LO = datetime(2020, 1, 1)
+_TEMPORAL_DEFAULT_HI = datetime(2024, 12, 31)
 from typing import Any, Iterator
 
 from .builtin_generators import dispatch as _builtin_dispatch
-from .model import CanonicalColumn, CanonicalTableSchema, GenerationRule
+from .model import CanonicalColumn, CanonicalTableSchema, GenerationRule, build_fk_max_map
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +188,10 @@ def _gen_value(
     ``"zipf"`` (power-law; params: ``{exponent: 1.2}``).
     """
     ctype = col.type.lower().strip()
+    if ctype == "bigint":
+        ctype = "long"      # bigint is an alias for long in the canonical type system
+    elif ctype == "smallint":
+        ctype = "integer"   # smallint maps to 32-bit integer generation
     if fk_params is None:
         fk_params = {}
 
@@ -315,7 +322,7 @@ def _gen_value(
             return f"{h:02d}:{m:02d}:{sec:02d}{tz}"
 
     # ── 5b. format_pattern for strings ──────────────────────────────────────
-    if g is not None and g.format_pattern and ctype == "string":
+    if g is not None and g.format_pattern and ctype in ("string", "varchar", "char"):
         # tpcc_last_name needs the current row position to guarantee full coverage
         # of all 1000 syllable combinations within each block of 3000 customers.
         if g.format_pattern == "tpcc_last_name":
@@ -339,11 +346,11 @@ def _gen_value(
     if ctype == "boolean":
         return bool(rng.randint(0, 1))
     if ctype == "date":
-        base = date(1990, 1, 1)
-        return base + timedelta(days=rng.randint(0, 3650))
+        span_days = (_TEMPORAL_DEFAULT_HI - _TEMPORAL_DEFAULT_LO).days
+        return (_TEMPORAL_DEFAULT_LO + timedelta(days=rng.randint(0, span_days))).date()
     if ctype in ("timestamp", "timestamptz"):
-        base = date(2000, 1, 1)
-        d = base + timedelta(days=rng.randint(0, 8000))
+        span_days = (_TEMPORAL_DEFAULT_HI - _TEMPORAL_DEFAULT_LO).days
+        d = _TEMPORAL_DEFAULT_LO + timedelta(days=rng.randint(0, span_days))
         return datetime(d.year, d.month, d.day,
                         rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59))
     if ctype in ("time", "timetz"):
@@ -426,29 +433,19 @@ def generate_rows(
 
     rng = random.Random(seed)
 
-    # Build FK column → (parent_max, fk_dist, fk_params) from fk_constraints
-    # and column-level references (fk_constraints takes precedence).
-    fk_max:    dict[str, int]        = {}
-    fk_dist:   dict[str, str]        = {}
-    fk_params: dict[str, dict]       = {}
+    # Build FK column → (parent_max, fk_dist, fk_params).
+    # build_fk_max_map handles the common {col: count} dict; a second pass
+    # attaches distribution metadata (fk_dist / fk_params) from fk_constraints.
+    fk_max    = build_fk_max_map(table, parent_row_counts)
+    fk_dist:   dict[str, str]  = {}
+    fk_params: dict[str, dict] = {}
 
-    if parent_row_counts:
-        if table.fk_constraints:
-            for fk in table.fk_constraints:
-                parent_count = parent_row_counts.get(fk.parent_table)
-                if parent_count:
-                    for col_name in fk.columns:
-                        fk_max[col_name]    = parent_count
-                        fk_dist[col_name]   = fk.fk_distribution or "uniform"
-                        fk_params[col_name] = fk.fk_distribution_params or {}
-        for col in table.columns:
-            if col.references and col.name not in fk_max:
-                parent_table, _ = col.references
-                parent_count = parent_row_counts.get(parent_table)
-                if parent_count:
-                    fk_max[col.name]    = parent_count
-                    fk_dist[col.name]   = "uniform"
-                    fk_params[col.name] = {}
+    if parent_row_counts and table.fk_constraints:
+        for fk in table.fk_constraints:
+            if parent_row_counts.get(fk.parent_table):
+                for col_name in fk.columns:
+                    fk_dist[col_name]   = fk.fk_distribution or "uniform"
+                    fk_params[col_name] = fk.fk_distribution_params or {}
 
     # Pre-compute per-column specs so the inner loop is tight.
     col_specs: list[tuple[CanonicalColumn, GenerationRule | None, int | None, str, dict]] = [

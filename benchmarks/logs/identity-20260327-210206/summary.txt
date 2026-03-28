@@ -1,0 +1,12 @@
+# 2026-03-27T21:35:34.624343+00:00
+
+FAIL  db2×tpcb(sf=1)                              exit=1
+FAIL  db2×tpcc(sf=1)                              exit=1
+PASS  oracle×tpcb(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcc(sf=1)                           Overall: PASS ✓
+PASS  sqlserver×tpcb(sf=1)                        Overall: PASS ✓
+FAIL  sqlserver×tpcc(sf=1)                        Overall: FAIL ✗  (mean_node_jaccard 0.000 < threshold 0.7)
+
+Passed : 3 / 6
+Failed : 3 / 6
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-210206

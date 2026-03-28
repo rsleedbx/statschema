@@ -41,6 +41,19 @@ cpuType:
 images:
   - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
 
+# ── VM resources ─────────────────────────────────────────────────────────────
+# DB2's STMM (Self-Tuning Memory Manager) grows DATABASE_MEMORY automatically
+# to fill available RAM.  At idle, db2sysc already consumes ~2.2 GB RSS.
+# With 4 GB VM and no swap, adding a concurrent schema load (200–400 MB) pushes
+# available memory to the edge.
+#
+# The provision script sets DATABASE_MEMORY = 524288 (2 GB in 4KB pages) to
+# cap STMM growth and leave ≈ 1.2 GB for OS + concurrent loads.
+# This supports 1 schema load at a time safely (schema_workers=1).
+#
+# Upgrade to 8 GB for 2 concurrent schema loads:
+#   memory: "8GiB"  # STMM naturally caps at ~3.5 GB; 4.5 GB free for OS+loads
+#   Then set LIMA_VM_LARGE_RAM=1 to enable schema_workers=2 in run_matrix.py.
 memory: "4GiB"
 cpus: 2
 disk: "40GiB"
@@ -93,6 +106,19 @@ provision:
       podman generate systemd --new --name db2ce \
         > /etc/systemd/system/container-db2ce.service
       systemctl enable --now container-db2ce
+
+      # Cap DB2 STMM database memory at 2 GB (524288 × 4KB pages).
+      # Without a cap, STMM grows DATABASE_MEMORY to fill all available VM RAM.
+      # At idle, db2sysc already uses ~2.2 GB; STMM growth during concurrent
+      # loads can push the VM over 4 GB (no swap) → OOM kill.
+      # Wait for DB2 to finish first-boot setup before applying the config.
+      timeout 600 bash -c "
+        until podman exec db2ce su - db2inst1 -c 'db2 connect to testdb' >/dev/null 2>&1; do
+          sleep 15
+        done
+        podman exec db2ce su - db2inst1 -c \
+          'db2 connect to testdb && db2 \"UPDATE DB CFG FOR testdb USING DATABASE_MEMORY 524288 IMMEDIATE\" && db2 connect reset'
+      " || true
 
 probes:
   - script: |

@@ -163,7 +163,7 @@ last two hash builds, causing nodes 7–10 in the zip comparison to pair against
 
 ## Summary table — all benchmarks
 
-Run date: 2026-03-25.  PG18 = PostgreSQL 18 with `pg_restore_attribute_stats` injection.  CRDB = CockroachDB v23.2 with ANALYZE fallback.  MySQL 8, SQL Server 2022, Oracle 21c XE, and DB2 LUW 11.5 use ANALYZE fallback.
+Run date: 2026-03-27.  PG18 = PostgreSQL 18 with `pg_restore_attribute_stats` injection.  CRDB = CockroachDB v23.2 with ANALYZE fallback.  MySQL 8, SQL Server 2022, Oracle 21c XE, and DB2 LUW 11.5 use ANALYZE fallback.
 
 **Layer 2** = schema + single-column statistics (`--no-extended-stats`).
 **Layer 3** = Layer 2 + query-pattern extended statistics (Phases A.5 and D.5).
@@ -736,6 +736,46 @@ and the format-pattern path had no length adjustment at all.
 **Fix.** Added a post-generation pass: after any generation path, trim or pad each string to
 `max(1, avg_width_bytes − 1)` characters (subtracting the 1-byte varlena header).
 
+### Bug 7 — `bigint` and `smallint` not in DDL emitter DEFAULTS (all six dialects)
+
+**Symptom.**  Oracle and DB2 created columns declared as `bigint` or `smallint` in the canonical schema (e.g. TPC-DI `SK_CompanyID`, `BatchID`) as `CLOB`.  Oracle then rejected `GROUP BY` on those columns with `ORA-00932: inconsistent datatypes: expected - got CLOB`.  DB2 raised `CLI0102E Invalid conversion` when binding integer values to `CLOB` parameters.
+
+**Diagnosis.**  `build_col_type` in `_emitter_shared.py` falls back to `defaults.get("string")` for unknown canonical types.  `bigint` and `smallint` were absent from every dialect's `DEFAULTS` dict, so both resolved to `CLOB` in Oracle and DB2.
+
+**Fix.**  Added explicit entries in all six emitters: `"smallint": "NUMBER(5)"` and `"bigint": "NUMBER(19)"` for Oracle; `"smallint": "SMALLINT"` and `"bigint": "BIGINT"` for all others.
+
+### Bug 8 — `bigint` and `smallint` not normalised in data generators
+
+**Symptom.**  After Bug 7 was fixed, data loading failed because the generators produced string values for `bigint`/`smallint` columns (the unknown-type fallback returns `"{ctype}_{i}"` strings).
+
+**Diagnosis.**  `_generate_column` in `pandas_builder.py` and `row_generator.py`, and `_spark_type_and_options` in `dbldatagen_builder.py`, only handled `integer` and `long` explicitly.  `bigint` and `smallint` fell through to the generic string fallback.
+
+**Fix.**  Added normalisation at the top of each generator's dispatch: `bigint → long`, `smallint → integer`.
+
+### Bug 9 — `varchar` and `char` not in DDL emitter DEFAULTS or `build_col_type`
+
+**Symptom.**  Oracle and DB2 created TPC-E and TPC-DS columns declared as `varchar` or `char` as `CLOB`.  Oracle rejected `GROUP BY ex.ex_name` and `GROUP BY c.c_l_name` (both `varchar` columns) with `ORA-00932`.
+
+**Diagnosis.**  `build_col_type` only handled `key == "string"` for the length-aware VARCHAR path.  `varchar` and `char` fell through to `defaults.get(key, defaults.get("string", "TEXT"))` — which resolved to `CLOB` for Oracle and DB2 since neither type was in their `DEFAULTS`.
+
+**Fix.**  Extended `build_col_type` to include `varchar` in the `string` length-aware branch, and added a new `char` branch.  Added fallback entries to all six emitter `DEFAULTS` dicts: `"varchar": "VARCHAR2(4000)"` and `"char": "CHAR(1)"` for Oracle; `"varchar": "VARCHAR(4000)"` and `"char": "CHAR(1)"` for DB2; `"varchar": "NVARCHAR(MAX)"` and `"char": "NCHAR(1)"` for SQL Server; `"varchar": "TEXT"` and `"char": "CHAR(1)"` for PostgreSQL, MySQL, and Databricks.
+
+### Bug 10 — TPC-E `in_name` column too narrow for generated values
+
+**Symptom.**  All engines failed TPC-E with truncation errors: Oracle raised `DPY-8000: value of size 53 exceeds maximum allowed size of 50`; PostgreSQL raised `StringDataRightTruncation`; SQL Server raised `ValueError: String length (3 characters) exceeds schema size (2 characters)` (for a different column, see Bug 11).
+
+**Diagnosis.**  `industry.in_name` was declared `length: 50`, but the values list includes `"Independent Power and Renewable Electricity Producers"` (53 characters).
+
+**Fix.**  Widened `in_name` to `length: 60` in `tpce_schema.yaml`.
+
+### Bug 11 — TPC-E `in_id`, `co_in_id`, `cp_in_id` too narrow for 102 industries
+
+**Symptom.**  SQL Server (and any engine with strict length enforcement) failed on TPC-E: `in_id` is `varchar(2)` but the industry table has 102 rows; the zero-padded generator produces `"100"`, `"101"`, `"102"` (3 characters).
+
+**Diagnosis.**  `in_id` and the two FK columns that reference it (`company.co_in_id`, `company_competitor.cp_in_id`) all declared `length: 2` with `format_pattern: zero_padded_int, length: 2`.  With 102 rows the keys overflow.
+
+**Fix.**  Widened all three columns to `length: 3` and updated their generation `length: 3` in `tpce_schema.yaml`.
+
 ### Earlier bugs (fixed during initial TPC-H run)
 
 | Bug | File | Effect |
@@ -892,7 +932,7 @@ export DB2_CONTAINER_NAME=db2ce
 
 `data_loader.bulk_load_db2` copies the staging file into the target using `limactl copy` + `podman cp` (Lima topology) or `podman/docker cp` (direct), then calls `ADMIN_CMD` with the container-side path.
 
-**SQL Server TPC-DI.**  TPC-DI on SQL Server consistently scores `within_2x = 0.44`, below the 0.5 pass threshold.  Data loads correctly (211,319 rows in both source and target).  The gap is a statistics injection fidelity issue: SQL Server's `UPDATE STATISTICS` histogram does not fully replicate PostgreSQL's per-column MCVs for the broker–trade FK fan-out pattern in Q1, leaving the optimizer's join-cardinality estimate off by more than 2×.
+**SQL Server TPC-DI.**  TPC-DI on SQL Server previously scored `within_2x = 0.44` when `bigint` and `smallint` canonical types were mapped to `NVARCHAR(MAX)` in the DDL emitter (both were missing from `DEFAULTS`).  After adding explicit `bigint → BIGINT` and `smallint → SMALLINT` mappings in all six dialect emitters and normalising those types in the data generators, SQL Server TPC-DI now scores `node_jaccard = 0.933`, `within_2x = 0.938` — a passing result.
 
 ### What these tests validate — the two-path design
 
@@ -936,29 +976,35 @@ All scores below are from the clean re-runs.
 
 ### Cross-database identity test summary (all six TPC schemas)
 
+Run date: 2026-03-27.  All 36 combinations pass.
+
 | Schema | SF | MySQL 8 | SQL Server | Oracle | DB2 |
 |:-------|---:|:-------:|:----------:|:------:|:---:|
-| TPC-B  | 1.0 | PASS | PASS | PASS | PASS |
-| TPC-C  | 1.0 | PASS | PASS | PASS | PASS |
+| TPC-B  | 1.0  | PASS | PASS | PASS | PASS |
+| TPC-C  | 1.0  | PASS | PASS | PASS | PASS |
 | TPC-H  | 0.01 | PASS | PASS | PASS | PASS |
-| TPC-DI | 1.0 | PASS | **FAIL** | PASS | PASS |
+| TPC-DI | 1.0  | PASS | PASS | PASS | PASS |
 | TPC-DS | 0.01 | PASS | PASS | PASS | PASS |
 | TPC-E  | varies | PASS | PASS | PASS | PASS |
 
-TPC-E scale factors: MySQL 0.01, SQL Server 0.1, Oracle 1.0, DB2 0.01.
+TPC-E scale factors: MySQL 0.01, SQL Server 0.1, Oracle 0.1, DB2 0.01.
 
-Scores (mean `node_jaccard` / mean `within_2x`) for all schemas across all four databases:
+Scores (`node_jaccard` / `within_2x`) for all schemas across all four databases:
 
-| Schema | MySQL | SQL Server | Oracle | DB2 |
-|:-------|:-----:|:----------:|:------:|:---:|
+| Schema | MySQL 8 | SQL Server | Oracle | DB2 |
+|:-------|:-------:|:----------:|:------:|:---:|
 | TPC-B  | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 0.94 | 1.00 / 1.00 |
-| TPC-C  | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| TPC-C  | 1.00 / 1.00 | 1.00 / 0.89 | 1.00 / 1.00 | 1.00 / 1.00 |
 | TPC-H  | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
-| TPC-DI | 1.00 / 1.00 | 0.72 / 0.44 ✗ | 1.00 / 0.64 | 1.00 / 1.00 |
-| TPC-DS | 1.00 / 0.55 | 0.80 / 0.54 | 1.00 / 0.75 | 1.00 / 1.00 |
-| TPC-E  | 1.00 / 1.00 | 0.74 / 0.58 | 0.95 / 0.78 | 1.00 / 1.00 |
+| TPC-DI | 1.00 / 1.00 | 0.93 / 0.94 | 1.00 / 1.00 | 1.00 / 1.00 |
+| TPC-DS | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| TPC-E  | 1.00 / 1.00 | 0.80 / 0.55 | 0.95 / 0.78 | 1.00 / 1.00 |
 
-Oracle TPC-B w2=0.94 reflects a genuine sub-2x cardinality deviation on one plan node (`Hash Join` estimate ratio ≈ 1.25 across all four queries).  The test passes because w2 ≥ 0.5 and all ratios are < 2×.
+Oracle TPC-B `within_2x = 0.94` reflects a sub-2× cardinality deviation on one plan node (`Hash Join` estimate ratio ≈ 1.25 across all four queries).  The test passes because all ratios are < 2×.
+
+SQL Server TPC-DI previously failed (`within_2x = 0.44`) when `bigint`/`smallint` columns were emitted as `NVARCHAR(MAX)`.  After fixing all six DDL emitters and the data generators, it now scores `0.93 / 0.94`.
+
+SQL Server TPC-E `within_2x = 0.55` passes the ≥ 0.50 threshold and is the weakest cross-dialect result.  The TPC-E workload uses string-keyed FKs (`s_symb`) and three-table joins where cardinality depends on cross-table selectivity that ANALYZE-fallback statistics cannot fully reproduce.
 
 ### Lakebase identity test results
 
@@ -1051,7 +1097,7 @@ SQL Server stats collection (Phase C) is slow because `sys.dm_db_stats_histogram
 |:-----------|-----:|--------:|----------:|----------:|----------:|------------:|---------:|
 | MySQL 8    | 0.01 | 837 K  |      16 s |    0.03 s |     22 s |       19 s |    0.03 s |
 | SQL Server | 0.1  | 8.23 M |    1000 s |     2.7 s |    1104 s |      585 s |     3.2 s |
-| Oracle     | 1.0  | 82.1 M |    2201 s |     1.2 s |     82 s |     1871 s |     1.0 s |
+| Oracle     | 0.1  | 8.23 M |     156 s |     0.4 s |     38 s |      160 s |     0.4 s |
 | DB2        | 0.01 | 837 K  |     244 s |     0.2 s |     2.3 s |      260 s |     0.3 s |
 
 ### How to reproduce
@@ -1084,7 +1130,7 @@ done
 
 # TPC-DI
 python benchmarks/identity_test.py --schema tpcdi --sf 1 --dialect mysql    --dsn "$MYSQL_DSN" --no-extended-stats
-python benchmarks/identity_test.py --schema tpcdi --sf 1 --dialect sqlserver --dsn "$SS_DSN"   --no-extended-stats  # scores 0.44 (below threshold — expected)
+python benchmarks/identity_test.py --schema tpcdi --sf 1 --dialect sqlserver --dsn "$SS_DSN"   --no-extended-stats
 python benchmarks/identity_test.py --schema tpcdi --sf 1 --dialect oracle    --dsn "$ORA_DSN"  --no-extended-stats
 python benchmarks/identity_test.py --schema tpcdi --sf 1 --dialect db2       --dsn "$DB2_DSN"  --no-extended-stats
 
@@ -1097,7 +1143,7 @@ done
 # TPC-E (dialect-specific scale factors)
 python benchmarks/identity_test.py --schema tpce --sf 0.01 --dialect mysql    --dsn "$MYSQL_DSN" --no-extended-stats
 python benchmarks/identity_test.py --schema tpce --sf 0.1  --dialect sqlserver --dsn "$SS_DSN"   --no-extended-stats
-python benchmarks/identity_test.py --schema tpce --sf 1.0  --dialect oracle    --dsn "$ORA_DSN"  --no-extended-stats
+python benchmarks/identity_test.py --schema tpce --sf 0.1  --dialect oracle    --dsn "$ORA_DSN"  --no-extended-stats
 python benchmarks/identity_test.py --schema tpce --sf 0.01 --dialect db2       --dsn "$DB2_DSN"  --no-extended-stats
 ```
 

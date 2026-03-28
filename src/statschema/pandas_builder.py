@@ -15,11 +15,13 @@ from .core.pandas_builder import (
     _generate_pattern,
     _zipf_array,
     _temporal_origin_and_span,
+    _TEMPORAL_DEFAULT_LO,
+    _TEMPORAL_DEFAULT_HI,
     _generate_column,
     _generate_string,
     _generate_temporal,
     _apply_nulls,
     _CONSTRAINT_RE,
     _enforce_temporal_constraints,
-    _build_fk_ranges,
 )
+from .core.model import build_fk_max_map as _build_fk_ranges  # backward-compat alias

@@ -25,9 +25,10 @@ from typing import Any, TextIO
 
 from .model import QueryEntry, QueryWorkload, ReplayResult
 from .transpiler import transpile_query
+from ..dialect_registry import MYSQL_FAMILY, PG_FAMILY
 
-_PG_FAMILY   = {"postgres", "postgresql", "neon", "cockroachdb", "lakebase"}
-_MYSQL_FAMILY = {"mysql", "mariadb"}
+_PG_FAMILY    = PG_FAMILY
+_MYSQL_FAMILY = MYSQL_FAMILY
 
 
 def _explain_postgres(cur: Any, sql: str) -> tuple[str, str | None]:

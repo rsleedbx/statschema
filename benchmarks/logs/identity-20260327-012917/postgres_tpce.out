@@ -1,0 +1,12 @@
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 0.00s
+  [A]   loading sector                            12 rows… 0.00s
+  [A]   loading status_type                        5 rows… 0.00s
+  [A]   loading trade_type                         5 rows… 0.00s
+  [A]   loading taxrate                          320 rows… 0.00s
+  [A]   loading charge                            15 rows… 0.00s
+  [A]   loading commission_rate                  240 rows… 0.00s
+  [A]   loading zip_code                      14,741 rows… 0.05s
+  [A]   loading address                       13,333 rows… 0.42s
+  [A]   loading news_item                        200 rows… 0.01s
+  [A]   loading industry                         102 rows… 

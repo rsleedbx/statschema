@@ -1,0 +1,40 @@
+WARNING __main__ CREATE STATISTICS source dimbroker(firstname,lastname): relation "tpcdi_src.dimbroker" does not exist
+
+WARNING __main__ CREATE STATISTICS source dimbroker(firstname,sk_brokerid): relation "tpcdi_src.dimbroker" does not exist
+
+WARNING __main__ CREATE STATISTICS source dimbroker(lastname,sk_brokerid): relation "tpcdi_src.dimbroker" does not exist
+
+WARNING __main__ CREATE STATISTICS source dimcustomer(firstname,lastname): relation "tpcdi_src.dimcustomer" does not exist
+
+WARNING __main__ CREATE STATISTICS source dimcustomer(firstname,sk_customerid): relation "tpcdi_src.dimcustomer" does not exist
+
+WARNING __main__ CREATE STATISTICS source dimcustomer(lastname,sk_customerid): relation "tpcdi_src.dimcustomer" does not exist
+
+WARNING __main__ CREATE STATISTICS source dimaccount(sk_accountid,sk_customerid): relation "tpcdi_src.dimaccount" does not exist
+
+WARNING __main__ ANALYZE source dimbroker: relation "tpcdi_src.dimbroker" does not exist
+
+WARNING __main__ ANALYZE source dimcustomer: relation "tpcdi_src.dimcustomer" does not exist
+
+WARNING __main__ ANALYZE source dimaccount: relation "tpcdi_src.dimaccount" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimbroker(firstname,lastname): relation "tpcdi_tgt.dimbroker" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimbroker(firstname,sk_brokerid): relation "tpcdi_tgt.dimbroker" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimbroker(lastname,sk_brokerid): relation "tpcdi_tgt.dimbroker" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimcustomer(firstname,lastname): relation "tpcdi_tgt.dimcustomer" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimcustomer(firstname,sk_customerid): relation "tpcdi_tgt.dimcustomer" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimcustomer(lastname,sk_customerid): relation "tpcdi_tgt.dimcustomer" does not exist
+
+WARNING __main__ CREATE STATISTICS target dimaccount(sk_accountid,sk_customerid): relation "tpcdi_tgt.dimaccount" does not exist
+
+WARNING __main__ ANALYZE target dimbroker: relation "tpcdi_tgt.dimbroker" does not exist
+
+WARNING __main__ ANALYZE target dimcustomer: relation "tpcdi_tgt.dimcustomer" does not exist
+
+WARNING __main__ ANALYZE target dimaccount: relation "tpcdi_tgt.dimaccount" does not exist
+

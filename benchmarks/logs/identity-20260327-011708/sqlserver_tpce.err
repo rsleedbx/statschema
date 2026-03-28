@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2483, in <module>
+    main()
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2447, in main
+    result = run_identity_test(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 1976, in run_identity_test
+    result.source_row_counts = load_source(
+                               ^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 995, in load_source
+    load_dataframe(
+  File "/Users/robert.lee/github/statschema/src/statschema/data_loader.py", line 210, in load_dataframe
+    bc_result = bc_cur.bulkcopy(
+                ^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/mssql_python/cursor.py", line 2706, in bulkcopy
+    raise type(e)(str(e)) from None
+ValueError: String length (3 characters) exceeds schema size (2 characters)

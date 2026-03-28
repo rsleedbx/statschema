@@ -1,0 +1,6 @@
+PASS  oracle×tpcb(sf=1)                            Overall: PASS ✓
+PASS  oracle×tpcc(sf=1)                            Overall: PASS ✓
+PASS  oracle×tpch(sf=0.01)                         Overall: PASS ✓
+PASS  oracle×tpcdi(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcds(sf=0.01)                        Overall: PASS ✓
+FAIL  oracle×tpce(sf=0.1)                        exit=1

@@ -36,6 +36,7 @@ import re
 from typing import Any
 
 from .model import QueryEntry, QueryWorkload
+from ..dialect_registry import MYSQL_FAMILY, PG_FAMILY
 
 # Maps the rank_by alias to (pg_col, mysql_col, tsql_col, oracle_col, databricks_col)
 _RANK_COLS: dict[str, dict[str, str]] = {
@@ -62,8 +63,8 @@ _RANK_COLS: dict[str, dict[str, str]] = {
     },
 }
 
-_PG_FAMILY = {"postgres", "postgresql", "neon", "cockroachdb", "lakebase"}
-_MYSQL_FAMILY = {"mysql", "mariadb"}
+_PG_FAMILY    = PG_FAMILY
+_MYSQL_FAMILY = MYSQL_FAMILY
 
 
 def _short_id(sql: str) -> str:

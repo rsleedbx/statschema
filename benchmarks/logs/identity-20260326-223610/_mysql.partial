@@ -1,0 +1,6 @@
+PASS  mysql×tpcb(sf=1)                             Overall: PASS ✓
+PASS  mysql×tpcc(sf=1)                             Overall: PASS ✓
+PASS  mysql×tpch(sf=0.01)                          Overall: PASS ✓
+PASS  mysql×tpcdi(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcds(sf=0.01)                         Overall: PASS ✓
+PASS  mysql×tpce(sf=0.01)                          Overall: PASS ✓

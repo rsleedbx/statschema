@@ -1,0 +1,21 @@
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2483, in <module>
+    main()
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2447, in main
+    result = run_identity_test(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 1976, in run_identity_test
+    result.source_row_counts = load_source(
+                               ^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 995, in load_source
+    load_dataframe(
+  File "/Users/robert.lee/github/statschema/src/statschema/data_loader.py", line 237, in load_dataframe
+    inserted = bulk_load_postgres(conn, df, table, col_names)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/src/statschema/dialects/postgres/loader.py", line 35, in bulk_load_postgres
+    cur.copy_expert(sql, buf)
+psycopg2.OperationalError: server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+invalid socket
+

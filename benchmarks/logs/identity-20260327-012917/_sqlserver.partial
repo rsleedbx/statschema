@@ -1,0 +1,6 @@
+PASS  sqlserver×tpcb(sf=1)                         Overall: PASS ✓
+PASS  sqlserver×tpcc(sf=1)                         Overall: PASS ✓
+PASS  sqlserver×tpch(sf=0.01)                      Overall: PASS ✓
+PASS  sqlserver×tpcdi(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcds(sf=0.01)                     Overall: PASS ✓
+FAIL  sqlserver×tpce(sf=0.1)                     exit=1

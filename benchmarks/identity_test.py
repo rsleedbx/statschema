@@ -397,7 +397,8 @@ def _set_namespace_mysql(conn, schema_name: str) -> None:
         cur.execute(f"USE `{schema_name}`")
 
 
-def _analyze_mysql(conn, tables: list, schema: str) -> None:
+def _analyze_mysql(conn, tables: list, schema: str,
+                   pred_col_map: dict | None = None) -> None:
     with conn.cursor() as cur:
         for t in tables:
             try:
@@ -449,8 +450,12 @@ def _strip_oracle_quotes(ddl_text: str) -> str:
     return re.sub(r'"([^"]+)"', r'\1', ddl_text)
 
 
-def _analyze_sqlserver(conn, tables: list, schema: str) -> None:
-    # After _set_namespace_sqlserver (USE [db]), tables are in dbo within current db.
+def _analyze_sqlserver(conn, tables: list, schema: str,
+                       pred_col_map: dict | None = None, full_stats: bool = False) -> None:
+    # SQL Server statistics are per-object (not per-column), so UPDATE STATISTICS
+    # updates all statistics objects on the table.  With full_stats=False (default)
+    # we use FULLSCAN only for small tables and let SQL Server sample larger ones,
+    # which is already the default behavior.
     with conn.cursor() as cur:
         for t in tables:
             try:
@@ -480,13 +485,38 @@ def _set_namespace_oracle(conn, schema_name: str) -> None:
         cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
 
 
-def _analyze_oracle(conn, tables: list, schema: str) -> None:
+def _analyze_oracle(conn, tables: list, schema: str,
+                    pred_col_map: dict | None = None, full_stats: bool = False) -> None:
+    """Gather Oracle optimizer statistics.
+
+    When *pred_col_map* is provided and *full_stats* is False, only predicate
+    columns get full distribution stats (SIZE AUTO); every other column gets a
+    fast row-count-only sweep (SIZE 1).  Full-table stats are always gathered
+    for indexed columns regardless of the predicate map.
+
+    With *full_stats=True* (major-release / audit mode) all columns receive
+    SIZE AUTO — the same as Oracle's default DBMS_STATS options.
+    """
     with conn.cursor() as cur:
         for t in tables:
             try:
+                pred_cols = (
+                    {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
+                )
+                if full_stats or not pred_cols:
+                    # All columns, Oracle default behaviour
+                    method_opt = "FOR ALL COLUMNS SIZE AUTO"
+                else:
+                    # Deep stats for predicate columns; row-count-only for the rest
+                    col_list = ", ".join(
+                        f"FOR COLUMNS {c} SIZE AUTO" for c in sorted(pred_cols)
+                    )
+                    method_opt = f"FOR ALL COLUMNS SIZE 1, {col_list}"
                 cur.execute(
                     "BEGIN DBMS_STATS.GATHER_TABLE_STATS("
-                    f"ownname => '{schema.upper()}', tabname => '{t.name.upper()}'); END;"
+                    f"ownname => '{schema.upper()}', "
+                    f"tabname => '{t.name.upper()}', "
+                    f"method_opt => '{method_opt}'); END;"
                 )
             except Exception:
                 pass
@@ -531,14 +561,41 @@ def _set_namespace_db2(conn, schema_name: str) -> None:
         cur.execute(f"SET SCHEMA {schema_name}")
 
 
-def _analyze_db2(conn, tables: list, schema: str) -> None:
+def _analyze_db2(conn, tables: list, schema: str,
+                 pred_col_map: dict | None = None, full_stats: bool = False) -> None:
+    """Run DB2 RUNSTATS.
+
+    Default (fast) mode — ``full_stats=False``:
+    • Tables that have predicate columns in the workload: targeted
+      ``RUNSTATS ON TABLE … ON COLUMNS (c1, c2) WITH DISTRIBUTION``.
+      Only the listed columns get histogram/MCV stats; this is 5-10× faster
+      than running WITH DISTRIBUTION across all columns for wide tables.
+    • Tables with no predicate columns: bare ``RUNSTATS ON TABLE …`` — updates
+      row counts and basic cardinality without per-column distributions.
+
+    Full mode — ``full_stats=True`` (major-release / audit):
+    • Every table gets ``RUNSTATS … WITH DISTRIBUTION AND DETAILED INDEXES ALL``,
+      the most complete but most expensive option.
+    """
     with conn.cursor() as cur:
         for t in tables:
+            tref = f"{schema.upper()}.{t.name.upper()}"
             try:
-                cur.execute(
-                    f"RUNSTATS ON TABLE {schema.upper()}.{t.name.upper()} "
-                    "WITH DISTRIBUTION AND DETAILED INDEXES ALL"
+                pred_cols = (
+                    {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
                 )
+                if full_stats:
+                    sql = f"RUNSTATS ON TABLE {tref} WITH DISTRIBUTION AND DETAILED INDEXES ALL"
+                elif pred_cols:
+                    col_clause = ", ".join(sorted(pred_cols))
+                    sql = (
+                        f"RUNSTATS ON TABLE {tref} "
+                        f"ON COLUMNS ({col_clause}) WITH DISTRIBUTION"
+                    )
+                else:
+                    # No predicate columns — basic row-count update only
+                    sql = f"RUNSTATS ON TABLE {tref}"
+                cur.execute(sql)
             except Exception:
                 pass
     conn.commit()
@@ -576,17 +633,36 @@ def _set_namespace(conn, schema_name: str, dialect: str) -> None:
         _set_namespace_db2(conn, schema_name)
 
 
-def _analyze_tables(conn, tables: list, schema: str, dialect: str) -> None:
+def _analyze_tables(
+    conn,
+    tables: list,
+    schema: str,
+    dialect: str,
+    pred_col_map: dict | None = None,
+    full_stats: bool = False,
+) -> None:
+    """Run the engine's native ANALYZE / RUNSTATS / GATHER_TABLE_STATS.
+
+    *pred_col_map* — ``{table_name: [col, ...]}`` from the workload YAML.
+      When provided (and *full_stats* is False), DB2 and Oracle restrict
+      expensive per-column distribution stats to predicate columns only,
+      which is significantly faster for wide schemas.
+    *full_stats* — if True, always gather all-column statistics regardless
+      of the predicate map.  Useful for major-release validation runs.
+    """
     if dialect in ("postgres", "neon", "cockroachdb", "lakebase"):
         _analyze_pg(conn, tables, schema)
     elif dialect in ("mysql", "mariadb"):
-        _analyze_mysql(conn, tables, schema)
+        _analyze_mysql(conn, tables, schema, pred_col_map=pred_col_map)
     elif dialect == "sqlserver":
-        _analyze_sqlserver(conn, tables, schema)
+        _analyze_sqlserver(conn, tables, schema,
+                           pred_col_map=pred_col_map, full_stats=full_stats)
     elif dialect == "oracle":
-        _analyze_oracle(conn, tables, schema)
+        _analyze_oracle(conn, tables, schema,
+                        pred_col_map=pred_col_map, full_stats=full_stats)
     elif dialect == "db2":
-        _analyze_db2(conn, tables, schema)
+        _analyze_db2(conn, tables, schema,
+                     pred_col_map=pred_col_map, full_stats=full_stats)
 
 
 # ---------------------------------------------------------------------------
@@ -1008,7 +1084,8 @@ def load_source(
         print(f"{elapsed:.2f}s")
 
     print(f"  [A] Running ANALYZE on {source_schema!r}…", end=" ", flush=True)
-    _analyze_tables(conn, ordered, source_schema, dialect)
+    # Phase A must always gather full distribution stats — Phase C reads from this schema.
+    _analyze_tables(conn, ordered, source_schema, dialect, full_stats=True)
     print("done")
 
     actual = {}
@@ -1622,6 +1699,8 @@ def build_target(
     sf: float,
     seed: int = 99,
     fk_range_overrides: dict[str, dict[str, tuple[int, int]]] | None = None,
+    pred_col_map: dict | None = None,
+    full_stats: bool = False,
 ) -> dict[str, int]:
     """
     Phase D — create target_schema, load synthetic rows driven by collected
@@ -1630,6 +1709,14 @@ def build_target(
 
     Parameters
     ----------
+    pred_col_map
+        ``{table_name: [col, ...]}`` from the workload YAML.  Passed to
+        ``_analyze_tables`` so DB2 and Oracle only gather deep distribution
+        stats for workload-predicate columns.  Pass ``None`` (default) for
+        all-columns stats (same as pre-existing behaviour).
+    full_stats
+        If True, always run the most expensive ANALYZE variant regardless of
+        *pred_col_map*.  Intended for major-release validation.
     fk_range_overrides
         ``{table_name: {col_name: (min, max)}}`` derived from query predicate
         analysis (Phase A.6).  Constrains FK column generation ranges so that
@@ -1771,7 +1858,8 @@ def build_target(
     else:
         # Non-PG dialects: run the engine's native ANALYZE equivalent on the
         # stats-driven synthetic data loaded above.
-        _analyze_tables(conn, ordered, target_schema, dialect)
+        _analyze_tables(conn, ordered, target_schema, dialect,
+                        pred_col_map=pred_col_map, full_stats=full_stats)
         print("done (native ANALYZE)")
         injection_mode = "stats_analyze"
 
@@ -1884,6 +1972,8 @@ def run_identity_test(
     stats_source_dialect: str | None = None,
     stats_source_schema: str | None = None,
     collection_config: CollectionConfig | None = None,
+    phases: list[str] | None = None,
+    full_stats: bool = False,
     **kwargs,
 ) -> IdentityTestResult:
     """
@@ -1955,6 +2045,15 @@ def run_identity_test(
             pass  # ibm_db_dbi doesn't support setting autocommit post-connect
 
     _is_pg_wire = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
+
+    # Resolve active phases.  --skip-load is kept for backwards compat and
+    # takes precedence over phases when both are given.
+    _active_phases: set[str] = set(phases) if phases else {
+        "load_source", "explain_source", "collect_stats",
+        "load_target", "explain_target", "score",
+    }
+    if "load_source" not in _active_phases:
+        skip_load = True
 
     # ── Phase A: Load source ─────────────────────────────────────────────────
     if skip_load:
@@ -2137,10 +2236,14 @@ def run_identity_test(
 
     # ── Phase D: Build copy ────────────────────────────────────────────────────
     t0 = time.perf_counter()
+    _pred_map = (collection_config.predicate_col_map
+                 if collection_config and not full_stats else None)
     result.target_row_counts, result.stats_injection_mode = build_target(
         conn, ordered, collected_stats, target_schema, dialect,
         sf=sf, seed=seed + 1000,
         fk_range_overrides=fk_range_overrides or None,
+        pred_col_map=_pred_map,
+        full_stats=full_stats,
     )
     result.phase_times["D_build_target"] = time.perf_counter() - t0
 
@@ -2285,6 +2388,17 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Schema name for statschema copy (default: <schema>_tgt)")
     p.add_argument("--skip-load", action="store_true",
                    help="Skip Phase A — reuse existing source_schema data")
+    p.add_argument(
+        "--phases", metavar="LIST",
+        default="load_source,explain_source,collect_stats,load_target,explain_target,score",
+        help=(
+            "Comma-separated pipeline phases to run. "
+            "Values: load_source (A), explain_source (B), collect_stats (C), "
+            "load_target (D), explain_target (E), score (F). "
+            "Default: all. "
+            "Example: --phases explain_source,score (re-score from saved data)"
+        ),
+    )
     p.add_argument("--save-yaml", metavar="DIR",
                    help="Save collected stats + schema YAML artifacts to DIR")
     p.add_argument("--threshold-jaccard", type=float, default=0.70, metavar="FLOAT",
@@ -2295,6 +2409,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--no-extended-stats", action="store_true",
                    help="Disable Phase A.5/D.5 extended statistics (Layer 3 query feature)")
+    p.add_argument("--full-stats-db2-ora", action="store_true",
+                   help=(
+                       "DB2 and Oracle only.  Phase D: gather full per-column distribution "
+                       "stats on the target schema (DB2: WITH DISTRIBUTION AND DETAILED "
+                       "INDEXES ALL; Oracle: FOR ALL COLUMNS SIZE AUTO).  Default is "
+                       "predicate-column-only stats, which is 5–10× faster.  "
+                       "No effect on Postgres, MySQL, SQL Server, or CockroachDB.  "
+                       "Use for major-release or audit runs."
+                   ))
     p.add_argument(
         "--enrich", metavar="TECHNIQUES",
         help=(
@@ -2462,6 +2585,8 @@ def main() -> None:
         stats_source_dialect=args.stats_source_dialect,
         stats_source_schema=args.stats_source_schema,
         collection_config=collection_config,
+        phases=args.phases.split(",") if args.phases else None,
+        full_stats=args.full_stats_db2_ora,
     )
 
     print(result.summary())

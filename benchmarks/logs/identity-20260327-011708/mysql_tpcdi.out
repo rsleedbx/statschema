@@ -1,0 +1,117 @@
+  [C] Auto-selected profile 'standard' for source dialect 'mysql'
+  [A] Creating tables in schema 'tpcdi_src'… done
+  [A]   loading StatusType                         5 rows… 0.01s
+  [A]   loading TaxRate                          320 rows… 0.02s
+  [A]   loading TradeType                          5 rows… 0.01s
+  [A]   loading Industry                         102 rows… 0.02s
+  [A]   loading DimDate                        3,652 rows… 0.22s
+  [A]   loading DimTime                       86,400 rows… 2.68s
+  [A]   loading DimCompany                       400 rows… 0.07s
+  [A]   loading DimBroker                        100 rows… 0.02s
+  [A]   loading DimCustomer                      950 rows… 0.21s
+  [A]   loading DimMessage                       500 rows… 0.08s
+  [A]   loading DimSecurity                      685 rows… 0.05s
+  [A]   loading Financial                      3,200 rows… 0.22s
+  [A]   loading DimAccount                     1,500 rows… 0.10s
+  [A]   loading FactMarketHistory             57,000 rows… 2.11s
+  [A]   loading FactWatches                    5,000 rows… 0.09s
+  [A]   loading DimTrade                      46,000 rows… 5.31s
+  [A]   loading FactCashBalances               2,500 rows… 0.07s
+  [A]   loading FactHoldings                   3,000 rows… 0.13s
+  [A] Running ANALYZE on 'tpcdi_src'… done
+  [B] EXPLAIN tpcdi-q01… ok
+  [B] EXPLAIN tpcdi-q02… ok
+  [B] EXPLAIN tpcdi-q03… ok
+  [B] EXPLAIN tpcdi-q04… ok
+  [C] pred_cols: 12 predicate columns from workload YAML across 18 tables
+  [C] collecting stats StatusType… ok  (row_count=5)
+  [C] collecting stats TaxRate… ok  (row_count=320)
+  [C] collecting stats TradeType… ok  (row_count=5)
+  [C] collecting stats Industry… ok  (row_count=102)
+  [C] collecting stats DimDate… ok  (row_count=3,652)
+  [C] collecting stats DimTime… ok  (row_count=86,400)
+  [C] collecting stats DimCompany… ok  (row_count=400)
+  [C] collecting stats DimBroker… ok  (row_count=100)
+  [C] collecting stats DimCustomer… ok  (row_count=950)
+  [C] collecting stats DimMessage… ok  (row_count=500)
+  [C] collecting stats DimSecurity… ok  (row_count=685)
+  [C] collecting stats Financial… ok  (row_count=3,200)
+  [C] collecting stats DimAccount… ok  (row_count=1,500)
+  [C] collecting stats FactMarketHistory… ok  (row_count=57,000)
+  [C] collecting stats FactWatches… ok  (row_count=5,000)
+  [C] collecting stats DimTrade… ok  (row_count=46,000)
+  [C] collecting stats FactCashBalances… ok  (row_count=2,500)
+  [C] collecting stats FactHoldings… ok  (row_count=3,000)
+  [D] Creating tables in schema 'tpcdi_tgt'… done
+  [D]   synthetic StatusType                         5 rows… 0.02s
+  [D]   synthetic TaxRate                          320 rows… 0.06s
+  [D]   synthetic TradeType                          5 rows… 0.04s
+  [D]   synthetic Industry                         102 rows… 0.04s
+  [D]   synthetic DimDate                        3,652 rows… 0.40s
+  [D]   synthetic DimTime                       86,400 rows… 3.80s
+  [D]   synthetic DimCompany                       400 rows… 0.12s
+  [D]   synthetic DimBroker                        100 rows… 0.03s
+  [D]   synthetic DimCustomer                      950 rows… 0.30s
+  [D]   synthetic DimMessage                       500 rows… 0.06s
+  [D]   synthetic DimSecurity                      685 rows… 0.07s
+  [D]   synthetic Financial                      3,200 rows… 0.16s
+  [D]   synthetic DimAccount                     1,500 rows… 0.07s
+  [D]   synthetic FactMarketHistory             57,000 rows… 2.00s
+  [D]   synthetic FactWatches                    5,000 rows… 0.08s
+  [D]   synthetic DimTrade                      46,000 rows… 3.48s
+  [D]   synthetic FactCashBalances               2,500 rows… 0.07s
+  [D]   synthetic FactHoldings                   3,000 rows… 0.11s
+  [D] Updating statistics in 'tpcdi_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats StatusType… ok  (row_count=5)
+  [C] collecting stats TaxRate… ok  (row_count=320)
+  [C] collecting stats TradeType… ok  (row_count=5)
+  [C] collecting stats Industry… ok  (row_count=102)
+  [C] collecting stats DimDate… ok  (row_count=3,652)
+  [C] collecting stats DimTime… ok  (row_count=86,400)
+  [C] collecting stats DimCompany… ok  (row_count=400)
+  [C] collecting stats DimBroker… ok  (row_count=100)
+  [C] collecting stats DimCustomer… ok  (row_count=950)
+  [C] collecting stats DimMessage… ok  (row_count=500)
+  [C] collecting stats DimSecurity… ok  (row_count=685)
+  [C] collecting stats Financial… ok  (row_count=3,200)
+  [C] collecting stats DimAccount… ok  (row_count=1,500)
+  [C] collecting stats FactMarketHistory… ok  (row_count=57,000)
+  [C] collecting stats FactWatches… ok  (row_count=5,000)
+  [C] collecting stats DimTrade… ok  (row_count=46,000)
+  [C] collecting stats FactCashBalances… ok  (row_count=2,500)
+  [C] collecting stats FactHoldings… ok  (row_count=3,000)
+  [C.5] stats fidelity: ndistinct_w2x=0.880  range_covered=1.000  null_match=0.995
+  [B] EXPLAIN tpcdi-q01… ok
+  [B] EXPLAIN tpcdi-q02… ok
+  [B] EXPLAIN tpcdi-q03… ok
+  [B] EXPLAIN tpcdi-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcdi  dialect=mysql  sf=1.0
+  source=tpcdi_src  target=tpcdi_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.880  range_covered=1.000  null_match=0.995
+    ⚠  FactCashBalances: only 60% of columns have matching n_distinct (target stats may not reflect source)
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcdi-q01             jaccard=1.00  within_2x=1.00  nodes: 5→5
+  tpcdi-q02             jaccard=1.00  within_2x=1.00  nodes: 3→3
+  tpcdi-q03             jaccard=1.00  within_2x=1.00  nodes: 6→6
+  tpcdi-q04             jaccard=1.00  within_2x=1.00  nodes: 3→3
+
+  Overall: PASS ✓
+    A_load_source             12.15s
+    B_baseline_explain        0.05s
+    C_collect_stats           9.80s
+    D_build_target            11.64s
+    C5_target_stats_fidelity  9.34s
+    E_replay_explain          0.04s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-062005-identity-tpcdi-sf1.0-mysql.json
+

@@ -1,0 +1,145 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'oracle'
+  [A] Creating tables in schema 'tpcds_src'… done
+  [A]   loading date_dim                      73,049 rows… 25.58s
+  [A]   loading time_dim                      86,400 rows… 13.14s
+  [A]   loading customer_demographics      1,920,800 rows… 276.72s
+  [A]   loading income_band                       20 rows… 0.16s
+  [A]   loading reason                            55 rows… 0.19s
+  [A]   loading ship_mode                         20 rows… 0.55s
+  [A]   loading item                             180 rows… 0.53s
+  [A]   loading warehouse                          5 rows… 0.76s
+  [A]   loading store                             12 rows… 0.56s
+  [A]   loading call_center                        6 rows… 0.89s
+  [A]   loading customer_address                 500 rows… 1.02s
+  [A]   loading catalog_page                     117 rows… 0.29s
+  [A]   loading web_site                          54 rows… 0.55s
+  [A]   loading web_page                          20 rows… 0.55s
+  [A]   loading household_demographics         7,200 rows… 0.44s
+  [A]   loading promotion                          3 rows… 0.81s
+  [A]   loading inventory                    117,450 rows… 1.23s
+  [A]   loading customer                       1,000 rows… 1.26s
+  [A]   loading store_sales                   28,804 rows… 1.44s
+  [A]   loading catalog_sales                 14,415 rows… 1.01s
+  [A]   loading web_sales                      7,193 rows… 0.63s
+  [A]   loading store_returns                  2,875 rows… 0.28s
+  [A]   loading catalog_returns                1,440 rows… 0.27s
+  [A]   loading web_returns                      717 rows… 0.19s
+  [A] Running ANALYZE on 'tpcds_src'… done
+  [B] EXPLAIN tpcds-q01… ok
+  [B] EXPLAIN tpcds-q02… ok
+  [B] EXPLAIN tpcds-q03… ok
+  [B] EXPLAIN tpcds-q04… ERROR: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+  [C] pred_cols: 9 predicate columns from workload YAML across 24 tables
+  [C] collecting stats date_dim… ok  (row_count=73,049)
+  [C] collecting stats time_dim… ok  (row_count=86,400)
+  [C] collecting stats customer_demographics… ok  (row_count=1,920,800)
+  [C] collecting stats income_band… ok  (row_count=20)
+  [C] collecting stats reason… ok  (row_count=55)
+  [C] collecting stats ship_mode… ok  (row_count=20)
+  [C] collecting stats item… ok  (row_count=180)
+  [C] collecting stats warehouse… ok  (row_count=5)
+  [C] collecting stats store… ok  (row_count=12)
+  [C] collecting stats call_center… ok  (row_count=6)
+  [C] collecting stats customer_address… ok  (row_count=500)
+  [C] collecting stats catalog_page… ok  (row_count=117)
+  [C] collecting stats web_site… ok  (row_count=54)
+  [C] collecting stats web_page… ok  (row_count=20)
+  [C] collecting stats household_demographics… ok  (row_count=7,200)
+  [C] collecting stats promotion… ok  (row_count=3)
+  [C] collecting stats inventory… ok  (row_count=117,450)
+  [C] collecting stats customer… ok  (row_count=1,000)
+  [C] collecting stats store_sales… ok  (row_count=28,804)
+  [C] collecting stats catalog_sales… ok  (row_count=14,415)
+  [C] collecting stats web_sales… ok  (row_count=7,193)
+  [C] collecting stats store_returns… ok  (row_count=2,875)
+  [C] collecting stats catalog_returns… ok  (row_count=1,440)
+  [C] collecting stats web_returns… ok  (row_count=717)
+  [D] Creating tables in schema 'tpcds_tgt'… done
+  [D]   synthetic date_dim                      73,049 rows… 20.87s
+  [D]   synthetic time_dim                      86,400 rows… 9.72s
+  [D]   synthetic customer_demographics      1,920,800 rows… 194.13s
+  [D]   synthetic income_band                       20 rows… 0.44s
+  [D]   synthetic reason                            55 rows… 0.18s
+  [D]   synthetic ship_mode                         20 rows… 0.38s
+  [D]   synthetic item                             180 rows… 0.35s
+  [D]   synthetic warehouse                          5 rows… 0.26s
+  [D]   synthetic store                             12 rows… 0.65s
+  [D]   synthetic call_center                        6 rows… 0.36s
+  [D]   synthetic customer_address                 500 rows… 0.44s
+  [D]   synthetic catalog_page                     117 rows… 0.19s
+  [D]   synthetic web_site                          54 rows… 0.43s
+  [D]   synthetic web_page                          20 rows… 0.18s
+  [D]   synthetic household_demographics         7,200 rows… 0.34s
+  [D]   synthetic promotion                          3 rows… 0.29s
+  [D]   synthetic inventory                    117,450 rows… 0.60s
+  [D]   synthetic customer                       1,000 rows… 0.49s
+  [D]   synthetic store_sales                   28,804 rows… 0.77s
+  [D]   synthetic catalog_sales                 14,415 rows… 0.60s
+  [D]   synthetic web_sales                      7,193 rows… 0.40s
+  [D]   synthetic store_returns                  2,875 rows… 0.17s
+  [D]   synthetic catalog_returns                1,440 rows… 0.16s
+  [D]   synthetic web_returns                      717 rows… 0.13s
+  [D] Updating statistics in 'tpcds_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats date_dim… ok  (row_count=73,049)
+  [C] collecting stats time_dim… ok  (row_count=86,400)
+  [C] collecting stats customer_demographics… ok  (row_count=1,920,800)
+  [C] collecting stats income_band… ok  (row_count=20)
+  [C] collecting stats reason… ok  (row_count=55)
+  [C] collecting stats ship_mode… ok  (row_count=20)
+  [C] collecting stats item… ok  (row_count=180)
+  [C] collecting stats warehouse… ok  (row_count=5)
+  [C] collecting stats store… ok  (row_count=12)
+  [C] collecting stats call_center… ok  (row_count=6)
+  [C] collecting stats customer_address… ok  (row_count=500)
+  [C] collecting stats catalog_page… ok  (row_count=117)
+  [C] collecting stats web_site… ok  (row_count=54)
+  [C] collecting stats web_page… ok  (row_count=20)
+  [C] collecting stats household_demographics… ok  (row_count=7,200)
+  [C] collecting stats promotion… ok  (row_count=3)
+  [C] collecting stats inventory… ok  (row_count=117,450)
+  [C] collecting stats customer… ok  (row_count=1,000)
+  [C] collecting stats store_sales… ok  (row_count=28,804)
+  [C] collecting stats catalog_sales… ok  (row_count=14,415)
+  [C] collecting stats web_sales… ok  (row_count=7,193)
+  [C] collecting stats store_returns… ok  (row_count=2,875)
+  [C] collecting stats catalog_returns… ok  (row_count=1,440)
+  [C] collecting stats web_returns… ok  (row_count=717)
+  [C.5] stats fidelity: ndistinct_w2x=0.929  range_covered=0.886  null_match=1.000
+  [B] EXPLAIN tpcds-q01… ok
+  [B] EXPLAIN tpcds-q02… ok
+  [B] EXPLAIN tpcds-q03… ok
+  [B] EXPLAIN tpcds-q04… ERROR: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+
+======================================================================
+  Identity Test Result
+  schema=tpcds  dialect=oracle  sf=0.01
+  source=tpcds_src  target=tpcds_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.929  range_covered=0.886  null_match=1.000
+    ⚠  date_dim: only 54% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  time_dim: only 70% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  customer_demographics: only 56% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  inventory: only 0% of columns have matching n_distinct (target stats may not reflect source)
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcds-q01             jaccard=1.00  within_2x=1.00  nodes: 5→5
+  tpcds-q02             jaccard=1.00  within_2x=1.00  nodes: 6→6
+  tpcds-q03             jaccard=1.00  within_2x=1.00  nodes: 8→8
+
+  Overall: PASS ✓
+    A_load_source             398.67s
+    B_baseline_explain        0.51s
+    C_collect_stats           49.52s
+    D_build_target            273.70s
+    C5_target_stats_fidelity  43.40s
+    E_replay_explain          0.45s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-054554-identity-tpcds-sf0.01-oracle.json
+

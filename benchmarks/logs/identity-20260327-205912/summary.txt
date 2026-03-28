@@ -1,0 +1,10 @@
+# 2026-03-27T21:53:33.196551+00:00
+
+PASS  db2×tpcb(sf=1)                              Overall: PASS ✓
+FAIL  db2×tpcc(sf=1)                              exit=1
+FAIL  db2×tpcdi(sf=1)                             exit=1
+FAIL  db2×tpch(sf=0.01)                           exit=1
+
+Passed : 1 / 4
+Failed : 3 / 4
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260327-205912

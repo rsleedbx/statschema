@@ -86,6 +86,20 @@ packages = ["src/statschema"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts   = "-q"
+markers = [
+    "live:   marks tests that require a live database (deselect with -m 'not live')",
+    "slow:   marks tests that take >30 s (deselect with -m 'not slow')",
+    "obj1:   Objective 1 — Schema correctness",
+    "obj2:   Objective 2 — Source type coverage",
+    "obj3:   Objective 3 — Row count correctness",
+    "obj4:   Objective 4 — Distribution fidelity",
+    "obj5:   Objective 5 — Stats injection fidelity",
+    "obj6:   Objective 6 — Semantic correctness",
+    "obj7:   Objective 7 — Plan fidelity (identity test)",
+    "obj8:   Objective 8 — Cross-engine portability",
+    "obj9:   Objective 9 — Benchmark compatibility",
+    "obj10:  Objective 10 — Step-level testability",
+]
 
 [tool.coverage.run]
 source = ["src/statschema"]

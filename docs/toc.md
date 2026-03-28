@@ -31,6 +31,8 @@ README.md
 │   └── docs/stats_transpiler.md        Per-engine workarounds and function reference
 │
 ├── Testing
+│   ├── docs/test_objectives.md         Test objectives: what the suite must prove and why
+│   ├── docs/test_refactor_plan.md      Test refactoring plan: .sh → .py, shared fixtures, notebook support
 │   ├── docs/testing.md                 Local test setup, credentials, Spark/Java config
 │   ├── docs/test_plan_ddl_roundtrip.md DDL round-trip test plan
 │   ├── docs/learnings/README.md        Learnings index
@@ -100,6 +102,8 @@ README.md
 
 | Document | Contents |
 |----------|----------|
+| [`docs/test_objectives.md`](test_objectives.md) | Test objectives: what the suite must prove, the test pyramid, and planned deployment models |
+| [`docs/test_refactor_plan.md`](test_refactor_plan.md) | Test refactoring plan: .sh → .py migration, shared fixtures, parametrized type coverage, notebook compatibility |
 | [`docs/testing.md`](testing.md) | Local test setup, `.env` credentials, Spark/Java config, live-DB setup |
 | [`docs/test_plan_ddl_roundtrip.md`](test_plan_ddl_roundtrip.md) | Complete DDL round-trip test plan (all types, boundaries, constraints) |
 | [`docs/learnings/README.md`](learnings/README.md) | Learnings index: gotchas and decisions captured while building statschema |

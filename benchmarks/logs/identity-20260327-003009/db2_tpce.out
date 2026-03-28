@@ -1,0 +1,13 @@
+  [C] Auto-selected profile 'thorough' for source dialect 'db2'
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 2.93s
+  [A]   loading sector                            12 rows… 3.03s
+  [A]   loading status_type                        5 rows… 3.48s
+  [A]   loading trade_type                         5 rows… 2.80s
+  [A]   loading taxrate                          320 rows… 2.92s
+  [A]   loading charge                            15 rows… 2.34s
+  [A]   loading commission_rate                  240 rows… 2.01s
+  [A]   loading zip_code                      14,741 rows… 5.78s
+  [A]   loading address                       13,333 rows… 5.48s
+  [A]   loading news_item                        200 rows… 2.85s
+  [A]   loading industry                         102 rows… 

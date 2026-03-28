@@ -1,0 +1,173 @@
+  [C] Auto-selected profile 'standard' for source dialect 'sqlserver'
+  [A] Creating tables in schema 'tpce_src'… done
+  [A]   loading exchange                           4 rows… 1.30s
+  [A]   loading sector                            12 rows… 0.54s
+  [A]   loading status_type                        5 rows… 0.48s
+  [A]   loading trade_type                         5 rows… 0.58s
+  [A]   loading taxrate                          320 rows… 0.59s
+  [A]   loading charge                            15 rows… 0.55s
+  [A]   loading commission_rate                  240 rows… 0.63s
+  [A]   loading zip_code                      14,741 rows… 2.10s
+  [A]   loading address                      133,333 rows… 19.00s
+  [A]   loading news_item                      2,000 rows… 0.76s
+  [A]   loading industry                         102 rows… 0.61s
+  [A]   loading broker                           100 rows… 0.72s
+  [A]   loading customer                     100,000 rows… 44.65s
+  [A]   loading company                          500 rows… 0.67s
+  [A]   loading customer_taxrate             300,000 rows… 11.12s
+  [A]   loading customer_account             500,000 rows… 24.39s
+  [A]   loading watch_list                   100,000 rows… 1.29s
+  [A]   loading company_competitor             1,500 rows… 0.60s
+  [A]   loading security                         685 rows… 0.69s
+  [A]   loading financial                     10,000 rows… 0.83s
+  [A]   loading news_xref                      6,000 rows… 0.57s
+  [A]   loading account_permission           750,000 rows… 79.56s
+  [A]   loading watch_item                 1,500,000 rows… 60.03s
+  [A]   loading daily_market               1,250,275 rows… 94.55s
+  [A]   loading last_trade                       685 rows… 0.57s
+  [A]   loading trade                        333,876 rows… 51.34s
+  [A]   loading holding_summary              380,000 rows… 15.39s
+  [A]   loading trade_history              1,000,000 rows… 45.48s
+  [A]   loading trade_request                 10,000 rows… 1.66s
+  [A]   loading holding                      500,000 rows… 21.15s
+  [A]   loading cash_transaction             333,876 rows… 15.00s
+  [A]   loading holding_history            1,000,000 rows… 7.80s
+  [A] Running ANALYZE on 'tpce_src'… done
+  [B] EXPLAIN tpce-q01… ok
+  [B] EXPLAIN tpce-q02… ok
+  [B] EXPLAIN tpce-q03… ok
+  [B] EXPLAIN tpce-q04… ok
+  [C] pred_cols: 15 predicate columns from workload YAML across 32 tables
+  [C] collecting stats exchange… ok  (row_count=4)
+  [C] collecting stats sector… ok  (row_count=12)
+  [C] collecting stats status_type… ok  (row_count=5)
+  [C] collecting stats trade_type… ok  (row_count=5)
+  [C] collecting stats taxrate… ok  (row_count=320)
+  [C] collecting stats charge… ok  (row_count=15)
+  [C] collecting stats commission_rate… ok  (row_count=240)
+  [C] collecting stats zip_code… ok  (row_count=14,741)
+  [C] collecting stats address… ok  (row_count=133,333)
+  [C] collecting stats news_item… ok  (row_count=2,000)
+  [C] collecting stats industry… ok  (row_count=102)
+  [C] collecting stats broker… ok  (row_count=100)
+  [C] collecting stats customer… ok  (row_count=100,000)
+  [C] collecting stats company… ok  (row_count=500)
+  [C] collecting stats customer_taxrate… ok  (row_count=300,000)
+  [C] collecting stats customer_account… ok  (row_count=500,000)
+  [C] collecting stats watch_list… ok  (row_count=100,000)
+  [C] collecting stats company_competitor… ok  (row_count=1,500)
+  [C] collecting stats security… ok  (row_count=685)
+  [C] collecting stats financial… ok  (row_count=10,000)
+  [C] collecting stats news_xref… ok  (row_count=6,000)
+  [C] collecting stats account_permission… ok  (row_count=750,000)
+  [C] collecting stats watch_item… ok  (row_count=1,500,000)
+  [C] collecting stats daily_market… ok  (row_count=1,250,275)
+  [C] collecting stats last_trade… ok  (row_count=685)
+  [C] collecting stats trade… ok  (row_count=333,876)
+  [C] collecting stats holding_summary… ok  (row_count=380,000)
+  [C] collecting stats trade_history… ok  (row_count=1,000,000)
+  [C] collecting stats trade_request… ok  (row_count=10,000)
+  [C] collecting stats holding… ok  (row_count=500,000)
+  [C] collecting stats cash_transaction… ok  (row_count=333,876)
+  [C] collecting stats holding_history… ok  (row_count=1,000,000)
+  [D] Creating tables in schema 'tpce_tgt'… done
+  [D]   synthetic exchange                           4 rows… 2.13s
+  [D]   synthetic sector                            12 rows… 0.81s
+  [D]   synthetic status_type                        5 rows… 0.70s
+  [D]   synthetic trade_type                         5 rows… 0.98s
+  [D]   synthetic taxrate                          320 rows… 1.37s
+  [D]   synthetic charge                            15 rows… 0.88s
+  [D]   synthetic commission_rate                  240 rows… 1.01s
+  [D]   synthetic zip_code                      14,741 rows… 3.53s
+  [D]   synthetic address                      133,333 rows… 24.36s
+  [D]   synthetic news_item                      2,000 rows… 0.73s
+  [D]   synthetic industry                         102 rows… 0.46s
+  [D]   synthetic broker                           100 rows… 0.46s
+  [D]   synthetic customer                     100,000 rows… 73.26s
+  [D]   synthetic company                          500 rows… 1.30s
+  [D]   synthetic customer_taxrate             300,000 rows… 27.34s
+  [D]   synthetic customer_account             500,000 rows… 37.82s
+  [D]   synthetic watch_list                   100,000 rows… 1.76s
+  [D]   synthetic company_competitor             1,500 rows… 0.74s
+  [D]   synthetic security                         685 rows… 0.62s
+  [D]   synthetic financial                     10,000 rows… 0.72s
+  [D]   synthetic news_xref                      6,000 rows… 0.52s
+  [D]   synthetic account_permission           750,000 rows… 82.38s
+  [D]   synthetic watch_item                 1,500,000 rows… 56.57s
+  [D]   synthetic daily_market               1,250,275 rows… 55.11s
+  [D]   synthetic last_trade                       685 rows… 0.51s
+  [D]   synthetic trade                        333,876 rows… 38.92s
+  [D]   synthetic holding_summary              380,000 rows… 13.51s
+  [D]   synthetic trade_history              1,000,000 rows… 32.71s
+  [D]   synthetic trade_request                 10,000 rows… 1.10s
+  [D]   synthetic holding                      500,000 rows… 20.96s
+  [D]   synthetic cash_transaction             333,876 rows… 14.26s
+  [D]   synthetic holding_history            1,000,000 rows… 7.05s
+  [D] Updating statistics in 'tpce_tgt'… done (native ANALYZE)
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats exchange… ok  (row_count=4)
+  [C] collecting stats sector… ok  (row_count=12)
+  [C] collecting stats status_type… ok  (row_count=5)
+  [C] collecting stats trade_type… ok  (row_count=5)
+  [C] collecting stats taxrate… ok  (row_count=320)
+  [C] collecting stats charge… ok  (row_count=15)
+  [C] collecting stats commission_rate… ok  (row_count=240)
+  [C] collecting stats zip_code… ok  (row_count=14,741)
+  [C] collecting stats address… ok  (row_count=133,333)
+  [C] collecting stats news_item… ok  (row_count=2,000)
+  [C] collecting stats industry… ok  (row_count=102)
+  [C] collecting stats broker… ok  (row_count=100)
+  [C] collecting stats customer… ok  (row_count=100,000)
+  [C] collecting stats company… ok  (row_count=500)
+  [C] collecting stats customer_taxrate… ok  (row_count=300,000)
+  [C] collecting stats customer_account… ok  (row_count=500,000)
+  [C] collecting stats watch_list… ok  (row_count=100,000)
+  [C] collecting stats company_competitor… ok  (row_count=1,500)
+  [C] collecting stats security… ok  (row_count=685)
+  [C] collecting stats financial… ok  (row_count=10,000)
+  [C] collecting stats news_xref… ok  (row_count=6,000)
+  [C] collecting stats account_permission… ok  (row_count=750,000)
+  [C] collecting stats watch_item… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats daily_market… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats last_trade… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats trade… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats holding_summary… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats trade_history… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats trade_request… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats holding… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats cash_transaction… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C] collecting stats holding_history… WARNING: Driver Error: Communication link failure; DDBC Error: [Microsoft]Communication link failure
+  [C.5] stats fidelity: ndistinct_w2x=0.882  range_covered=0.971  null_match=1.000
+  [B] EXPLAIN tpce-q01… ERROR: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+  [B] EXPLAIN tpce-q02… ERROR: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+  [B] EXPLAIN tpce-q03… ERROR: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+  [B] EXPLAIN tpce-q04… ERROR: Driver Error: Syntax error or access violation; DDBC Error: [Microsoft][SQL Server]Database 'tpce_tgt' is in transition. Try the statement later.
+
+======================================================================
+  Identity Test Result
+  schema=tpce  dialect=sqlserver  sf=0.1
+  source=tpce_src  target=tpce_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=0.882  range_covered=0.971  null_match=1.000
+    ⚠  customer_taxrate: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  watch_list: only 67% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  company_competitor: only 33% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  news_xref: only 50% of columns have matching n_distinct (target stats may not reflect source)
+    ⚠  account_permission: only 60% of columns have matching n_distinct (target stats may not reflect source)
+
+  node_jaccard  : 0.000  (threshold ≥ 0.7)
+  within_2x     : 0.000  (threshold ≥ 0.5)
+  within_10x    : 0.000
+
+
+  Overall: FAIL ✗  (mean_node_jaccard 0.000 < threshold 0.7)
+    A_load_source             534.80s
+    B_baseline_explain        38.73s
+    C_collect_stats           506.33s
+    D_build_target            521.44s
+    C5_target_stats_fidelity  1108.42s
+    E_replay_explain          0.28s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-062436-identity-tpce-sf0.1-sqlserver.json
+

@@ -1,0 +1,3 @@
+PASS  db2×tpcdi(sf=1)                              Overall: PASS ✓
+FAIL  db2×tpcds(sf=0.01)                         exit=1
+FAIL  db2×tpce(sf=0.01)                          exit=1

@@ -1,0 +1,4 @@
+PASS  cockroachdb×tpce(sf=0.01)                    Overall: PASS ✓
+PASS  cockroachdb×tpch(sf=0.1)                     Overall: PASS ✓
+PASS  cockroachdb×tpcdi(sf=5)                      Overall: PASS ✓
+PASS  cockroachdb×tpcds(sf=0.01)                   Overall: PASS ✓

@@ -100,6 +100,47 @@ def _lakebase_connect(endpoint: str, host: str, dbname: str, user: str, port: in
     )
 
 
+def _open_connection(
+    dialect: str,
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    database: str,
+) -> Any:
+    """Open a DBAPI-2 connection from resolved host/port/user/password/database.
+
+    Used by both _connect (DSN path) and _connect_interactive (prompt path) so
+    the driver selection logic lives in exactly one place.
+    """
+    if dialect in ("mysql", "mariadb"):
+        import pymysql
+        return pymysql.connect(
+            host=host, port=port, user=user, password=password,
+            database=database, local_infile=True, autocommit=False,
+        )
+
+    if dialect == "sqlserver":
+        try:
+            import mssql_python
+            return mssql_python.connect(f"SERVER={host},{port};DATABASE={database};UID={user};PWD={password}")
+        except ImportError:
+            import pymssql
+            return pymssql.connect(server=host, port=port, database=database, user=user, password=password)
+
+    if dialect == "oracle":
+        import oracledb
+        return oracledb.connect(user=user, password=password, dsn=f"{host}:{port}/{database}")
+
+    if dialect == "db2":
+        import ibm_db_dbi
+        return ibm_db_dbi.connect(
+            f"DATABASE={database};HOSTNAME={host};PORT={port};UID={user};PWD={password}", "", ""
+        )
+
+    raise ValueError(f"_open_connection: unexpected dialect {dialect!r}")
+
+
 def _connect(dialect: str, dsn: str | None) -> Any:
     """Open and return a DBAPI-2 connection from a DSN string."""
     env = os.environ
@@ -126,9 +167,7 @@ def _connect(dialect: str, dsn: str | None) -> Any:
                     or env.get("DATABRICKS_CLIENT_ID", ""))
         port     = int(parts.get("port") or env.get("PGPORT", "5432"))
         if not endpoint:
-            _die(
-                "Lakebase: provide endpoint= in --dsn or set STATSCHEMA_LAKEBASE_ENDPOINT."
-            )
+            _die("Lakebase: provide endpoint= in --dsn or set STATSCHEMA_LAKEBASE_ENDPOINT.")
         if not host:
             _die("Lakebase: provide host= in --dsn or set STATSCHEMA_LAKEBASE_HOST.")
         if not user:
@@ -143,7 +182,6 @@ def _connect(dialect: str, dsn: str | None) -> Any:
         return psycopg2.connect(conn_str)
 
     if dialect in ("mysql", "mariadb"):
-        import pymysql
         if dsn:
             parts = dict(kv.split("=", 1) for kv in dsn.split() if "=" in kv)
             host = parts.get("host", "localhost")
@@ -159,10 +197,7 @@ def _connect(dialect: str, dsn: str | None) -> Any:
             database = env.get("STATSCHEMA_MYSQL_DB", "")
         if not database:
             _die("Provide database= in --dsn or set STATSCHEMA_MYSQL_DB.")
-        return pymysql.connect(
-            host=host, port=port, user=user, password=password,
-            database=database, local_infile=True, autocommit=False,
-        )
+        return _open_connection(dialect, host, port, user, password, database)
 
     if dialect == "sqlserver":
         conn_str = dsn or env.get("STATSCHEMA_SQLSERVER_DSN", "")
@@ -189,7 +224,7 @@ def _connect(dialect: str, dsn: str | None) -> Any:
 
     if dialect == "oracle":
         import oracledb
-        oracle_dsn  = dsn or env.get("STATSCHEMA_ORACLE_DSN",  "localhost:1521/XEPDB1")
+        oracle_dsn  = dsn or env.get("STATSCHEMA_ORACLE_DSN", "localhost:1521/XEPDB1")
         oracle_user = env.get("STATSCHEMA_ORACLE_USER", "")
         oracle_pass = env.get("STATSCHEMA_ORACLE_PASS", "")
         if dsn and "@" in dsn:
@@ -200,10 +235,10 @@ def _connect(dialect: str, dsn: str | None) -> Any:
         return oracledb.connect(user=oracle_user, password=oracle_pass, dsn=oracle_dsn)
 
     if dialect == "db2":
-        import ibm_db_dbi
         conn_str = dsn or env.get("STATSCHEMA_DB2_DSN", "")
         if not conn_str:
             _die("Provide --dsn or set STATSCHEMA_DB2_DSN.")
+        import ibm_db_dbi
         return ibm_db_dbi.connect(conn_str, "", "")
 
     _die(f"Unsupported dialect {dialect!r}. Choices: {', '.join(_ALL_DIALECTS)}")
@@ -604,32 +639,7 @@ def _connect_interactive(dialect: str, host: str | None, port: int | None,
         import psycopg2
         return psycopg2.connect(host=h, port=p, dbname=db, user=u, password=pw), h, p, u, db
 
-    if dialect in ("mysql", "mariadb"):
-        import pymysql
-        return (pymysql.connect(host=h, port=p, user=u, password=pw,
-                                database=db, local_infile=True, autocommit=True),
-                h, p, u, db)
-
-    if dialect == "sqlserver":
-        try:
-            import mssql_python
-            cs = f"SERVER={h},{p};DATABASE={db};UID={u};PWD={pw}"
-            return mssql_python.connect(cs), h, p, u, db
-        except ImportError:
-            import pymssql
-            return pymssql.connect(server=h, port=p, database=db, user=u, password=pw), h, p, u, db
-
-    if dialect == "oracle":
-        import oracledb
-        dsn = f"{h}:{p}/{db}"
-        return oracledb.connect(user=u, password=pw, dsn=dsn), h, p, u, db
-
-    if dialect == "db2":
-        import ibm_db_dbi
-        cs = f"DATABASE={db};HOSTNAME={h};PORT={p};UID={u};PWD={pw}"
-        return ibm_db_dbi.connect(cs, "", ""), h, p, u, db
-
-    _die(f"Unsupported dialect: {dialect!r}")
+    return _open_connection(dialect, h, p, u, pw, db), h, p, u, db
 
 
 def _list_tables(cur: _LoggingCursor, dialect: str, schema: str | None, pattern: str) -> list[str]:

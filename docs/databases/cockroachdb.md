@@ -15,19 +15,26 @@ Both topologies use `--insecure` (no TLS); `sslmode=disable` in psycopg2.
 
 ## Single-node setup
 
+The Podman VM is shared with the 3-node cluster (crdb1/crdb2/crdb3), which
+consumes ~5.1 GB of the ~8.3 GB VM total.  Without a hard memory ceiling,
+crdb-single defaults to 25% cache + 25% SQL memory ≈ 4 GB, which causes an
+OOM kill under concurrent schema loads.  The `--memory=2g` flag sets a hard
+container limit; `--cache` and `--max-sql-memory` tell CockroachDB to stay
+within that budget.
+
 ```bash
 podman run -d --name crdb-single \
   -p 26257:26257 -p 8080:8080 \
+  --memory=2g \
   cockroachdb/cockroach:latest start-single-node \
   --insecure \
-  --listen-addr=0.0.0.0:26257 \
-  --http-addr=0.0.0.0:8080 \
-  --advertise-addr=127.0.0.1:26257
+  --cache=512MiB \
+  --max-sql-memory=512MiB
 
-# Wait for cluster init (~5 s), then create test database
-sleep 5
+# Wait for cluster init (~8 s), then create test database
+sleep 8
 podman exec crdb-single \
-  cockroach sql --insecure --host=localhost:26257 \
+  cockroach sql --insecure \
   -e "CREATE DATABASE IF NOT EXISTS testdb;"
 ```
 

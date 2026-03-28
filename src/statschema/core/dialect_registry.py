@@ -71,6 +71,15 @@ SCHEMA_SOURCE_DB2_ALIASES: frozenset[str] = frozenset(
     {"ibmdb2", "ibm_db2", "db2luw", "db2z", "db2i", "dashdb"}
 )
 
+# Wire-protocol families used by query collectors, replayers, and CLI routing.
+# All product names and aliases that share the same driver / system views.
+PG_FAMILY: frozenset[str] = frozenset(
+    {"postgres", "postgresql", "neon", "neondb", "cockroach", "cockroachdb", "crdb", "lakebase"}
+)
+MYSQL_FAMILY: frozenset[str] = frozenset(
+    {"mysql", "mariadb", "maria", "mariadb_columnstore"}
+)
+
 # All strings valid as ``load_schema(..., format_hint=...)`` when loading a ``.sql`` path.
 DDL_FILE_FORMAT_HINTS: frozenset[str] = frozenset(DIALECT_ALIASES.keys()) | frozenset(
     CANONICAL_DIALECTS
@@ -92,6 +101,8 @@ __all__ = [
     "CANONICAL_DIALECTS",
     "DDL_FILE_FORMAT_HINTS",
     "DIALECT_ALIASES",
+    "MYSQL_FAMILY",
+    "PG_FAMILY",
     "SCHEMA_SOURCE_DB2_ALIASES",
     "SCHEMA_SOURCE_MYSQL_ALIASES",
     "SCHEMA_SOURCE_POSTGRES_ALIASES",

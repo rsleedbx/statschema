@@ -1,0 +1,16 @@
+WARNING __main__ EXPLAIN failed for tpce-q01: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q02: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q03: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q04: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q01: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q02: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q03: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/
+WARNING __main__ EXPLAIN failed for tpce-q04: ORA-00932: inconsistent datatypes: expected - got CLOB
+Help: https://docs.oracle.com/error-help/db/ora-00932/

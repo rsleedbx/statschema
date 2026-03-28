@@ -1,0 +1,1 @@
+WARNING __main__ build_rows_from_canonical failed for lineitem (Invalid comparison between dtype=str and ndarray); falling back to simple generate_rows — stats-driven generation was NOT used for this table

@@ -1,0 +1,123 @@
+  [A] Creating tables in schema 'tpcdi_src'… done
+  [A]   loading StatusType                         5 rows… 0.02s
+  [A]   loading TaxRate                          320 rows… 0.02s
+  [A]   loading TradeType                          5 rows… 0.01s
+  [A]   loading Industry                         102 rows… 0.01s
+  [A]   loading DimDate                        3,652 rows… 0.21s
+  [A]   loading DimTime                       86,400 rows… 2.41s
+  [A]   loading DimCompany                     2,000 rows… 0.21s
+  [A]   loading DimBroker                        500 rows… 0.03s
+  [A]   loading DimCustomer                    4,750 rows… 1.27s
+  [A]   loading DimMessage                     2,500 rows… 0.10s
+  [A]   loading DimSecurity                    3,425 rows… 0.14s
+  [A]   loading Financial                     16,000 rows… 0.53s
+  [A]   loading DimAccount                     7,500 rows… 0.23s
+  [A]   loading FactMarketHistory            285,000 rows… 7.57s
+  [A]   loading FactWatches                   25,000 rows… 0.21s
+  [A]   loading DimTrade                     230,000 rows… 9.92s
+  [A]   loading FactCashBalances              12,500 rows… 0.10s
+  [A]   loading FactHoldings                  15,000 rows… 0.21s
+  [A] Running ANALYZE on 'tpcdi_src'… done
+  [A.5] Found 7 column pairs across 3 tables; creating statistics… done (0 created)
+  [A.5] Running ANALYZE for extended stats… done
+  [A.6] No literal predicates on dimension columns found — skipping FK range inference
+  [B] EXPLAIN tpcdi-q01… ok
+  [B] EXPLAIN tpcdi-q02… ok
+  [B] EXPLAIN tpcdi-q03… ok
+  [B] EXPLAIN tpcdi-q04… ok
+  [C] collecting stats StatusType… ok  (row_count=5)
+  [C] collecting stats TaxRate… ok  (row_count=320)
+  [C] collecting stats TradeType… ok  (row_count=5)
+  [C] collecting stats Industry… ok  (row_count=102)
+  [C] collecting stats DimDate… ok  (row_count=3,652)
+  [C] collecting stats DimTime… ok  (row_count=86,400)
+  [C] collecting stats DimCompany… ok  (row_count=2,000)
+  [C] collecting stats DimBroker… ok  (row_count=500)
+  [C] collecting stats DimCustomer… ok  (row_count=4,750)
+  [C] collecting stats DimMessage… ok  (row_count=2,500)
+  [C] collecting stats DimSecurity… ok  (row_count=3,425)
+  [C] collecting stats Financial… ok  (row_count=16,000)
+  [C] collecting stats DimAccount… ok  (row_count=7,500)
+  [C] collecting stats FactMarketHistory… ok  (row_count=285,000)
+  [C] collecting stats FactWatches… ok  (row_count=25,000)
+  [C] collecting stats DimTrade… ok  (row_count=230,000)
+  [C] collecting stats FactCashBalances… ok  (row_count=12,500)
+  [C] collecting stats FactHoldings… ok  (row_count=15,000)
+  [D] Creating tables in schema 'tpcdi_tgt'… done
+  [D]   synthetic StatusType                         5 rows… 0.01s
+  [D]   synthetic TaxRate                          320 rows… 0.01s
+  [D]   synthetic TradeType                          5 rows… 0.01s
+  [D]   synthetic Industry                         102 rows… 0.01s
+  [D]   synthetic DimDate                        3,652 rows… 0.24s
+  [D]   synthetic DimTime                       86,400 rows… 2.20s
+  [D]   synthetic DimCompany                     2,000 rows… 0.23s
+  [D]   synthetic DimBroker                        500 rows… 0.03s
+  [D]   synthetic DimCustomer                    4,750 rows… 0.88s
+  [D]   synthetic DimMessage                     2,500 rows… 0.09s
+  [D]   synthetic DimSecurity                    3,425 rows… 0.14s
+  [D]   synthetic Financial                     16,000 rows… 0.38s
+  [D]   synthetic DimAccount                     7,500 rows… 0.18s
+  [D]   synthetic FactMarketHistory            285,000 rows… 5.02s
+  [D]   synthetic FactWatches                   25,000 rows… 0.09s
+  [D]   synthetic DimTrade                     230,000 rows… 8.33s
+  [D]   synthetic FactCashBalances              12,500 rows… 0.06s
+  [D]   synthetic FactHoldings                  15,000 rows… 0.13s
+  [D] Updating statistics in 'tpcdi_tgt'… done
+  [D.5] Creating extended statistics in 'tpcdi_tgt'… done (0 created)
+  [D.5] Analyzing target tables for extended stats… done
+  [D.5] Re-injecting single-column stats after ANALYZE… done
+  [C.5] Collecting target stats for fidelity check…
+  [C] collecting stats StatusType… ok  (row_count=5)
+  [C] collecting stats TaxRate… ok  (row_count=320)
+  [C] collecting stats TradeType… ok  (row_count=5)
+  [C] collecting stats Industry… ok  (row_count=102)
+  [C] collecting stats DimDate… ok  (row_count=3,652)
+  [C] collecting stats DimTime… ok  (row_count=86,400)
+  [C] collecting stats DimCompany… ok  (row_count=2,000)
+  [C] collecting stats DimBroker… ok  (row_count=500)
+  [C] collecting stats DimCustomer… ok  (row_count=4,750)
+  [C] collecting stats DimMessage… ok  (row_count=2,500)
+  [C] collecting stats DimSecurity… ok  (row_count=3,425)
+  [C] collecting stats Financial… ok  (row_count=16,000)
+  [C] collecting stats DimAccount… ok  (row_count=7,500)
+  [C] collecting stats FactMarketHistory… ok  (row_count=285,000)
+  [C] collecting stats FactWatches… ok  (row_count=25,000)
+  [C] collecting stats DimTrade… ok  (row_count=230,000)
+  [C] collecting stats FactCashBalances… ok  (row_count=12,500)
+  [C] collecting stats FactHoldings… ok  (row_count=15,000)
+  [C.5] stats fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+  [B] EXPLAIN tpcdi-q01… ok
+  [B] EXPLAIN tpcdi-q02… ok
+  [B] EXPLAIN tpcdi-q03… ok
+  [B] EXPLAIN tpcdi-q04… ok
+
+======================================================================
+  Identity Test Result
+  schema=tpcdi  dialect=postgres  sf=5.0
+  source=tpcdi_src  target=tpcdi_tgt
+======================================================================
+  stats_fidelity: ndistinct_w2x=1.000  range_covered=1.000  null_match=1.000
+
+  node_jaccard  : 1.000  (threshold ≥ 0.7)
+  within_2x     : 1.000  (threshold ≥ 0.5)
+  within_10x    : 1.000
+
+  tpcdi-q01             jaccard=1.00  within_2x=1.00  nodes: 10→10
+  tpcdi-q02             jaccard=1.00  within_2x=1.00  nodes: 6→6
+  tpcdi-q03             jaccard=1.00  within_2x=1.00  nodes: 12→12
+  tpcdi-q04             jaccard=1.00  within_2x=1.00  nodes: 4→4
+
+  Overall: PASS ✓
+    A_load_source             24.29s
+    A5_source_extended_stats  0.07s
+    A6_fk_range_inference     0.01s
+    B_baseline_explain        0.03s
+    C_collect_stats           7.78s
+    D_build_target            18.70s
+    D5_target_extended_stats  0.02s
+    C5_target_stats_fidelity  8.50s
+    E_replay_explain          0.07s
+======================================================================
+
+  Result saved → benchmarks/results/20260327-064047-identity-tpcdi-sf5.0-postgres.json
+

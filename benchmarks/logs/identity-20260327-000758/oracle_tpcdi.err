@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2483, in <module>
+    main()
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 2447, in main
+    result = run_identity_test(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 1976, in run_identity_test
+    result.source_row_counts = load_source(
+                               ^^^^^^^^^^^^
+  File "/Users/robert.lee/github/statschema/benchmarks/identity_test.py", line 995, in load_source
+    load_dataframe(
+  File "/Users/robert.lee/github/statschema/src/statschema/data_loader.py", line 180, in load_dataframe
+    conn.direct_path_load(
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/oracledb/connection.py", line 1089, in direct_path_load
+    self._impl.direct_path_load(
+  File "src/oracledb/impl/thin/connection.pyx", line 567, in oracledb.thin_impl.ThinConnImpl.direct_path_load
+  File "src/oracledb/impl/thin/messages/direct_path_load_stream.pyx", line 367, in oracledb.thin_impl.DirectPathLoadStreamMessage.prepare
+  File "src/oracledb/impl/thin/messages/direct_path_load_stream.pyx", line 306, in oracledb.thin_impl.DirectPathLoadStreamMessage._calculate_pieces
+  File "src/oracledb/impl/base/connection.pyx", line 170, in oracledb.base_impl.BaseConnImpl._check_value
+  File "/Users/robert.lee/github/statschema/.venv_test/lib/python3.11/site-packages/oracledb/errors.py", line 199, in _raise_err
+    raise error.exc_type(error) from cause
+oracledb.exceptions.NotSupportedError: DPY-3013: unsupported Python type str for database type DB_TYPE_NUMBER

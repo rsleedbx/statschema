@@ -7,8 +7,12 @@ from .._emitter_shared import col_ddl, primary_key_constraint, quote
 
 DEFAULTS: dict[str, str] = {
     "integer":     "NUMBER(10)",
+    "smallint":    "NUMBER(5)",
+    "bigint":      "NUMBER(19)",
     "long":        "NUMBER(19)",
     "string":      "CLOB",
+    "varchar":     "VARCHAR2(4000)",
+    "char":        "CHAR(1)",
     "uuid":        "CHAR(36)",
     "float":       "FLOAT",
     "double":      "FLOAT(53)",
