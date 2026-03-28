@@ -562,40 +562,55 @@ def _set_namespace_db2(conn, schema_name: str) -> None:
 
 
 def _analyze_db2(conn, tables: list, schema: str,
-                 pred_col_map: dict | None = None, full_stats: bool = False) -> None:
-    """Run DB2 RUNSTATS.
+                 pred_col_map: dict | None = None, full_stats: bool = False,
+                 tablesample_pct: float | None = None) -> None:
+    """Run DB2 RUNSTATS via ``CALL SYSPROC.ADMIN_CMD()``.
+
+    ``ibm_db_dbi`` cannot execute ``RUNSTATS ON TABLE`` directly (SQL0104N);
+    it must be wrapped in ``SYSPROC.ADMIN_CMD``.
+
+    Always includes ``AND DETAILED INDEXES ALL``.  Without it SYSCAT.INDEXES
+    is not refreshed and the stat collector falls back to full-table MIN/MAX
+    scans for every column (2–3× slower subsequent collection).
+
+    ``TABLESAMPLE SYSTEM(n)`` goes after ``AND DETAILED INDEXES ALL``.
 
     Default (fast) mode — ``full_stats=False``:
-    • Tables that have predicate columns in the workload: targeted
-      ``RUNSTATS ON TABLE … ON COLUMNS (c1, c2) WITH DISTRIBUTION``.
-      Only the listed columns get histogram/MCV stats; this is 5-10× faster
-      than running WITH DISTRIBUTION across all columns for wide tables.
-    • Tables with no predicate columns: bare ``RUNSTATS ON TABLE …`` — updates
-      row counts and basic cardinality without per-column distributions.
+    • Tables with predicate columns:
+      ``RUNSTATS ON TABLE … ON COLUMNS (c1, c2) WITH DISTRIBUTION
+        AND DETAILED INDEXES ALL [TABLESAMPLE SYSTEM(n)]``
+    • Tables without predicate columns (no distributions needed):
+      ``RUNSTATS ON TABLE … AND DETAILED INDEXES ALL [TABLESAMPLE SYSTEM(n)]``
 
     Full mode — ``full_stats=True`` (major-release / audit):
-    • Every table gets ``RUNSTATS … WITH DISTRIBUTION AND DETAILED INDEXES ALL``,
-      the most complete but most expensive option.
+    • ``RUNSTATS … WITH DISTRIBUTION AND DETAILED INDEXES ALL [TABLESAMPLE …]``
+      on every table.
+
+    ``tablesample_pct`` (0 < n ≤ 100): RUNSTATS scans only n% of pages.
+    Reduces time proportionally with slight accuracy trade-off.
+    Empirical timings on 1.9 M-row table (customer_demographics):
+      no sample → 6.6 s │ 50% → 4.3 s │ 25% → 2.2 s │ 10% → 1.0 s
     """
+    sample_suffix = f" TABLESAMPLE SYSTEM({tablesample_pct})" if tablesample_pct else ""
     with conn.cursor() as cur:
         for t in tables:
             tref = f"{schema.upper()}.{t.name.upper()}"
             try:
-                pred_cols = (
-                    {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
-                )
+                pred_cols = {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
                 if full_stats:
-                    sql = f"RUNSTATS ON TABLE {tref} WITH DISTRIBUTION AND DETAILED INDEXES ALL"
+                    runstats = (f"RUNSTATS ON TABLE {tref} "
+                                f"WITH DISTRIBUTION AND DETAILED INDEXES ALL{sample_suffix}")
                 elif pred_cols:
                     col_clause = ", ".join(sorted(pred_cols))
-                    sql = (
+                    runstats = (
                         f"RUNSTATS ON TABLE {tref} "
-                        f"ON COLUMNS ({col_clause}) WITH DISTRIBUTION"
+                        f"ON COLUMNS ({col_clause}) WITH DISTRIBUTION "
+                        f"AND DETAILED INDEXES ALL{sample_suffix}"
                     )
                 else:
-                    # No predicate columns — basic row-count update only
-                    sql = f"RUNSTATS ON TABLE {tref}"
-                cur.execute(sql)
+                    runstats = (f"RUNSTATS ON TABLE {tref} "
+                                f"AND DETAILED INDEXES ALL{sample_suffix}")
+                cur.execute(f"CALL SYSPROC.ADMIN_CMD('{runstats}')")
             except Exception:
                 pass
     conn.commit()
@@ -640,6 +655,7 @@ def _analyze_tables(
     dialect: str,
     pred_col_map: dict | None = None,
     full_stats: bool = False,
+    db2_tablesample_pct: float | None = None,
 ) -> None:
     """Run the engine's native ANALYZE / RUNSTATS / GATHER_TABLE_STATS.
 
@@ -649,6 +665,8 @@ def _analyze_tables(
       which is significantly faster for wide schemas.
     *full_stats* — if True, always gather all-column statistics regardless
       of the predicate map.  Useful for major-release validation runs.
+    *db2_tablesample_pct* — DB2 only: ``TABLESAMPLE SYSTEM(n)`` page-sampling
+      percentage (0 < n ≤ 100).  Reduces RUNSTATS scan time proportionally.
     """
     if dialect in ("postgres", "neon", "cockroachdb", "lakebase"):
         _analyze_pg(conn, tables, schema)
@@ -662,7 +680,8 @@ def _analyze_tables(
                         pred_col_map=pred_col_map, full_stats=full_stats)
     elif dialect == "db2":
         _analyze_db2(conn, tables, schema,
-                     pred_col_map=pred_col_map, full_stats=full_stats)
+                     pred_col_map=pred_col_map, full_stats=full_stats,
+                     tablesample_pct=db2_tablesample_pct)
 
 
 # ---------------------------------------------------------------------------
@@ -2258,10 +2277,13 @@ def run_identity_test(
     # ── Phase C.5: Collect target stats and compare vs source ─────────────────
     # Validates that build_rows_from_canonical actually reproduced the source
     # statistics — if it didn't, plan matches in Phase E are coincidental.
+    # Uses the same collection_config as Phase C so pred_cols short-circuiting
+    # and samp_nd apply here too, keeping C.5 at a similar cost as Phase C.
     t0 = time.perf_counter()
     try:
         print("  [C.5] Collecting target stats for fidelity check…")
-        target_stats = collect_stats(conn, ordered, target_schema, dialect)
+        target_stats = collect_stats(conn, ordered, target_schema, dialect,
+                                     config=collection_config)
         result.stats_fidelity = _compare_stats(collected_stats, target_stats)
         nd   = result.stats_fidelity.get("mean_ndistinct_within_2x")
         rng  = result.stats_fidelity.get("mean_range_covered")

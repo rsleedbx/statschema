@@ -52,7 +52,7 @@ What each engine's `_analyze_*` function issues, and what it covers:
 | **MySQL** | `ANALYZE TABLE \`schema\`.\`table\`` | Refreshes InnoDB index cardinality + previously-created column histograms only |
 | **SQL Server** | `UPDATE STATISTICS [dbo].[table]` | All statistics objects on the table (per-column + per-index); samples by default |
 | **Oracle** | `DBMS_STATS.GATHER_TABLE_STATS(…)` | All columns with `method_opt => 'FOR ALL COLUMNS SIZE AUTO'` by default |
-| **DB2** | `RUNSTATS ON TABLE schema.TABLE WITH DISTRIBUTION AND DETAILED INDEXES ALL` | All columns, all indexes; most expensive variant |
+| **DB2** | `CALL SYSPROC.ADMIN_CMD('RUNSTATS ON TABLE schema.TABLE WITH DISTRIBUTION AND DETAILED INDEXES ALL')` | All columns, all indexes; most expensive variant.  **Must use `ADMIN_CMD`** — bare `cursor.execute('RUNSTATS …')` returns SQL0104N and is silently ignored by `ibm_db_dbi`. Add `TABLESAMPLE SYSTEM(n)` at the end for faster sampling (25% = ~2× faster, 10% = ~6× faster). |
 
 ### statschema default vs. `--full-stats-db2-ora`
 
@@ -60,15 +60,15 @@ For non-PostgreSQL engines in Phase D (target schema), statschema uses the workl
 
 | Engine | Default (predicate-targeted) | `--full-stats-db2-ora` |
 |---|---|---|
-| **DB2** | `RUNSTATS … ON COLUMNS (c1, c2) WITH DISTRIBUTION` for predicate columns; bare `RUNSTATS ON TABLE …` for tables with no predicate columns | `RUNSTATS … WITH DISTRIBUTION AND DETAILED INDEXES ALL` on every table |
+| **DB2** | `RUNSTATS … ON COLUMNS (pred_cols) WITH DISTRIBUTION AND DETAILED INDEXES ALL` for tables with predicate columns; `RUNSTATS … AND DETAILED INDEXES ALL` only for tables with no predicate columns.  `DETAILED INDEXES ALL` is always included so `SYSCAT.INDEXES` is current and the Python collector can use fast index-scan MIN/MAX. | `RUNSTATS … WITH DISTRIBUTION AND DETAILED INDEXES ALL` on every table |
 | **Oracle** | `GATHER_TABLE_STATS(… method_opt='FOR ALL COLUMNS SIZE 1, FOR COLUMNS pred_col SIZE AUTO')` | `GATHER_TABLE_STATS(… method_opt='FOR ALL COLUMNS SIZE AUTO')` |
 | **SQL Server** | `UPDATE STATISTICS [dbo].[table]` (no change; column targeting not available at this level) | Same — no effect |
 | **MySQL** | `ANALYZE TABLE` (no change) | Same — no effect |
 | **PostgreSQL / CockroachDB** | `ANALYZE "schema"."table"` (no change; stats injected directly via `pg_restore_attribute_stats`) | Same — no effect |
 
-`--full-stats-db2-ora` is intended for major-release or audit runs where you want to verify that the full DB2 / Oracle catalog matches what statschema collected, not just the predicate-column subset.
+`--full-stats-db2-ora` is intended for major-release or audit runs where you want to verify that the full DB2 / Oracle catalog matches what statschema collected, not just the predicate-column subset.  For routine CI runs the default targeted mode is sufficient: Phase C.5 uses the same `collection_config` as Phase C (including `pred_cols` short-circuiting), so it only needs stats for predicate columns to produce correct identity scores.
 
-Phase A (source schema) always uses full stats regardless of this flag, because Phase C reads from it.
+Phase A (source schema) always uses full stats regardless of this flag, because Phase C reads from it as the ground truth.
 
 ---
 
@@ -100,7 +100,7 @@ The primary pass/fail judgment:
 
 ### Stats not compared
 
-The following fields are collected and stored in the canonical YAML but are not evaluated in the identity test scoring:
+The following fields are collected and stored in the canonical YAML but are not evaluated in the identity test scoring (see [why these fields are not scored](stats_not_scored_rationale.md)):
 
 - `correlation` — collected from PostgreSQL only; not injected into non-PG targets
 - `avg_width_bytes` — used to guide synthetic data generation; not scored

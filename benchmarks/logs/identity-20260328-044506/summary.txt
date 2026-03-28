@@ -1,0 +1,7 @@
+# 2026-03-28T04:45:07.737795+00:00
+
+FAIL  db2×tpcds(sf=0.01)                          exit=1
+
+Passed : 0 / 1
+Failed : 1 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260328-044506
