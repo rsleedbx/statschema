@@ -167,6 +167,8 @@ class IdentityTestResult:
     # When stats are collected from a different database engine than the target
     # (cross-database test), this records the source engine's dialect name.
     stats_source_dialect: str = ""
+    # Git commit hash of the code that produced this result — set at save time
+    git_commit: str = ""
     # Stats fidelity (Phase C.5) — how well did build_rows_from_canonical
     # reproduce the source statistics on the target schema?
     # Structure:
@@ -401,11 +403,8 @@ def _analyze_mysql(conn, tables: list, schema: str,
                    pred_col_map: dict | None = None) -> None:
     with conn.cursor() as cur:
         for t in tables:
-            try:
-                cur.execute(f"ANALYZE TABLE `{schema}`.`{t.name}`")
-                cur.fetchall()  # consume result
-            except Exception:
-                pass
+            cur.execute(f"ANALYZE TABLE `{schema}`.`{t.name}`")
+            cur.fetchall()  # consume result
 
 
 def _create_schema_sqlserver(conn, schema_name: str) -> None:
@@ -458,11 +457,8 @@ def _analyze_sqlserver(conn, tables: list, schema: str,
     # which is already the default behavior.
     with conn.cursor() as cur:
         for t in tables:
-            try:
-                cur.execute(f"UPDATE STATISTICS [dbo].[{t.name}]")
-                cur.fetchall()  # drain any result set
-            except Exception:
-                pass
+            cur.execute(f"UPDATE STATISTICS [dbo].[{t.name}]")
+            cur.fetchall()  # drain any result set
     # No explicit commit — autocommit=True handles it
 
 
@@ -499,27 +495,24 @@ def _analyze_oracle(conn, tables: list, schema: str,
     """
     with conn.cursor() as cur:
         for t in tables:
-            try:
-                pred_cols = (
-                    {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
+            pred_cols = (
+                {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
+            )
+            if full_stats or not pred_cols:
+                # All columns, Oracle default behaviour
+                method_opt = "FOR ALL COLUMNS SIZE AUTO"
+            else:
+                # Deep stats for predicate columns; row-count-only for the rest
+                col_list = ", ".join(
+                    f"FOR COLUMNS {c} SIZE AUTO" for c in sorted(pred_cols)
                 )
-                if full_stats or not pred_cols:
-                    # All columns, Oracle default behaviour
-                    method_opt = "FOR ALL COLUMNS SIZE AUTO"
-                else:
-                    # Deep stats for predicate columns; row-count-only for the rest
-                    col_list = ", ".join(
-                        f"FOR COLUMNS {c} SIZE AUTO" for c in sorted(pred_cols)
-                    )
-                    method_opt = f"FOR ALL COLUMNS SIZE 1, {col_list}"
-                cur.execute(
-                    "BEGIN DBMS_STATS.GATHER_TABLE_STATS("
-                    f"ownname => '{schema.upper()}', "
-                    f"tabname => '{t.name.upper()}', "
-                    f"method_opt => '{method_opt}'); END;"
-                )
-            except Exception:
-                pass
+                method_opt = f"FOR ALL COLUMNS SIZE 1, {col_list}"
+            cur.execute(
+                "BEGIN DBMS_STATS.GATHER_TABLE_STATS("
+                f"ownname => '{schema.upper()}', "
+                f"tabname => '{t.name.upper()}', "
+                f"method_opt => '{method_opt}'); END;"
+            )
     conn.commit()
 
 
@@ -595,24 +588,21 @@ def _analyze_db2(conn, tables: list, schema: str,
     with conn.cursor() as cur:
         for t in tables:
             tref = f"{schema.upper()}.{t.name.upper()}"
-            try:
-                pred_cols = {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
-                if full_stats:
-                    runstats = (f"RUNSTATS ON TABLE {tref} "
-                                f"WITH DISTRIBUTION AND DETAILED INDEXES ALL{sample_suffix}")
-                elif pred_cols:
-                    col_clause = ", ".join(sorted(pred_cols))
-                    runstats = (
-                        f"RUNSTATS ON TABLE {tref} "
-                        f"ON COLUMNS ({col_clause}) WITH DISTRIBUTION "
-                        f"AND DETAILED INDEXES ALL{sample_suffix}"
-                    )
-                else:
-                    runstats = (f"RUNSTATS ON TABLE {tref} "
-                                f"AND DETAILED INDEXES ALL{sample_suffix}")
-                cur.execute(f"CALL SYSPROC.ADMIN_CMD('{runstats}')")
-            except Exception:
-                pass
+            pred_cols = {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
+            if full_stats:
+                runstats = (f"RUNSTATS ON TABLE {tref} "
+                            f"WITH DISTRIBUTION AND DETAILED INDEXES ALL{sample_suffix}")
+            elif pred_cols:
+                col_clause = ", ".join(sorted(pred_cols))
+                runstats = (
+                    f"RUNSTATS ON TABLE {tref} "
+                    f"ON COLUMNS ({col_clause}) WITH DISTRIBUTION "
+                    f"AND DETAILED INDEXES ALL{sample_suffix}"
+                )
+            else:
+                runstats = (f"RUNSTATS ON TABLE {tref} "
+                            f"AND DETAILED INDEXES ALL{sample_suffix}")
+            cur.execute(f"CALL SYSPROC.ADMIN_CMD('{runstats}')")
     conn.commit()
 
 
@@ -2616,10 +2606,17 @@ def main() -> None:
     # Save JSON result
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     from datetime import datetime, timezone
+    import subprocess as _sp
+    import dataclasses
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    try:
+        result.git_commit = _sp.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, text=True
+        ).strip()
+    except _sp.CalledProcessError:
+        result.git_commit = "unknown"
     _from_suffix = f"-from-{args.stats_source_dialect}" if args.stats_source_dialect else ""
     out = RESULTS_DIR / f"{ts}-identity-{args.schema}-sf{args.sf}-{args.dialect}{_from_suffix}.json"
-    import dataclasses
     out.write_text(json.dumps(dataclasses.asdict(result), indent=2, default=str))
     print(f"  Result saved → {out.relative_to(_REPO_ROOT)}\n")
 

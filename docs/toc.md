@@ -57,11 +57,15 @@ README.md
 │   ├── docs/faq/17-what-is-gvenzl-oracle-xe.md
 │   └── docs/faq/18-podman-machine-on-macos.md
 │
-└── Contributing & project
-    ├── docs/adding-a-database.md       Contributor guide: add a new engine end-to-end
-    ├── docs/PLAN.md                    Architecture and implementation notes
-    ├── docs/ROADMAP.md                 Roadmap and planned work
-    └── docs/git-submodules.md          Git submodule workflow
+├── Contributing & project
+│   ├── docs/adding-a-database.md       Contributor guide: add a new engine end-to-end
+│   ├── docs/PLAN.md                    Architecture and implementation notes
+│   ├── docs/ROADMAP.md                 Roadmap and planned work
+│   └── docs/git-submodules.md          Git submodule workflow
+│
+└── Bugs to file (vendor issues)
+    ├── docs/bugs-to-file/ibm-db2.md    ibm_db_dbi driver + DB2 utility doc gaps
+    └── docs/bugs-to-file/lima.md       Lima VM config-change silent no-op
 ```
 
 ---

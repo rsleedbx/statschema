@@ -165,7 +165,7 @@ def bulk_load_db2(  # pragma: no cover
             cur.execute(f"SELECT COUNT(*) FROM {full}")
             actual = cur.fetchone()[0]
         except Exception as e:
-            logger.warning("bulk_load_db2 ADMIN_CMD failed (%s); falling back to MULTI_ROW", e)
+            logger.error("bulk_load_db2 ADMIN_CMD failed (%s); falling back to MULTI_ROW inserts", e)
             actual = 0
         finally:
             try:

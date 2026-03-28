@@ -31,9 +31,12 @@ Usage
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from .dialect_registry import normalize_dialect
+
+logger = logging.getLogger(__name__)
 from .stats_model import ColumnStats, TableStats
 
 # ---------------------------------------------------------------------------
@@ -116,16 +119,12 @@ def collect_table_stats(  # pragma: no cover
 
     col_stats: list[ColumnStats] = []
     for col in columns:
-        try:
-            cs = _collect_column_stats(
-                conn, table, col, d, schema, row_count, indexed_cols,
-                cfg=cfg, is_predicate=(pred_set is None or col.lower() in pred_set),
-                timing=timing,
-            )
-            col_stats.append(cs)
-        except Exception:
-            _safe_rollback(conn)
-            col_stats.append(ColumnStats(name=col, null_fraction=0.0, n_distinct=1.0))
+        cs = _collect_column_stats(
+            conn, table, col, d, schema, row_count, indexed_cols,
+            cfg=cfg, is_predicate=(pred_set is None or col.lower() in pred_set),
+            timing=timing,
+        )
+        col_stats.append(cs)
 
     composite: list = []
     if d == "postgres":
