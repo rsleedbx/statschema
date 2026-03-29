@@ -140,6 +140,7 @@ celerybeat.pid
 # Environments — .env files (anywhere in the tree) contain secrets and must never
 # be committed.  Copy .env.example → .env at the repo root and fill in values.
 .env
+.env.*
 .envrc
 .venv
 env/

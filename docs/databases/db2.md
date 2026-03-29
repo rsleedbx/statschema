@@ -14,7 +14,7 @@ sqlglot has no Db2 dialect.  DDL is emitted by a hand-written emitter in `ddl_em
 limactl start --name=db2 config/lima/db2.yaml
 ```
 
-First boot pulls the image (~2 GB) and runs Db2 setup — **this takes 5–10 minutes**.  Watch progress:
+First boot pulls the image (~2 GB) and runs Db2 setup.  Under QEMU on Apple Silicon, expect **20–30 minutes** total (VM boot ~5 min + DB2 12.1 first-boot setup ~13 min + CPU settle ~8 min).  Watch progress:
 
 ```bash
 limactl shell db2 -- podman logs -f db2ce
@@ -24,12 +24,14 @@ limactl shell db2 -- podman logs -f db2ce
 Or poll:
 
 ```bash
-until limactl shell db2 -- podman logs db2ce 2>/dev/null \
+until limactl shell db2 -- sudo podman logs db2ce 2>/dev/null \
     | grep -q "Setup has completed"; do
   echo "waiting..."; sleep 15
 done
 echo "Db2 ready"
 ```
+
+Note: `sudo` is required because `container-db2ce.service` runs as root.
 
 ## Run the live tests
 
@@ -92,7 +94,15 @@ limactl shell db2 -- podman ps
 ```
 
 **"Setup has completed" never appears**
-Db2 setup can take up to 10 minutes on first boot.  If the probe times out, delete and retry:
+Under QEMU emulation, DB2 12.1 setup takes 13–20 minutes.  The Lima probe timeout in `config/lima/db2.yaml` is set to 35 minutes (2100 s) to accommodate this.  If you see the probe fail immediately, check that `container-db2ce.service` is using `sudo podman logs` — plain `podman logs` cannot see root-owned containers and will never match.
+
+Poll manually while waiting:
+```bash
+limactl shell db2 -- sudo podman logs -f db2ce
+# Wait for: "Setup has completed"
+```
+
+If still stuck after 35 minutes, delete and retry:
 ```bash
 limactl delete db2 && limactl start --name=db2 config/lima/db2.yaml
 ```
