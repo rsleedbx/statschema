@@ -202,9 +202,28 @@ if __name__ == "__main__":
     elif cmd == "engines":
         print(",".join(engines_from_env()))
 
+    elif cmd == "ping" and len(sys.argv) == 3:
+        # Exit 0 if the engine accepts a real connection, 1 otherwise.
+        # Used by _common.sh wait_db() to distinguish "port open" from "DB ready".
+        engine = sys.argv[2]
+        try:
+            dsn = build_dsn(engine)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from benchmarks.dialects import get as _get_dialect  # noqa: E402
+            conn = _get_dialect(engine).connect(dsn)
+            conn.close()
+            sys.exit(0)
+        except Exception:
+            sys.exit(1)
+
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)
         print("Usage: bench_config.py sf_for <engine> <schema>", file=sys.stderr)
         print("       bench_config.py dsn <engine>", file=sys.stderr)
         print("       bench_config.py engines", file=sys.stderr)
+        print("       bench_config.py ping <engine>", file=sys.stderr)
         sys.exit(1)

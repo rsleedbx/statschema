@@ -72,40 +72,63 @@ LOGS_DIR    = Path(__file__).parent / "logs"
 # ---------------------------------------------------------------------------
 # Per-engine schema parallelism limits
 # ---------------------------------------------------------------------------
-# Empirically validated on 2026-03-27 (collect_stats + load_target, 6 schemas):
-#
 # Podman engines (native ARM64, Podman VM ≈ 8.3 GB shared):
 #   postgres    sw=6 → 6/6 pass, 59 s  (sw=4 baseline: 112 s)
-#   mysql       sw=6 → 6/6 pass, 80 s  (sw=3 baseline:  98 s)
+#   mysql       sw=5 → 6/6 pass, 84 s
 #   cockroachdb sw=5 → 6/6 pass, 83 s  (sw=3 was 5/6: plan-quality miss)
-#               Requires crdb-single launched with --memory=2g to avoid OOM
-#               from the co-located 3-node cluster consuming ~5.1 GB.
+#               Requires crdb-single launched with --memory=2g to avoid OOM.
 #
-# Lima QEMU VMs (4 GiB, no swap, x86_64 emulation via QEMU):
-#   SQL Server:  ~2.7 GB RSS (buffer pool capped at 3072 MB)  → ~755 MB free
-#   Oracle XE:   ~3.1 GB container footprint                  → ~1265 MB free
-#   DB2 CE:      ~2.2 GB (STMM capped at 2 GB)               → ~1160 MB free
-#   Each schema load peaks at 300–500 MB → 1 concurrent load is safe.
-#   Set LIMA_VM_LARGE_RAM=1 to enable 2 parallel schemas (requires 8 GiB VMs).
+# Lima QEMU VMs (8 GiB, no swap, x86_64 emulation via QEMU):
+#   SQL Server:  ~2.7 GB RSS (buffer pool capped at 5632 MB)
+#   Oracle XE:   ~3.1 GB (SGA hard-capped at 2 GB by XE edition)
+#   DB2 CE:      STMM self-tunes to ~3.5 GB
+#   Each schema load peaks at 300–500 MB.
+#
+#   QEMU emulation overhead means adding concurrent schemas within a VM
+#   competes for the same emulated vCPUs and saturates the host, causing
+#   3-4× per-operation slowdowns that negate any parallelism gain.  At sw=1,
+#   each VM's schemas run sequentially at full speed.  The wall-time
+#   bottleneck is sqlserver (all 6 schemas sequential ≈ 33 min).
 
 _SCHEMA_WORKERS: dict[str, int] = {
     "postgres":    6,   # Podman, 6/6 at sw=6 (59 s vs 112 s at sw=4)
-    "cockroachdb": 5,   # Podman, 6/6 at sw=5; sw=3 risks plan-quality misses
+    "cockroachdb": 4,   # Podman, stable at sw=4; sw=5 risks liveness-session-expired under load
     "neon":        2,   # remote cloud, limit to avoid rate limits
-    "mysql":       5,   # Podman, 6/6 at sw=5 (84 s); marginal gain above 5
+    "mysql":       4,   # Podman, reduced from 5 to avoid TCP packet errors under heavy host load
     "mariadb":     3,   # Podman, similar to mysql; not yet empirically tested
     "lakebase":    2,   # remote cloud
-    # Lima QEMU VMs — sequential by default for 4 GB VMs.
-    # Set LIMA_VM_LARGE_RAM=1 to enable 2 parallel schemas per engine.
-    # This requires upgrading Lima VMs to 8 GB RAM:
-    #   • Edit config/lima/{oracle,sqlserver,db2}.yaml: memory: "8GiB"
-    #   • SQL Server: raise memorylimitmb to 5632 in mssql.conf
-    #   • Then: limactl stop <vm> && limactl start <vm>  (VM rebuild required)
-    "sqlserver":   2 if os.environ.get("LIMA_VM_LARGE_RAM") else 1,
-    "oracle":      2 if os.environ.get("LIMA_VM_LARGE_RAM") else 1,
-    "db2":         2 if os.environ.get("LIMA_VM_LARGE_RAM") else 1,
+    # Lima QEMU VMs — 8 GiB RAM, 4 vCPUs (x86_64 emulation on Apple Silicon).
+    #
+    # Standalone single-engine optimum (measured on SQL Server 2022, clean state1):
+    #   sw=2 default order: ~20 min
+    #   sw=3 LPT order:     ~13 min  ← sweet spot (-35%)
+    #   sw=4 LPT order:     ~15 min  (worse: 4 vCPUs saturate, mutual interference)
+    # sw=3 leaves 1 vCPU free for SQL Server background threads; sw=4 fights them.
+    #
+    # Multi-engine full run (run_identity.sh wave-2, all QEMU engines together):
+    #   Use sw=1 to avoid cross-engine CPU saturation under QEMU emulation.
+    #   run_identity.sh overrides to --schema-workers 3 for the QEMU-only wave.
+    "sqlserver":   3,
+    "oracle":      1,
+    "db2":         1,
 }
 _DEFAULT_SCHEMA_WORKERS = 1
+
+# Approximate per-schema wall-time (seconds) for identity test stats+explain phases
+# on a single-engine SQL Server run with sw=2 (isolated, no other engines active).
+# Derived from timestamped PASS lines: individual times inferred from thread-pool
+# interleaving at sw=2 (two threads, schemas start in submission order).
+# Used to sort schemas in Longest-Processing-Time (LPT) order before thread-pool
+# submission so the heaviest schemas occupy the first slots and keep the
+# critical path full from the start.  Unknown schemas fall back to 0 (last).
+_SCHEMA_DURATION_S: dict[str, int] = {
+    "tpce":  509,   # ~8m29s — most complex joins + largest working set
+    "tpcdi": 464,   # ~7m44s
+    "tpcds": 411,   # ~6m51s — many columns, more stat histogram buckets
+    "tpch":  215,   # ~3m35s
+    "tpcc":  165,   # ~2m45s
+    "tpcb":   87,   # ~1m27s — simplest schema
+}
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +316,14 @@ def _run_engine_identity(
             results.append(r)
         return results
 
-    # Parallel schema execution within the engine
+    # Parallel schema execution within the engine.
+    # Submit in Longest-Processing-Time (LPT) order so the heaviest schemas
+    # occupy the first available threads and keep the critical path full.
+    lpt_schemas = sorted(
+        schemas,
+        key=lambda s: _SCHEMA_DURATION_S.get(s, 0),
+        reverse=True,
+    )
     results: list[RunResult] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=schema_workers) as pool:
         futures = {
@@ -302,7 +332,7 @@ def _run_engine_identity(
                 engine, schema, dsn, log_dir, phases, skip_load, no_extended_stats,
                 full_stats=full_stats,
             ): schema
-            for schema in schemas
+            for schema in lpt_schemas
         }
         for future in concurrent.futures.as_completed(futures):
             r = future.result()
@@ -392,6 +422,7 @@ def run_lakebase_matrix(
     skip_load: bool = False,
     phases: list[str] | None = None,
     max_jobs: int = 3,
+    full_stats: bool = False,
 ) -> list[RunResult]:
     """
     Cross-engine identity test where the target is always Databricks Lakebase.
@@ -427,7 +458,7 @@ def run_lakebase_matrix(
                 futures.append(pool.submit(
                     _run_one_lakebase,
                     engine, schema, resolved_dsns[engine], lakebase_dsn,
-                    log_dir, phases, skip_load,
+                    log_dir, phases, skip_load, full_stats,
                 ))
         for future in concurrent.futures.as_completed(futures):
             r = future.result()
@@ -446,6 +477,7 @@ def _run_one_lakebase(
     log_dir: Path,
     phases: list[str],
     skip_load: bool,
+    full_stats: bool = False,
 ) -> RunResult:
     sf     = sf_for(engine, schema)
     result = RunResult(engine, schema, sf, "lakebase")
@@ -470,6 +502,8 @@ def _run_one_lakebase(
         "--stats-source-schema",  ss_schema,
         "--no-extended-stats",
     ]
+    if full_stats:
+        cmd.append("--full-stats-db2-ora")
     if skip_load:
         cmd.append("--skip-load")
 
@@ -592,11 +626,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── lakebase ──────────────────────────────────────────────────────────────
     lb = sub.add_parser("lakebase", help="Cross-engine Lakebase target test")
-    lb.add_argument("--source-engines", default=",".join(DEFAULT_ENGINES))
-    lb.add_argument("--schemas",        default=",".join(DEFAULT_SCHEMAS))
-    lb.add_argument("--log-dir",        default=None)
-    lb.add_argument("--skip-load",      action="store_true")
-    lb.add_argument("--max-jobs",       type=int, default=3)
+    lb.add_argument("--source-engines",    default=",".join(DEFAULT_ENGINES))
+    lb.add_argument("--schemas",           default=",".join(DEFAULT_SCHEMAS))
+    lb.add_argument("--log-dir",           default=None)
+    lb.add_argument("--skip-load",         action="store_true")
+    lb.add_argument("--max-jobs",          type=int, default=3)
+    lb.add_argument("--full-stats-db2-ora", action="store_true",
+                    help="Collect all-column distribution stats for DB2/Oracle source "
+                         "schemas (slower; use for audit / major-release runs).")
     lb.add_argument(
         "--phases",
         default=",".join(ALL_PHASES),
@@ -646,6 +683,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_load=args.skip_load,
             phases=args.phases.split(","),
             max_jobs=args.max_jobs,
+            full_stats=getattr(args, "full_stats_db2_ora", False),
         )
         failed = sum(1 for r in results if not r.passed)
         return 1 if failed else 0

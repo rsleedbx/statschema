@@ -26,3 +26,16 @@ Covers four phases where migration teams lose time and statschema's concrete imp
 Also documents **where statschema does not help**: stored procedure rewriting, network latency, zero-downtime cutover mechanics, ETL pipeline correctness, and ORM query generation differences.
 
 The summary table (bottom of the file) maps every evaluation cycle phase to a statschema command or explicit "no impact."
+
+### [`qemu-parallelism-capacity-planning.md`](qemu-parallelism-capacity-planning.md) — QEMU parallelism and capacity planning
+
+Findings from running the 36-combination identity test matrix (6 engines × 6 TPC schemas) on Apple Silicon.  Covers:
+
+- **QEMU CPU math**: x86\_64 emulation on ARM reduces integer throughput to 10–20% of native speed; each idle QEMU VM still consumes host CPU.
+- **Contention measurement**: three simultaneous QEMU VMs cause ~2× slowdown per engine; `sw=3` for three engines simultaneously is no faster than `sw=1`.
+- **Two-wave scheduling**: running Podman engines first (~5 min), then QEMU engines uncontested (~32 min) gives the best achievable wall time.
+- **CPU vs I/O profiling**: SQL Server `sys.dm_os_wait_stats` shows 91% `SOS_WORK_DISPATCHER` (CPU scheduling), zero `WRITELOG`/`PAGEIOLATCH` waits — confirming `UPDATE STATISTICS` is CPU-bound, not I/O-bound.
+- **Recovery model experiments**: `ALTER DATABASE SET RECOVERY SIMPLE` (SQL Server) and `ALTER TABLE NOLOGGING` (Oracle) provide no measurable speedup because the bottleneck is compute, not I/O.
+- **A/B methodology for QEMU**: 20–30% run-to-run variance requires 3+ samples per condition and identical VM inventories between runs.
+- **8 GiB Lima VM upgrade**: memory budget, safe worker counts, and the delete-recreate requirement.
+- **Operational bugs**: DB2 instance ownership corruption fix; Oracle XE 12 GB hard limit and recovery procedure.

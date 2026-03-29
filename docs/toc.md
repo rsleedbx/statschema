@@ -144,3 +144,19 @@ README.md
 | [`docs/ROADMAP.md`](ROADMAP.md) | Roadmap and planned work |
 | [`docs/git-submodules.md`](git-submodules.md) | Git submodule workflow (commit and push `.cursor` + parent repo) |
 | [`.env.example`](../.env.example) | Credential template — copy to `.env` and fill in values |
+
+## Bugs to file (vendor issues)
+
+Staged bug reports for upstream vendors — file when ready.
+
+| Document | Contents |
+|----------|----------|
+| [`docs/bugs-to-file/ibm-db2.md`](bugs-to-file/ibm-db2.md) | `ibm_db_dbi` silently swallows SQL0104N from RUNSTATS; `TABLESAMPLE` placement undocumented; no list of `ADMIN_CMD`-only statements |
+| [`docs/bugs-to-file/lima.md`](bugs-to-file/lima.md) | `cpus:`/`memory:` edits silently ignored on existing VMs; no dry-run or config-diff command |
+
+## Code metrics
+
+| Document | Contents |
+|----------|----------|
+| [`docs/loc_report.md`](loc_report.md) | Lines-of-code snapshot by module group — regenerate with `python scripts/loc_report.py --save` |
+| [`docs/loc_comparison.md`](loc_comparison.md) | statschema codebase vs. SDV, dbldatagen, sqlsynthgen, Faker, mimesis — size and architecture comparison |

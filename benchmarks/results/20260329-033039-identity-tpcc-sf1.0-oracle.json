@@ -1,0 +1,463 @@
+{
+  "schema": "tpcc",
+  "dialect": "oracle",
+  "sf": 1.0,
+  "source_schema": "tpcc_src",
+  "target_schema": "tpcc_tgt",
+  "source_row_counts": {
+    "item": 100000,
+    "warehouse": 1,
+    "district": 10,
+    "stock": 100000,
+    "customer": 30000,
+    "history": 30000,
+    "orders": 30000,
+    "new_order": 9000,
+    "order_line": 300000
+  },
+  "target_row_counts": {
+    "item": 100000,
+    "warehouse": 1,
+    "district": 10,
+    "stock": 100000,
+    "customer": 30000,
+    "history": 30000,
+    "orders": 30000,
+    "new_order": 9000,
+    "order_line": 300000
+  },
+  "query_metrics": {
+    "tpcc-q02": {
+      "query_id": "tpcc-q02",
+      "source_node_types": [
+        "Select Statement",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Select Statement",
+        "Aggregate",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpcc-q03": {
+      "query_id": "tpcc-q03",
+      "source_node_types": [
+        "Select Statement",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Select Statement",
+        "Aggregate",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 2,
+      "target_plan_depth": 2
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 66.3315238750074,
+    "B_baseline_explain": 0.6269018329912797,
+    "C_collect_stats": 7.180451042018831,
+    "D_build_target": 54.42525362496963,
+    "C5_target_stats_fidelity": 31.874750291986857,
+    "E_replay_explain": 0.48753854201640934
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "",
+  "git_commit": "b76e9dc80f900011c76d689784797028ffb74482",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": 1.0,
+    "mean_range_covered": 0.8462,
+    "mean_null_match": 1.0,
+    "per_table": {
+      "item": {
+        "row_count_ok": true,
+        "src_row_count": 100000,
+        "tgt_row_count": 100000,
+        "ndistinct_within_2x": 1.0,
+        "range_covered": 1.0,
+        "null_match": 1.0,
+        "columns": {
+          "i_id": {
+            "src_n_distinct": 100000.0,
+            "tgt_n_distinct": 99930.0,
+            "nd_ok": true,
+            "src_min": "1",
+            "tgt_min": "1",
+            "src_max": "100000",
+            "tgt_max": "100000",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "i_im_id": {
+            "src_n_distinct": 63540.0,
+            "tgt_n_distinct": 62440.0,
+            "nd_ok": true,
+            "src_min": "1",
+            "tgt_min": "1",
+            "src_max": "10000",
+            "tgt_max": "10000",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "i_name": {
+            "src_n_distinct": 99610.0,
+            "tgt_n_distinct": 100000.0,
+            "nd_ok": true,
+            "src_min": "aaablsxccyalzhbzdepzjwes",
+            "tgt_min": "aaaahseurthbiixjchzvgwbs",
+            "src_max": "zzzzwpkzpmkiebglyivkqpmg",
+            "tgt_max": "zzzzksviwpnwutltisczaxkt",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "i_price": {
+            "src_n_distinct": 63080.0,
+            "tgt_n_distinct": 63000.0,
+            "nd_ok": true,
+            "src_min": "1",
+            "tgt_min": "1",
+            "src_max": "99.99",
+            "tgt_max": "99.99",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "i_data": {
+            "src_n_distinct": 100000.0,
+            "tgt_n_distinct": 99790.0,
+            "nd_ok": true,
+            "src_min": "aaabssevprmfjppahtfrousnoxfareocxwgafvcnudwwyjjpdk",
+            "tgt_min": "aaadprrkwojwzkdxgowokyqutbnucufu",
+            "src_max": "zzzyqafzlmwxqwpyklnxsynvntepjmoqkyzngmqjxmxywogcqh",
+            "tgt_max": "zzyzimmjvxxicbxeayzkqukrycyamact",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          }
+        }
+      },
+      "warehouse": {
+        "row_count_ok": true,
+        "src_row_count": 1,
+        "tgt_row_count": 1,
+        "ndistinct_within_2x": 1.0,
+        "range_covered": 0.5,
+        "null_match": 1.0,
+        "columns": {
+          "w_id": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "0",
+            "tgt_min": "0",
+            "src_max": "0",
+            "tgt_max": "0",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_name": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "qahftrxcka",
+            "tgt_min": "tjajdomtne",
+            "src_max": "qahftrxcka",
+            "tgt_max": "tjajdomtne",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_street_1": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "fnafqofpvausieyiccwp",
+            "tgt_min": "4464 Xray Hotel",
+            "src_max": "fnafqofpvausieyiccwp",
+            "tgt_max": "4464 Xray Hotel",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_street_2": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "usnzjovqwpsbfhcgchqj",
+            "tgt_min": "5347 Delta Yankee",
+            "src_max": "usnzjovqwpsbfhcgchqj",
+            "tgt_max": "5347 Delta Yankee",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_city": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "jfgyqpesejzqorvufaig",
+            "tgt_min": "Orbit",
+            "src_max": "jfgyqpesejzqorvufaig",
+            "tgt_max": "Orbit",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_state": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "fy",
+            "tgt_min": "gr",
+            "src_max": "fy",
+            "tgt_max": "gr",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_zip": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "51245",
+            "tgt_min": "11319",
+            "src_max": "51245",
+            "tgt_max": "11319",
+            "range_ok": false,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_tax": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "0.0425",
+            "tgt_min": "0.0463",
+            "src_max": "0.0425",
+            "tgt_max": "0.0463",
+            "range_ok": false,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "w_ytd": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "300000",
+            "tgt_min": "300000",
+            "src_max": "300000",
+            "tgt_max": "300000",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          }
+        }
+      },
+      "district": {
+        "row_count_ok": true,
+        "src_row_count": 10,
+        "tgt_row_count": 10,
+        "ndistinct_within_2x": 1.0,
+        "range_covered": 1.0,
+        "null_match": 1.0,
+        "columns": {
+          "d_id": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "1",
+            "tgt_min": "1",
+            "src_max": "10",
+            "tgt_max": "10",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_w_id": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "0",
+            "tgt_min": "0",
+            "src_max": "0",
+            "tgt_max": "0",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_name": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "byfbybagvq",
+            "tgt_min": "bwgevfrnnc",
+            "src_max": "ytflyxqrdx",
+            "tgt_max": "tjajdomtne",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_street_1": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "asbbainhmoswogmkcrjk",
+            "tgt_min": "1307 Vertex Papa",
+            "src_max": "yzbjrrjowztygeuekeyu",
+            "tgt_max": "9506 Bravo Delta",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_street_2": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "dntefmsznhcffeanhzos",
+            "tgt_min": "3524 Echo Sierra",
+            "src_max": "wbqqbsucendemwbvwcqo",
+            "tgt_max": "9527 Alpha November",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_city": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 9.0,
+            "nd_ok": true,
+            "src_min": "actgkmwxeakyuhssurme",
+            "tgt_min": "Apex",
+            "src_max": "xtpafrwpatvotenlhzlv",
+            "tgt_max": "Swift",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_state": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "dt",
+            "tgt_min": "il",
+            "src_max": "zy",
+            "tgt_max": "zy",
+            "range_ok": null,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_zip": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "12540",
+            "tgt_min": "23565",
+            "src_max": "89471",
+            "tgt_max": "91854",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_tax": {
+            "src_n_distinct": 10.0,
+            "tgt_n_distinct": 10.0,
+            "nd_ok": true,
+            "src_min": "0.0122",
+            "tgt_min": "0.0021",
+            "src_max": "0.1498",
+            "tgt_max": "0.1936",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_ytd": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "30000",
+            "tgt_min": "30000",
+            "src_max": "30000",
+            "tgt_max": "30000",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          },
+          "d_next_o_id": {
+            "src_n_distinct": 1.0,
+            "tgt_n_distinct": 1.0,
+            "nd_ok": true,
+            "src_min": "3001",
+            "tgt_min": "3001",
+            "src_max": "3001",
+            "tgt_max": "3001",
+            "range_ok": true,
+            "src_null_frac": 0.0,
+            "tgt_null_frac": 0.0,
+            "null_ok": true
+          }
+        }
+      }
+    }
+  }
+}

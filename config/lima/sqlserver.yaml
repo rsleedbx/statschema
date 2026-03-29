@@ -19,16 +19,11 @@ arch: "x86_64"
 # unless max server memory is capped.  WITHOUT a cap, SQL Server consumes
 # 100% of the VM RAM, leaving 0 MB for concurrent schema loads → OOM kill.
 #
-# The provision script below sets max server memory to 3072 MB for a 4 GB VM,
-# leaving ≈ 900 MB for OS + concurrent query sort/hash memory.
-# With that cap: available ≈ 755 MB → 1 concurrent schema load is safe.
-#
-# Upgrade to 8 GB for 2 concurrent schema loads:
-#   memory: "8GiB"   # leaves ~2 GB headroom with max_server_memory = 5632
-#   Add to mssql.conf: [memory]  memorylimitmb = 5632
-#   Then set LIMA_VM_LARGE_RAM=1 to enable schema_workers=2 in run_matrix.py.
+# With 8 GB VM and max server memory = 5632 MB:
+#   available ≈ 2.4 GB for OS + concurrent schema loads
+#   Each schema load peaks at ~300-500 MB → 2 concurrent loads are safe (schema_workers=2).
 cpus: 4
-memory: "4GiB"
+memory: "8GiB"
 disk: "100GiB"
 
 images:
@@ -58,12 +53,10 @@ provision:
       MSSQL_SA_PASSWORD='Supersecure!'
       MSSQL_PID=developer /opt/mssql/bin/mssql-conf -n setup accept-eula
 
-      # Cap SQL Server buffer pool at 3072 MB for a 4 GB VM.
-      # Without this, SQL Server consumes 100% of VM RAM (no swap → OOM on any
-      # concurrent load).  3072 MB leaves ~900 MB for OS and concurrent query
-      # working memory, supporting 1 safe parallel schema load at a time.
-      # For 8 GB VMs, raise this to 5632 MB and enable schema_workers=2.
-      /opt/mssql/bin/mssql-conf set memory.memorylimitmb 3072
+      # Cap SQL Server buffer pool at 5632 MB (8 GB VM).
+      # Without a cap, SQL Server fills all available VM RAM (no swap → OOM).
+      # 5632 MB leaves ~2.4 GB for OS + 2 concurrent schema loads (~500 MB each).
+      /opt/mssql/bin/mssql-conf set memory.memorylimitmb 5632
 
 probes:
   - script: |

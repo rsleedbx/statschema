@@ -158,6 +158,17 @@ limactl shell oracle -- sudo systemctl status container-oracle-xe
 **Port 1521 not open after container is running**
 Oracle XE takes 3–5 min to initialise data files on first boot.  Use the polling script above.
 
+**`ORA-12954: The request exceeds the maximum allowed database size of 12 GB`**
+Oracle XE has a hard 12 GB total database size limit.  Old test schemas accumulate in
+`users01.dbf` across runs.  To recover:
+
+```sql
+-- connect as system/oracle
+DROP USER old_schema CASCADE;          -- repeat for all stale test schemas
+ALTER DATABASE DATAFILE '/opt/oracle/oradata/XE/users01.dbf' RESIZE 3G;
+ALTER DATABASE DATAFILE '/opt/oracle/oradata/XE/users01.dbf' AUTOEXTEND ON MAXSIZE 10G;
+```
+
 ## Sample schemas
 
 - [Oracle HR / CO schemas](oracle-hr.md)

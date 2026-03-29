@@ -783,55 +783,64 @@ bash benchmarks/run_identity.sh --skip-setup --schema-workers 4
 
 #### Schema parallelism (`--schema-workers`)
 
-`benchmarks/run_matrix.py` runs schemas within each engine in parallel via `ThreadPoolExecutor`.  The per-engine defaults in `_SCHEMA_WORKERS` were validated empirically on 2026-03-27 across all 6 TPC schemas (collect_stats + load_target phases):
+`benchmarks/run_matrix.py` runs schemas within each engine in parallel via `ThreadPoolExecutor`.  The per-engine defaults in `_SCHEMA_WORKERS` were validated empirically across all 6 TPC schemas:
 
-| Engine | Type | Default workers | Validated range | Notes |
-|--------|------|-----------------|-----------------|-------|
-| `postgres` | Podman ARM64 | **6** | 4–6 ✓ | 59 s at sw=6 vs 112 s at sw=4 |
-| `mysql` | Podman ARM64 | **5** | 3–6 ✓ | marginal gain above 5 |
-| `cockroachdb` | Podman ARM64 | **5** | 4–6 ✓ | sw=3 had a plan-quality score miss; requires `crdb-single` launched with `--memory=2g` |
-| `sqlserver` | Lima QEMU 4 GiB | **1** (2 with `LIMA_VM_LARGE_RAM=1`) | 1 safe | ~755 MB free after 3072 MB buffer pool cap |
-| `oracle` | Lima QEMU 4 GiB | **1** (2 with `LIMA_VM_LARGE_RAM=1`) | 1 safe | ~1.3 GB free; Oracle XE SGA fixed at 2 GB |
-| `db2` | Lima QEMU 4 GiB | **1** (2 with `LIMA_VM_LARGE_RAM=1`) | 1 safe | STMM capped at 2 GB via DATABASE_MEMORY |
-| `neon` | remote cloud | 2 | — | rate-limit headroom |
-| `lakebase` | remote cloud | 2 | — | rate-limit headroom |
+| Engine | Type | Default workers | Notes |
+|--------|------|-----------------|-------|
+| `postgres` | Podman ARM64 | **6** | 59 s at sw=6 vs 112 s at sw=4 |
+| `mysql` | Podman ARM64 | **4** | sw=5 caused `Packet sequence number wrong` under heavy host load |
+| `cockroachdb` | Podman ARM64 | **4** | requires `crdb-single` launched with `--memory=2g` |
+| `sqlserver` | Lima QEMU 8 GiB | **1** | sw=3 used in Wave 2 (uncontested); `memorylimitmb=5632` |
+| `oracle` | Lima QEMU 8 GiB | **1** | sw=3 used in Wave 2 (uncontested) |
+| `db2` | Lima QEMU 8 GiB | **1** | sw=3 used in Wave 2 (uncontested) |
+| `neon` | remote cloud | 2 | rate-limit headroom |
+| `lakebase` | remote cloud | 2 | rate-limit headroom |
 
-**Lima VMs and memory:** The 4 GiB Lima VMs have no swap — a single OOM kills the database process.  Memory caps are set persistently in the Lima provision scripts (`config/lima/*.yaml`).  To unlock 2 parallel schemas, upgrade to 8 GiB and set `LIMA_VM_LARGE_RAM=1`:
+**Lima VMs are 8 GiB** (upgraded from 4 GiB).  Memory caps are set in `config/lima/*.yaml`.  SQL Server `memorylimitmb` is 5632.  `cpus:` and `memory:` are baked into QEMU at VM creation — changing them requires delete + recreate:
 
 ```bash
-# Edit config/lima/{oracle,sqlserver,db2}.yaml: change memory: "8GiB"
-# SQL Server only: also raise memorylimitmb to 5632 in mssql.conf
-limactl stop sqlserver22 oracle db2 && limactl start sqlserver22 oracle db2
-LIMA_VM_LARGE_RAM=1 bash benchmarks/run_identity.sh --skip-setup
+limactl delete sqlserver22 oracle db2
+limactl start --name=sqlserver22 config/lima/sqlserver.yaml
+limactl start --name=oracle      config/lima/oracle.yaml
+limactl start --name=db2         config/lima/db2.yaml
 ```
 
 **CockroachDB and shared Podman VM memory:** The single-node container (`crdb-single`) shares the ~8.3 GB Podman VM with the 3-node cluster (`crdb1/2/3`), which consumes ~5.1 GB at idle.  Without a hard container memory limit, `crdb-single` defaults to 25%+25% of VM RAM ≈ 4 GB and gets OOM-killed under concurrent loads.  The setup in [`docs/databases/cockroachdb.md`](databases/cockroachdb.md) includes `--memory=2g --cache=512MiB --max-sql-memory=512MiB`.  Under peak load the container reaches ~1.82 GB / 2 GB hard cap without crashing.
 
 **Running all three Podman engines simultaneously (18-way test):** Validated 2026-03-27 — `postgres + mysql + cockroachdb`, each at `--schema-workers 6` across all 6 TPC schemas (18 total concurrent loads).  Result: **17/18 pass** in ~150 s; the one miss (`cockroachdb×tpce`) was a plan-quality score failure (not a crash), same intermittent behaviour seen at sw=3 for tpce.  crdb-single memory peaked at 1.82 GB / 2 GB hard cap and survived.  Running sequentially would take ~223 s (postgres 59 s + mysql 80 s + cockroachdb 84 s), so the 18-way run is ~33% faster.
 
-#### Full 6-engine run: timing and hardware requirements
+#### Two-wave scheduling and full-run timing
 
-Validated 2026-03-28 — all 6 engines running simultaneously (`collect_stats + load_target`, 6 TPC schemas each, 36 total combinations):
+`run_identity.sh` runs the full 36-combination matrix in two sequential waves to avoid QEMU CPU contention.
+
+**Why two waves:** Three QEMU VMs running simultaneously at high parallelism each slow to ~50% of their uncontested speed because the host CPU is shared across all three QEMU processes.  Running Podman engines first (no emulation overhead), then QEMU engines uncontested, gives the best achievable wall time.
 
 ```
-Result: 35/36 PASS in 59 min 26 s wall time
-Sole failure: cockroachdb×tpch — intermittent plan-quality score miss (not a crash)
+Wave 1: postgres, cockroachdb, mysql  (Podman ARM64)
+        schema-workers: 6 / 4 / 4     Wall time: ~5 min     18/18 schemas
+
+Wave 2: sqlserver, oracle, db2        (QEMU x86_64 — starts after Wave 1 completes)
+        schema-workers: 3 each         Wall time: ~33 min    18/18 schemas
+
+Total: ~37 min,  36/36 PASS
 ```
 
-Per-engine completion times (all start simultaneously):
+Validated 2026-03-29 — 8 GiB Lima VMs, 36 total combinations:
 
-| Engine | Type | Workers | Completes at | Wall time |
-|--------|------|---------|-------------|-----------|
-| postgres | Podman ARM64 | 6 | +3 min | 3 min 24 s |
-| mysql | Podman ARM64 | 5 | +4 min | 3 min 38 s |
-| cockroachdb | Podman ARM64 | 5 | +4 min | 3 min 59 s |
-| oracle | Lima QEMU | 1 | +10 min | 10 min 20 s |
-| sqlserver | Lima QEMU | 1 | +33 min | 32 min 50 s |
-| **db2** | **Lima QEMU** | **1** | **+60 min** | **59 min 26 s ← bottleneck** |
+| Engine | Type | Wave | Workers | Solo time |
+|--------|------|------|---------|-----------|
+| postgres | Podman ARM64 | 1 | 6 | ~1.5 min |
+| mysql | Podman ARM64 | 1 | 4 | ~2 min |
+| cockroachdb | Podman ARM64 | 1 | 4 | ~4.7 min |
+| oracle | Lima QEMU 8 GiB | 2 | 3 | ~9 min |
+| db2 | Lima QEMU 8 GiB | 2 | 3 | ~20 min |
+| sqlserver | Lima QEMU 8 GiB | 2 | 3 | ~19 min |
 
-DB2 dominates because `RUNSTATS` (statistics collection) is CPU-intensive and the DB2 VM runs under QEMU x86_64 emulation on Apple Silicon, where integer-heavy workloads run at roughly 10–20% of native speed.
+When all three QEMU engines run concurrently in Wave 2, they compete for host CPU.  SQL Server (last to finish) takes ~33 min under shared QEMU load vs ~19 min uncontested.  See [`docs/learnings/qemu-parallelism-capacity-planning.md`](../learnings/qemu-parallelism-capacity-planning.md) for the contention analysis and recovery model experiments.
 
-**Minimum hardware for the full parallel run:**
+To disable two-wave scheduling: `bash benchmarks/run_identity.sh --no-wave`
+
+**Hardware requirements:**
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
@@ -839,22 +848,12 @@ DB2 dominates because `RUNSTATS` (statistics collection) is CPU-intensive and th
 | Host CPU | Apple M2 (8 cores) | Apple M3 Pro (12 cores) |
 | Host storage | 50 GB free SSD | 100 GB NVMe |
 | Podman VM RAM | 8 GB (shared by all containers) | 12 GB |
-| Lima VM RAM | 4 GiB per VM × 3 = 12 GiB | 8 GiB per VM × 3 = 24 GiB |
+| Lima VM RAM | 8 GiB per VM × 3 = 24 GiB | 8 GiB per VM × 3 = 24 GiB |
 
-The Lima VMs each reserve 4 GiB host RAM whether running or not.  Total Lima
-overhead at idle: **~12 GiB**.  The Podman VM adds ~6.5 GB in active use.
-On a 32 GB machine this leaves ~13.5 GB for the host OS and Python workers.
-
-To run the full parallel suite:
+The Lima VMs each reserve 8 GiB host RAM whether running or not.  Total Lima overhead at idle: **~24 GiB**.  A 64 GB host leaves ~33.5 GB for the OS and Python workers; a 32 GB host is insufficient.
 
 ```bash
-# All DBs already running and source schemas loaded
-cd /path/to/statschema && source .env
-python -u benchmarks/run_matrix.py identity \
-    --engines postgres,mysql,cockroachdb,sqlserver,oracle,db2 \
-    --schemas tpcb,tpcc,tpch,tpcdi,tpcds,tpce \
-    --skip-load \
-    --phases collect_stats,load_target
+bash benchmarks/run_identity.sh --skip-setup
 ```
 
 See [`docs/databases/`](databases/) for per-database setup.  The agent skills

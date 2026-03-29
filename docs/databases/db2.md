@@ -102,3 +102,19 @@ Verify `DB2_PASS` matches the `DB2INST1_PASSWORD` set in `config/lima/db2.yaml` 
 
 **Fatal glibc error: CPU does not support x86-64-v2**
 The Db2 11.5.9 container requires SSE4.2 and POPCNT instructions.  The `config/lima/db2.yaml` already sets `cpuType: x86_64: "Haswell-noTSX-IBRS"` to satisfy this.  If you recreated the YAML manually, ensure this line is present.
+
+**`db2ftok.C:87: Failed to generate seed` / `instance home directory is invalid because it is not owned by db2inst1`**
+This occurs after a VM recreate: the Podman container's `useradd` assigns a new UID that does not match the volume's ownership.  The fix is baked into `container-db2ce.service` via `ExecStartPre` directives in `config/lima/db2.yaml`.  Trigger them with:
+
+```bash
+limactl shell db2 -- sudo systemctl restart container-db2ce.service
+```
+
+If the service fails to start, run the ownership fix manually inside the VM:
+
+```bash
+limactl shell db2 -- sudo bash -c "
+  podman exec db2ce chown -R db2inst1:db2iadm1 /home/db2inst1 &&
+  podman exec db2ce chown db2inst1:db2iadm1 /home/db2inst1/sqllib/security/db2ftok
+"
+```

@@ -9,9 +9,15 @@
 #   limactl start db2                                # container restarts via systemd
 #   limactl delete db2                               # destroy VM and all data
 #
-# Wait for Db2 to be ready (first boot):
+# Wait for Db2 to be ready (first boot, ~8 min):
 #   until limactl shell db2 -- podman logs db2ce 2>/dev/null \
 #         | grep -q "Setup has completed"; do echo "waiting..."; sleep 15; done
+#
+# OWNERSHIP INVARIANT — the Lima host user (UID 502) owns /opt/db2data by default,
+# but DB2 containers need db2inst1(1000):db2iadm1 and db2fenc1(1001):db2fadm1 ownership,
+# with fencedid specifically at root:db2iadm1 (0:1000).
+# The container-db2ce.service has ExecStartPre steps that fix ownership on every start.
+# Do NOT do chown -R on /opt/db2data manually — that breaks fencedid ownership.
 #
 # Connection (from macOS host):
 #   Python (ibm_db_dbi):
@@ -54,8 +60,8 @@ images:
 # Upgrade to 8 GB for 2 concurrent schema loads:
 #   memory: "8GiB"  # STMM naturally caps at ~3.5 GB; 4.5 GB free for OS+loads
 #   Then set LIMA_VM_LARGE_RAM=1 to enable schema_workers=2 in run_matrix.py.
-memory: "4GiB"
-cpus: 2
+memory: "8GiB"
+cpus: 4
 disk: "40GiB"
 
 mounts:
@@ -76,6 +82,14 @@ provision:
     script: |
       #!/bin/bash
       set -e
+
+      # Lima runs provision scripts on EVERY start.  Guard with a sentinel so
+      # the image pull + container setup only happens once.
+      # On subsequent starts, container-db2ce.service restarts automatically.
+      if systemctl is-enabled container-db2ce 2>/dev/null | grep -q enabled; then
+        exit 0
+      fi
+
       apt-get update -y
       apt-get install -y podman netcat-openbsd
 
@@ -102,21 +116,29 @@ provision:
         -v /opt/db2data:/database \
         icr.io/db2_community/db2
 
-      # Enable auto-restart on VM start/stop cycles
+      # Enable auto-restart on VM start/stop cycles.
+      # We generate the base unit then patch in ExecStartPre ownership fixes
+      # so that db2iupdt succeeds on every restart (Lima host UID 502 owns
+      # the volume files; container db2inst1=1000/db2fenc1=1001 must own theirs).
       podman generate systemd --new --name db2ce \
         > /etc/systemd/system/container-db2ce.service
+      # Inject ownership-fix steps before ExecStart
+      sed -i '/^ExecStart=/i ExecStartPre=/bin/bash -c '"'"'chown -R 1000:1000 /opt/db2data/config/db2inst1 2>/dev/null || true'"'"'\nExecStartPre=/bin/bash -c '"'"'chown -R 1001:1001 /opt/db2data/config/db2fenc1 2>/dev/null || true'"'"'\nExecStartPre=/bin/bash -c '"'"'f=/opt/db2data/config/db2inst1/sqllib/adm/fencedid; [ -f $f ] \&\& chown 0:1000 $f || true'"'"'' \
+        /etc/systemd/system/container-db2ce.service
+      systemctl daemon-reload
       systemctl enable --now container-db2ce
 
       # Cap DB2 STMM database memory at 2 GB (524288 × 4KB pages).
       # Without a cap, STMM grows DATABASE_MEMORY to fill all available VM RAM.
       # At idle, db2sysc already uses ~2.2 GB; STMM growth during concurrent
       # loads can push the VM over 4 GB (no swap) → OOM kill.
-      # Wait for DB2 to finish first-boot setup before applying the config.
-      timeout 600 bash -c "
-        until podman exec db2ce su - db2inst1 -c 'db2 connect to testdb' >/dev/null 2>&1; do
+      # container-db2ce runs as root, so use sudo podman.
+      # Wait for DB2 to finish first-boot setup (20-30 min under QEMU) before applying.
+      timeout 2100 bash -c "
+        until sudo podman exec db2ce su - db2inst1 -c 'db2 connect to testdb' >/dev/null 2>&1; do
           sleep 15
         done
-        podman exec db2ce su - db2inst1 -c \
+        sudo podman exec db2ce su - db2inst1 -c \
           'db2 connect to testdb && db2 \"UPDATE DB CFG FOR testdb USING DATABASE_MEMORY 524288 IMMEDIATE\" && db2 connect reset'
       " || true
 
@@ -124,12 +146,14 @@ probes:
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      if ! timeout 600s bash -c "
-        until podman logs db2ce 2>/dev/null | grep -q 'Setup has completed'; do
-          sleep 10
+      # container-db2ce.service runs as root; use sudo for log access.
+      # First boot under QEMU emulation takes 20-30 min; timeout set to 35 min.
+      if ! timeout 2100s bash -c "
+        until sudo podman logs db2ce 2>/dev/null | grep -q 'Setup has completed'; do
+          sleep 15
         done
       "; then
-        echo >&2 "Db2 CE did not finish setup within 10 minutes"
+        echo >&2 "Db2 CE did not finish setup within 35 minutes"
         exit 1
       fi
       # Extra wait for port to be ready after setup completes
@@ -139,6 +163,6 @@ probes:
         exit 1
       fi
     hint: |
-      Db2 CE is still initialising (first boot takes 5-10 min).
-      Watch progress: limactl shell db2 -- podman logs -f db2ce
+      Db2 CE is still initialising (first boot takes 20-30 min under QEMU).
+      Watch progress: limactl shell db2 -- sudo podman logs -f db2ce
       Wait for: "Setup has completed"

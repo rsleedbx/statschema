@@ -44,7 +44,7 @@ arch: "x86_64"
 # NOTE: Oracle XE edition hard-caps SGA at 2 GB and max CPUs at 2 regardless
 # of VM size.  More RAM helps PGA working memory and OS page cache, not SGA.
 cpus: 4
-memory: "4GiB"
+memory: "8GiB"
 disk: "100GiB"
 
 images:
@@ -70,6 +70,14 @@ provision:
     script: |
       #!/bin/bash
       set -e
+
+      # Lima runs provision scripts on EVERY start.  Guard with a sentinel so
+      # the image pull + container setup only happens once.
+      # On subsequent starts, container-oracle-xe.service restarts automatically.
+      if systemctl is-enabled container-oracle-xe 2>/dev/null | grep -q enabled; then
+        exit 0
+      fi
+
       apt-get update -y
       apt-get install -y podman netcat-openbsd
 
@@ -104,5 +112,5 @@ probes:
       fi
     hint: |
       Oracle XE is still initialising (first boot takes 3-5 min).
-      Run: limactl shell oracle -- podman logs oracle-xe
+      Run:  limactl shell oracle -- podman logs oracle-xe
       Wait for: DATABASE IS READY TO USE!

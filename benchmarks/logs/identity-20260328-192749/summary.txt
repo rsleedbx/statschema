@@ -1,0 +1,42 @@
+# 2026-03-28T20:09:43.410046+00:00
+
+PASS  cockroachdb×tpcb(sf=1)                      Overall: PASS ✓
+PASS  cockroachdb×tpcc(sf=1)                      Overall: PASS ✓
+PASS  cockroachdb×tpcdi(sf=5)                     Overall: PASS ✓
+PASS  cockroachdb×tpcds(sf=0.01)                  Overall: PASS ✓
+PASS  cockroachdb×tpce(sf=0.01)                   Overall: PASS ✓
+FAIL  cockroachdb×tpch(sf=0.1)                    Overall: FAIL ✗  (mean_within_2x 0.386 < threshold 0.5)
+PASS  db2×tpcb(sf=1)                              Overall: PASS ✓
+PASS  db2×tpcc(sf=1)                              Overall: PASS ✓
+PASS  db2×tpcdi(sf=1)                             Overall: PASS ✓
+PASS  db2×tpcds(sf=0.01)                          Overall: PASS ✓
+PASS  db2×tpce(sf=0.01)                           Overall: PASS ✓
+PASS  db2×tpch(sf=0.01)                           Overall: PASS ✓
+PASS  mysql×tpcb(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcc(sf=1)                            Overall: PASS ✓
+PASS  mysql×tpcdi(sf=1)                           Overall: PASS ✓
+PASS  mysql×tpcds(sf=0.01)                        Overall: PASS ✓
+PASS  mysql×tpce(sf=0.01)                         Overall: PASS ✓
+PASS  mysql×tpch(sf=0.01)                         Overall: PASS ✓
+PASS  oracle×tpcb(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcc(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcdi(sf=1)                          Overall: PASS ✓
+PASS  oracle×tpcds(sf=0.01)                       Overall: PASS ✓
+PASS  oracle×tpce(sf=0.1)                         Overall: PASS ✓
+PASS  oracle×tpch(sf=0.01)                        Overall: PASS ✓
+PASS  postgres×tpcb(sf=1)                         Overall: PASS ✓
+PASS  postgres×tpcc(sf=1)                         Overall: PASS ✓
+PASS  postgres×tpcdi(sf=5)                        Overall: PASS ✓
+PASS  postgres×tpcds(sf=0.01)                     Overall: PASS ✓
+PASS  postgres×tpce(sf=0.01)                      Overall: PASS ✓
+PASS  postgres×tpch(sf=0.1)                       Overall: PASS ✓
+PASS  sqlserver×tpcb(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcc(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcdi(sf=1)                       Overall: PASS ✓
+PASS  sqlserver×tpcds(sf=0.01)                    Overall: PASS ✓
+PASS  sqlserver×tpce(sf=0.1)                      Overall: PASS ✓
+PASS  sqlserver×tpch(sf=0.01)                     Overall: PASS ✓
+
+Passed : 35 / 36
+Failed : 1 / 36
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260328-192749

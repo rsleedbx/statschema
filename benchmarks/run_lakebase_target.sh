@@ -23,8 +23,10 @@
 #   --schemas LIST Comma-separated TPC schemas (default: tpcb,tpcc,tpch,tpcdi,tpcds,tpce).
 #   --jobs N       Maximum parallel workers (default: 3).
 #   --log-dir DIR  Directory for per-run logs (default: benchmarks/logs/lakebase-<ts>).
-#   --phases LIST  Pipeline phases to run (default: all).
-#   -h, --help     Show this help.
+#   --phases LIST         Pipeline phases to run (default: all).
+#   --full-stats-db2-ora  Collect full distribution stats on all columns for DB2/Oracle
+#                         source schemas (slower; use for audit / major-release runs).
+#   -h, --help            Show this help.
 
 set -euo pipefail
 
@@ -45,16 +47,18 @@ SCHEMAS="tpcb,tpcc,tpch,tpcdi,tpcds,tpce"
 MAX_JOBS=3
 LOG_DIR=""
 PHASES="load_source,explain_source,collect_stats,load_target,explain_target,score,validate"
+FULL_STATS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --skip-setup) SKIP_SETUP=1 ;;
-        --skip-load)  SKIP_LOAD="--skip-load" ;;
-        --engines)    ENGINES="$2"; shift ;;
-        --schemas)    SCHEMAS="$2"; shift ;;
-        --jobs)       MAX_JOBS="$2"; shift ;;
-        --log-dir)    LOG_DIR="$2"; shift ;;
-        --phases)     PHASES="$2"; shift ;;
+        --skip-setup)        SKIP_SETUP=1 ;;
+        --skip-load)         SKIP_LOAD="--skip-load" ;;
+        --engines)           ENGINES="$2"; shift ;;
+        --schemas)           SCHEMAS="$2"; shift ;;
+        --jobs)              MAX_JOBS="$2"; shift ;;
+        --log-dir)           LOG_DIR="$2"; shift ;;
+        --phases)            PHASES="$2"; shift ;;
+        --full-stats-db2-ora) FULL_STATS="--full-stats-db2-ora" ;;
         -h|--help)
             sed -n '/^# USAGE/,/^set -e/p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0
@@ -87,4 +91,5 @@ exec "$VENV" benchmarks/run_matrix.py lakebase \
     --phases         "$PHASES" \
     --max-jobs       "$MAX_JOBS" \
     ${LOG_DIR:+--log-dir "$LOG_DIR"} \
-    $SKIP_LOAD
+    $SKIP_LOAD \
+    $FULL_STATS

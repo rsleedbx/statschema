@@ -7,7 +7,8 @@
 #   load_dotenv          — load .env from repo root (safe grep-based approach)
 #   find_python          — sets VENV to the virtualenv Python; dies if missing
 #   info / warn / die    — timestamped log helpers
-#   wait_port            — wait until a TCP port is open
+#   wait_port            — wait until a TCP port is open (necessary but not sufficient)
+#   wait_db              — wait until the engine accepts a real connection (use this)
 #   start_postgres       — start PG18 container if not up
 #   start_cockroachdb    — start CockroachDB container if not up
 #   start_mysql          — start MySQL 8 container if not up
@@ -62,6 +63,21 @@ wait_port() {
     info "$label is up on $port"
 }
 
+# ── wait_db DSN_SNIPPET ENGINE LABEL [MAX_SECONDS=120] ────────────────────────
+# Polls until a real database connection succeeds — not just TCP reachability.
+# DSN_SNIPPET is passed to bench_config.py via the ENGINE argument.
+# This catches the "port open but database not accepting connections yet" race.
+wait_db() {
+    local engine="$1" label="$2" max_s="${3:-120}"
+    local elapsed=0
+    until "$VENV" benchmarks/bench_config.py ping "$engine" 2>/dev/null; do
+        (( elapsed >= max_s )) && die "$label did not accept connections after ${max_s}s"
+        sleep 10; elapsed=$(( elapsed + 10 ))
+        info "  waiting for $label to accept connections… (${elapsed}s)"
+    done
+    info "$label is accepting connections"
+}
+
 # ── Container / VM startup ────────────────────────────────────────────────────
 
 start_postgres() {
@@ -99,13 +115,15 @@ start_mysql() {
 
 start_sqlserver() {
     local port="${SQLSERVER_PORT:-14330}"
-    nc -z 127.0.0.1 "$port" 2>/dev/null && { info "SQL Server already up on $port"; return; }
+    if "$VENV" benchmarks/bench_config.py ping sqlserver 2>/dev/null; then
+        info "SQL Server already accepting connections on $port"; return
+    fi
     info "Starting sqlserver22 Lima VM…"
     limactl start sqlserver22 2>&1 | grep -v '^$' || true
     # mssql-server does not auto-start on VM boot — start it explicitly.
     limactl shell sqlserver22 -- sudo systemctl start mssql-server 2>/dev/null || true
-    sleep 10
-    wait_port 127.0.0.1 "$port" "SQL Server" 60
+    wait_port 127.0.0.1 "$port" "SQL Server" 90
+    wait_db sqlserver "SQL Server" 120
 }
 
 start_oracle() {
@@ -127,10 +145,82 @@ start_oracle() {
 
 start_db2() {
     local port="${DB2_PORT:-50000}"
-    nc -z 127.0.0.1 "$port" 2>/dev/null && { info "DB2 already up on $port"; return; }
+    # TCP port open is insufficient — Lima's port-forward is active even while the
+    # DB2 container runs its 300-second first-boot Task #3 (db2iupdt).  A TCP
+    # connection succeeds but immediately resets (SQL30081N ECONNRESET) until
+    # db2start completes.  Use a real connection probe instead.
+    if "$VENV" benchmarks/bench_config.py ping db2 2>/dev/null; then
+        info "DB2 already accepting connections on $port"; return
+    fi
     info "Starting db2 Lima VM…"
     limactl start db2 2>&1 | grep -v '^$' || true
-    wait_port 127.0.0.1 "$port" "DB2" 180
+    wait_port 127.0.0.1 "$port" "DB2 (TCP)" 180
+    # Now wait for the DB2 instance to fully start (db2iupdt Task #3 ~ 300s).
+    info "Waiting for DB2 instance to accept connections (first-boot init may take ~5 min)…"
+    wait_db db2 "DB2" 600
+}
+
+# ── bench_prereq_check [ENGINE] ───────────────────────────────────────────────
+# Non-interactive baseline check sourced at the top of run_*.sh scripts.
+# Prints a CPU snapshot and warns (but does not abort) when:
+#   - active benchmark processes are detected,
+#   - QEMU VMs not needed for ENGINE are still running and consuming CPU, or
+#   - host load average is at or above the physical core count.
+#
+# This function never kills anything — it only reports and optionally suggests
+# running bench_baseline.sh.  Call it before start_databases.
+#
+# ENGINE  all (default) | sqlserver | oracle | db2 | podman
+bench_prereq_check() {
+    local engine="${1:-all}"
+    local cores load15 qemu_count warn_issued=0
+
+    cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "?")
+    load15=$(uptime | awk -F'load averages:|load average:' '{print $2}' | awk '{print $NF}' | tr -d ',')
+
+    info "── Prereq check (engine=${engine}) ──"
+
+    # Active benchmark processes
+    local bench_pids
+    bench_pids=$(pgrep -f "run_matrix\.py|identity_test\.py|run_bench\.py|run_identity\.sh" 2>/dev/null || true)
+    if [[ -n "$bench_pids" ]]; then
+        warn "Active benchmark processes detected (may skew results):"
+        pgrep -la "run_matrix\.py|identity_test\.py|run_bench\.py|run_identity\.sh" 2>/dev/null \
+            | sed 's/^/    /' || true
+        warn "Run: benchmarks/bench_baseline.sh --mode=wait  to block until they finish."
+        warn_issued=1
+    fi
+
+    # QEMU VMs not needed for this engine
+    declare -A needed_vms=()
+    case "$engine" in
+        sqlserver) needed_vms[sqlserver22]=1 ;;
+        oracle)    needed_vms[oracle]=1      ;;
+        db2)       needed_vms[db2]=1         ;;
+        all)       needed_vms[sqlserver22]=1; needed_vms[oracle]=1; needed_vms[db2]=1 ;;
+    esac
+
+    for vm in sqlserver22 oracle db2; do
+        local is_running
+        is_running=$(limactl list 2>/dev/null | awk -v v="$vm" '$1==v && $2=="Running" {print 1}')
+        if [[ -n "$is_running" && -z "${needed_vms[$vm]+x}" ]]; then
+            warn "$vm is Running but not needed for engine=${engine} — consuming host QEMU CPU."
+            warn "Run: benchmarks/bench_baseline.sh --mode=isolate --engine=${engine}"
+            warn_issued=1
+        fi
+    done
+
+    # Load average
+    qemu_count=$(ps -eo comm 2>/dev/null | grep -c "qemu-system-x86_64" || true)
+    if [[ "$cores" != "?" ]] && ! awk -v l="$load15" -v c="$cores" 'BEGIN{exit !(l < c)}' 2>/dev/null; then
+        warn "Load average ${load15} >= ${cores} cores — host may be saturated."
+        warn_issued=1
+    fi
+
+    if [[ $warn_issued -eq 0 ]]; then
+        info "Host is clean.  ${qemu_count} QEMU thread(s) running.  Load: ${load15}/${cores}."
+    fi
+    info "────────────────────────────────────────────────────"
 }
 
 # start_databases ENGINE_COMMA_LIST
@@ -178,13 +268,19 @@ dsn_oracle()      { "$VENV" benchmarks/bench_config.py dsn oracle;      }
 dsn_db2()         { "$VENV" benchmarks/bench_config.py dsn db2;         }
 
 dsn_sqlserver() {
-    # Extract the SA password from the Lima cloud-init log when SQLSERVER_PASS
-    # is not set.  Falls back to bench_config.py once the env var is populated.
+    # Prefer the persistent password file written by the provision script.
+    # Falls back to the cloud-init output log (legacy VMs without sentinel).
     if [[ -z "${SQLSERVER_PASS:-}" ]]; then
         local pass
+        # New VMs: password persisted at /var/opt/mssql/.sa_password
         pass=$(limactl shell sqlserver22 -- \
-                   sudo grep "SQL Server sa password is" /var/log/cloud-init-output.log 2>/dev/null \
-               | tail -1 | awk '{print $NF}' || true)
+                   sudo cat /var/opt/mssql/.sa_password 2>/dev/null || true)
+        # Legacy fallback: read from cloud-init output log
+        if [[ -z "$pass" ]]; then
+            pass=$(limactl shell sqlserver22 -- \
+                       sudo grep "SQL Server sa password is" /var/log/cloud-init-output.log 2>/dev/null \
+                   | tail -1 | awk '{print $NF}' || true)
+        fi
         [[ -n "$pass" ]] || die "SQL Server password unknown.  Set SQLSERVER_PASS in .env or start the sqlserver22 Lima VM."
         export SQLSERVER_PASS="$pass"
     fi

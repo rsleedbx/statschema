@@ -97,6 +97,8 @@ from src.statschema.stats_io import dump_stats, load_stats
 
 logger = logging.getLogger(__name__)
 
+from benchmarks.dialects import get as _get_dialect
+
 
 def _strip_constraints(table):
     """Return a constraint-free copy of table for bulk benchmark loads."""
@@ -234,408 +236,19 @@ class IdentityTestResult:
 
 
 # ---------------------------------------------------------------------------
-# Connection helpers
+# Dialect dispatch — thin wrappers delegating to benchmarks/dialects/
 # ---------------------------------------------------------------------------
-
-def _pg_connect(dsn: str):
-    import psycopg2  # type: ignore
-    return psycopg2.connect(dsn)
-
-
-def _parse_dsn(dsn: str) -> dict[str, str]:
-    """Parse a space-separated key=value DSN string."""
-    return dict(p.split("=", 1) for p in dsn.split() if "=" in p)
-
-
-def _connect_mysql(dsn: str):
-    import pymysql  # type: ignore
-    p = _parse_dsn(dsn)
-    return pymysql.connect(
-        host=p.get("host", "127.0.0.1"),
-        port=int(p.get("port", "3306")),
-        user=p.get("user", "root"),
-        password=p.get("password", p.get("passwd", "")),
-        database=p.get("database", p.get("db", "mysql")),
-        local_infile=True,
-        autocommit=False,
-        charset="utf8mb4",
-    )
-
-
-def _connect_sqlserver(dsn: str):
-    import mssql_python  # type: ignore
-    p = _parse_dsn(dsn)
-    host     = p.get("server", p.get("host", "127.0.0.1"))
-    port     = int(p.get("port", "1433"))
-    database = p.get("database", p.get("db", "master"))
-    user     = p.get("user", "sa")
-    password = p.get("password", "")
-    # mssql-python uses ODBC-style connection strings; ENCRYPT=no is required for
-    # containerised SQL Server instances without a valid TLS certificate.
-    conn_str = (
-        f"SERVER={host},{port};"
-        f"DATABASE={database};"
-        f"UID={user};"
-        f"PWD={password};"
-        "ENCRYPT=no;TrustServerCertificate=yes"
-    )
-    conn = mssql_python.connect(conn_str)
-    # DDL (CREATE DATABASE, DROP DATABASE, UPDATE STATISTICS) must run outside
-    # an explicit transaction.
-    conn.setautocommit(True)
-    # Store the clean user-specified connection string template so data_loader
-    # can create a fresh connection for bulkcopy() with the correct DATABASE.
-    # conn.connection_str has reserved keywords (Driver=, APP=) that cannot be
-    # re-passed to mssql_python.connect(); this template avoids those.
-    conn._mssql_conn_template = (
-        f"SERVER={host},{port};"
-        f"DATABASE={{db}};"
-        f"UID={user};"
-        f"PWD={password};"
-        "ENCRYPT=no;TrustServerCertificate=yes"
-    )
-    return conn
-
-
-def _connect_oracle(dsn: str):
-    import oracledb  # type: ignore
-    p = _parse_dsn(dsn)
-    host    = p.get("host", "127.0.0.1")
-    port    = p.get("port", "1521")
-    service = p.get("service", "XE")
-    return oracledb.connect(
-        user=p.get("user", "system"),
-        password=p.get("password", "oracle"),
-        dsn=f"{host}:{port}/{service}",
-    )
-
-
-def _connect_db2(dsn: str):
-    import ibm_db_dbi  # type: ignore
-    p = _parse_dsn(dsn)
-    # Accept either a full IBM DSN string or key=value pairs
-    if "DATABASE" in dsn or "HOSTNAME" in dsn:
-        ibm_dsn = dsn  # already a native IBM DSN
-    else:
-        ibm_dsn = (
-            f"DATABASE={p.get('database', p.get('db', 'SAMPLE'))};"
-            f"HOSTNAME={p.get('host', '127.0.0.1')};"
-            f"PORT={p.get('port', '50000')};"
-            f"UID={p.get('user', 'db2inst1')};"
-            f"PWD={p.get('password', '')};"
-            "PROTOCOL=TCPIP;"
-        )
-    return ibm_db_dbi.connect(ibm_dsn, "", "")
-
 
 def _connect(dialect: str, dsn: str):
-    if dialect == "lakebase":
-        from src.statschema.cli import _lakebase_connect
-        import os
-        endpoint = os.environ.get("STATSCHEMA_LAKEBASE_ENDPOINT", "")
-        host     = os.environ.get("STATSCHEMA_LAKEBASE_HOST", "")
-        dbname   = os.environ.get("STATSCHEMA_LAKEBASE_DB", "databricks_postgres")
-        user     = os.environ.get("STATSCHEMA_LAKEBASE_USER", "")
-        if dsn:
-            for part in dsn.split():
-                k, _, v = part.partition("=")
-                if k == "host":     host   = v
-                if k == "dbname":   dbname = v
-                if k == "user":     user   = v
-                if k == "endpoint": endpoint = v
-        conn = _lakebase_connect(endpoint, host, dbname, user)
-        conn.autocommit = False
-        return conn
-    if dialect in ("postgres", "neon", "cockroachdb"):
-        return _pg_connect(dsn)
-    if dialect in ("mysql", "mariadb"):
-        return _connect_mysql(dsn)
-    if dialect == "sqlserver":
-        return _connect_sqlserver(dsn)
-    if dialect == "oracle":
-        return _connect_oracle(dsn)
-    if dialect == "db2":
-        return _connect_db2(dsn)
-    raise NotImplementedError(f"Unsupported dialect: {dialect!r}")
+    return _get_dialect(dialect).connect(dsn)
 
-
-# ---------------------------------------------------------------------------
-# Phase A: load source data
-# ---------------------------------------------------------------------------
-
-def _create_schema_pg(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
-        cur.execute(f'CREATE SCHEMA "{schema_name}"')
-    conn.commit()
-
-
-def _set_search_path(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(f'SET search_path = "{schema_name}", public')
-
-
-def _analyze_pg(conn, tables: list, schema: str) -> None:
-    """Run ANALYZE on every table so the planner sees fresh statistics."""
-    with conn.cursor() as cur:
-        for t in tables:
-            cur.execute(f'ANALYZE "{schema}"."{t.name}"')
-    conn.commit()
-
-
-# ---------------------------------------------------------------------------
-# Non-PG schema management and EXPLAIN parsers
-# ---------------------------------------------------------------------------
-
-def _create_schema_mysql(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(f"DROP DATABASE IF EXISTS `{schema_name}`")
-        cur.execute(f"CREATE DATABASE `{schema_name}` CHARACTER SET utf8mb4")
-    conn.commit()
-
-
-def _set_namespace_mysql(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(f"USE `{schema_name}`")
-
-
-def _analyze_mysql(conn, tables: list, schema: str,
-                   pred_col_map: dict | None = None) -> None:
-    with conn.cursor() as cur:
-        for t in tables:
-            cur.execute(f"ANALYZE TABLE `{schema}`.`{t.name}`")
-            cur.fetchall()  # consume result
-
-
-def _create_schema_sqlserver(conn, schema_name: str) -> None:
-    """Drop and recreate a SQL Server database used as the identity-test namespace."""
-    with conn.cursor() as cur:
-        try:
-            cur.execute(f"ALTER DATABASE [{schema_name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE")
-        except Exception:
-            pass
-        try:
-            cur.execute(f"DROP DATABASE [{schema_name}]")
-        except Exception:
-            pass
-        cur.execute(f"CREATE DATABASE [{schema_name}]")
-
-
-def _set_namespace_sqlserver(conn, schema_name: str) -> None:
-    """Switch the active database so unqualified table references resolve correctly."""
-    with conn.cursor() as cur:
-        cur.execute(f"USE [{schema_name}]")
-
-
-def _qualify_sqlserver_ddl(ddl_text: str, schema_name: str) -> str:
-    """Add schema prefix to every CREATE TABLE statement in a T-SQL DDL string."""
-    import re
-    return re.sub(
-        r"CREATE TABLE \[([^\]]+)\]",
-        lambda m: f"CREATE TABLE [{schema_name}].[{m.group(1)}]",
-        ddl_text,
-    )
-
-
-def _strip_oracle_quotes(ddl_text: str) -> str:
-    """Remove double-quote delimiters from Oracle DDL identifiers.
-
-    The Oracle DDL emitter creates column names as "bid" (lowercase, quoted,
-    case-sensitive), but queries use unquoted `bid` which Oracle uppercases to BID
-    causing ORA-00904. Stripping quotes makes all identifiers resolve case-insensitively
-    in the Oracle-standard way (stored as uppercase internally).
-    """
-    import re
-    return re.sub(r'"([^"]+)"', r'\1', ddl_text)
-
-
-def _analyze_sqlserver(conn, tables: list, schema: str,
-                       pred_col_map: dict | None = None, full_stats: bool = False) -> None:
-    # SQL Server statistics are per-object (not per-column), so UPDATE STATISTICS
-    # updates all statistics objects on the table.  With full_stats=False (default)
-    # we use FULLSCAN only for small tables and let SQL Server sample larger ones,
-    # which is already the default behavior.
-    with conn.cursor() as cur:
-        for t in tables:
-            cur.execute(f"UPDATE STATISTICS [dbo].[{t.name}]")
-            cur.fetchall()  # drain any result set
-    # No explicit commit — autocommit=True handles it
-
-
-def _create_schema_oracle(conn, schema_name: str) -> None:
-    """Create an Oracle user (= schema). Requires DBA privileges (system user)."""
-    with conn.cursor() as cur:
-        try:
-            cur.execute(f"DROP USER {schema_name} CASCADE")
-        except Exception:
-            pass
-        cur.execute(f"CREATE USER {schema_name} IDENTIFIED BY Ident123")
-        cur.execute(f"GRANT CONNECT, RESOURCE TO {schema_name}")
-        cur.execute(f"GRANT CREATE SESSION TO {schema_name}")
-        cur.execute(f"ALTER USER {schema_name} QUOTA UNLIMITED ON USERS")
-    conn.commit()
-
-
-def _set_namespace_oracle(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
-
-
-def _analyze_oracle(conn, tables: list, schema: str,
-                    pred_col_map: dict | None = None, full_stats: bool = False) -> None:
-    """Gather Oracle optimizer statistics.
-
-    When *pred_col_map* is provided and *full_stats* is False, only predicate
-    columns get full distribution stats (SIZE AUTO); every other column gets a
-    fast row-count-only sweep (SIZE 1).  Full-table stats are always gathered
-    for indexed columns regardless of the predicate map.
-
-    With *full_stats=True* (major-release / audit mode) all columns receive
-    SIZE AUTO — the same as Oracle's default DBMS_STATS options.
-    """
-    with conn.cursor() as cur:
-        for t in tables:
-            pred_cols = (
-                {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
-            )
-            if full_stats or not pred_cols:
-                # All columns, Oracle default behaviour
-                method_opt = "FOR ALL COLUMNS SIZE AUTO"
-            else:
-                # Deep stats for predicate columns; row-count-only for the rest
-                col_list = ", ".join(
-                    f"FOR COLUMNS {c} SIZE AUTO" for c in sorted(pred_cols)
-                )
-                method_opt = f"FOR ALL COLUMNS SIZE 1, {col_list}"
-            cur.execute(
-                "BEGIN DBMS_STATS.GATHER_TABLE_STATS("
-                f"ownname => '{schema.upper()}', "
-                f"tabname => '{t.name.upper()}', "
-                f"method_opt => '{method_opt}'); END;"
-            )
-    conn.commit()
-
-
-def _create_schema_db2(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        # Ensure explain tables exist (needed for EXPLAIN ALL)
-        try:
-            cur.execute("SELECT 1 FROM SYSTOOLS.EXPLAIN_OPERATOR FETCH FIRST 1 ROW ONLY")
-        except Exception:
-            try:
-                cur.execute("CALL SYSPROC.SYSINSTALLOBJECTS('EXPLAIN', 'C', NULL, NULL)")
-                conn.commit()
-            except Exception:
-                pass
-        # Drop existing tables in this schema individually
-        try:
-            cur.execute(f"""
-                SELECT TABNAME FROM SYSCAT.TABLES
-                WHERE TABSCHEMA = '{schema_name.upper()}'
-            """)
-            tabnames = [r[0] for r in cur.fetchall()]
-            for tab in tabnames:
-                try:
-                    cur.execute(f"DROP TABLE {schema_name}.{tab}")
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        try:
-            cur.execute(f"DROP SCHEMA {schema_name} RESTRICT")
-        except Exception:
-            pass
-        cur.execute(f"CREATE SCHEMA {schema_name}")
-    conn.commit()
-
-
-def _set_namespace_db2(conn, schema_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(f"SET SCHEMA {schema_name}")
-
-
-def _analyze_db2(conn, tables: list, schema: str,
-                 pred_col_map: dict | None = None, full_stats: bool = False,
-                 tablesample_pct: float | None = None) -> None:
-    """Run DB2 RUNSTATS via ``CALL SYSPROC.ADMIN_CMD()``.
-
-    ``ibm_db_dbi`` cannot execute ``RUNSTATS ON TABLE`` directly (SQL0104N);
-    it must be wrapped in ``SYSPROC.ADMIN_CMD``.
-
-    Always includes ``AND DETAILED INDEXES ALL``.  Without it SYSCAT.INDEXES
-    is not refreshed and the stat collector falls back to full-table MIN/MAX
-    scans for every column (2–3× slower subsequent collection).
-
-    ``TABLESAMPLE SYSTEM(n)`` goes after ``AND DETAILED INDEXES ALL``.
-
-    Default (fast) mode — ``full_stats=False``:
-    • Tables with predicate columns:
-      ``RUNSTATS ON TABLE … ON COLUMNS (c1, c2) WITH DISTRIBUTION
-        AND DETAILED INDEXES ALL [TABLESAMPLE SYSTEM(n)]``
-    • Tables without predicate columns (no distributions needed):
-      ``RUNSTATS ON TABLE … AND DETAILED INDEXES ALL [TABLESAMPLE SYSTEM(n)]``
-
-    Full mode — ``full_stats=True`` (major-release / audit):
-    • ``RUNSTATS … WITH DISTRIBUTION AND DETAILED INDEXES ALL [TABLESAMPLE …]``
-      on every table.
-
-    ``tablesample_pct`` (0 < n ≤ 100): RUNSTATS scans only n% of pages.
-    Reduces time proportionally with slight accuracy trade-off.
-    Empirical timings on 1.9 M-row table (customer_demographics):
-      no sample → 6.6 s │ 50% → 4.3 s │ 25% → 2.2 s │ 10% → 1.0 s
-    """
-    sample_suffix = f" TABLESAMPLE SYSTEM({tablesample_pct})" if tablesample_pct else ""
-    with conn.cursor() as cur:
-        for t in tables:
-            tref = f"{schema.upper()}.{t.name.upper()}"
-            pred_cols = {c.lower() for c in (pred_col_map or {}).get(t.name, [])}
-            if full_stats:
-                runstats = (f"RUNSTATS ON TABLE {tref} "
-                            f"WITH DISTRIBUTION AND DETAILED INDEXES ALL{sample_suffix}")
-            elif pred_cols:
-                col_clause = ", ".join(sorted(pred_cols))
-                runstats = (
-                    f"RUNSTATS ON TABLE {tref} "
-                    f"ON COLUMNS ({col_clause}) WITH DISTRIBUTION "
-                    f"AND DETAILED INDEXES ALL{sample_suffix}"
-                )
-            else:
-                runstats = (f"RUNSTATS ON TABLE {tref} "
-                            f"AND DETAILED INDEXES ALL{sample_suffix}")
-            cur.execute(f"CALL SYSPROC.ADMIN_CMD('{runstats}')")
-    conn.commit()
-
-
-# ---------------------------------------------------------------------------
-# Dialect dispatch for schema creation, namespace, and stats update
-# ---------------------------------------------------------------------------
 
 def _create_schema(conn, schema_name: str, dialect: str) -> None:
-    if dialect in ("postgres", "neon", "cockroachdb", "lakebase"):
-        _create_schema_pg(conn, schema_name)
-    elif dialect in ("mysql", "mariadb"):
-        _create_schema_mysql(conn, schema_name)
-    elif dialect == "sqlserver":
-        _create_schema_sqlserver(conn, schema_name)
-    elif dialect == "oracle":
-        _create_schema_oracle(conn, schema_name)
-    elif dialect == "db2":
-        _create_schema_db2(conn, schema_name)
-    else:
-        raise NotImplementedError(f"_create_schema: unsupported dialect {dialect!r}")
+    _get_dialect(dialect).create_schema(conn, schema_name)
 
 
 def _set_namespace(conn, schema_name: str, dialect: str) -> None:
-    if dialect in ("postgres", "neon", "cockroachdb", "lakebase"):
-        _set_search_path(conn, schema_name)
-    elif dialect in ("mysql", "mariadb"):
-        _set_namespace_mysql(conn, schema_name)
-    elif dialect == "sqlserver":
-        _set_namespace_sqlserver(conn, schema_name)
-    elif dialect == "oracle":
-        _set_namespace_oracle(conn, schema_name)
-    elif dialect == "db2":
-        _set_namespace_db2(conn, schema_name)
+    _get_dialect(dialect).set_namespace(conn, schema_name)
 
 
 def _analyze_tables(
@@ -658,20 +271,26 @@ def _analyze_tables(
     *db2_tablesample_pct* — DB2 only: ``TABLESAMPLE SYSTEM(n)`` page-sampling
       percentage (0 < n ≤ 100).  Reduces RUNSTATS scan time proportionally.
     """
-    if dialect in ("postgres", "neon", "cockroachdb", "lakebase"):
-        _analyze_pg(conn, tables, schema)
-    elif dialect in ("mysql", "mariadb"):
-        _analyze_mysql(conn, tables, schema, pred_col_map=pred_col_map)
-    elif dialect == "sqlserver":
-        _analyze_sqlserver(conn, tables, schema,
-                           pred_col_map=pred_col_map, full_stats=full_stats)
-    elif dialect == "oracle":
-        _analyze_oracle(conn, tables, schema,
-                        pred_col_map=pred_col_map, full_stats=full_stats)
-    elif dialect == "db2":
-        _analyze_db2(conn, tables, schema,
-                     pred_col_map=pred_col_map, full_stats=full_stats,
-                     tablesample_pct=db2_tablesample_pct)
+    _get_dialect(dialect).analyze(
+        conn, tables, schema,
+        pred_col_map=pred_col_map, full_stats=full_stats,
+        tablesample_pct=db2_tablesample_pct,
+    )
+
+
+def _strip_oracle_quotes(text: str) -> str:
+    """Remove double-quote delimiters from Oracle identifiers.
+
+    Used for both DDL (column names) and query SQL (identifier quoting),
+    since Oracle stores unquoted identifiers as uppercase.
+    """
+    import re
+    return re.sub(r'"([^"]+)"', r'\1', text)
+
+
+# ---------------------------------------------------------------------------
+# Phase A: load source data
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -718,299 +337,14 @@ def _transpile_and_qualify(
         return sql  # generation failure — return original
 
 
-# ---------------------------------------------------------------------------
-# EXPLAIN parsers for non-PG dialects
-# ---------------------------------------------------------------------------
-
-# Shared type mapping helpers
-_MYSQL_ACCESS_MAP = {
-    "ALL": "Seq Scan", "index": "Index Scan", "range": "Index Scan",
-    "ref": "Index Scan", "eq_ref": "Index Scan", "const": "Index Scan",
-    "system": "Index Scan", "fulltext": "Index Scan",
-}
-
-
-def _parse_mysql_plan_node(node: dict) -> dict | None:
-    """Recursively convert a MySQL EXPLAIN JSON node to a PG-style plan dict."""
-    plans: list[dict] = []
-
-    if "nested_loop" in node:
-        children = []
-        for item in node["nested_loop"]:
-            child = _parse_mysql_plan_node(item)
-            if child:
-                children.append(child)
-        # Check if this is a hash_join (MySQL 8.0.20+ may show this)
-        join_type = node.get("hash_join_type") or node.get("join_type", "Nested Loop")
-        pg_type = "Hash Join" if "hash" in str(join_type).lower() else "Nested Loop"
-        outer_rows = children[0]["Plan Rows"] if children else 1
-        return {"Node Type": pg_type, "Plan Rows": outer_rows, "Plans": children}
-
-    if "table" in node:
-        tbl = node["table"]
-        access = tbl.get("access_type", "ALL")
-        pg_type = _MYSQL_ACCESS_MAP.get(access, "Seq Scan")
-        rows = int(float(tbl.get("rows_examined_per_scan", tbl.get("rows_produced_per_join", 1))))
-        child_nodes: list[dict] = []
-        # MySQL wraps aggregation in a "grouping_operation" or "ordering_operation" sibling
-        return {"Node Type": pg_type, "Plan Rows": rows, "Plans": child_nodes}
-
-    if "grouping_operation" in node:
-        inner = _parse_mysql_plan_node(node["grouping_operation"])
-        rows = inner["Plan Rows"] if inner else 1
-        return {"Node Type": "Aggregate", "Plan Rows": rows, "Plans": [inner] if inner else []}
-
-    if "ordering_operation" in node:
-        inner = _parse_mysql_plan_node(node["ordering_operation"])
-        rows = inner["Plan Rows"] if inner else 1
-        return {"Node Type": "Sort", "Plan Rows": rows, "Plans": [inner] if inner else []}
-
-    if "duplicates_removal" in node:
-        inner = _parse_mysql_plan_node(node["duplicates_removal"])
-        rows = inner["Plan Rows"] if inner else 1
-        return {"Node Type": "Aggregate", "Plan Rows": rows, "Plans": [inner] if inner else []}
-
-    if "query_block" in node:
-        return _parse_mysql_plan_node(node["query_block"])
-
-    return None
-
-
-def _explain_mysql(conn, sql: str, schema: str) -> dict:
-    _set_namespace_mysql(conn, schema)
-    with conn.cursor() as cur:
-        cur.execute(f"EXPLAIN FORMAT=JSON {sql}")
-        raw = cur.fetchone()[0]
-    plan = json.loads(raw) if isinstance(raw, str) else raw
-    result = _parse_mysql_plan_node(plan.get("query_block", plan))
-    return result or {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-
-_MSSQL_OP_MAP = {
-    "Clustered Index Scan": "Seq Scan",
-    "Clustered Index Seek": "Index Scan",
-    "Index Scan": "Seq Scan",
-    "Index Seek": "Index Scan",
-    "Table Scan": "Seq Scan",
-    "Hash Match": "Hash Join",
-    "Nested Loops": "Nested Loop",
-    "Merge Join": "Merge Join",
-    "Sort": "Sort",
-    "Top": "Limit",
-    "Aggregate": "Aggregate",
-    "Stream Aggregate": "Aggregate",
-    "Compute Scalar": "Result",
-    "Filter": "Filter",
-    "Bitmap": "Hash",
-    "Parallelism": "Gather",
-    "Row Count Spool": "Materialize",
-}
-
-
-def _explain_sqlserver(conn, sql: str, schema: str) -> dict:
-    """Parse SQL Server SHOWPLAN_ALL into a PG-compatible plan dict."""
-    _set_namespace_sqlserver(conn, schema)
-    with conn.cursor() as cur:
-        cur.execute("SET SHOWPLAN_ALL ON")
-        try:
-            cur.execute(sql)
-            rows = cur.fetchall()
-            # The result has: StmtText, StmtId, NodeId, Parent, PhysicalOp,
-            #                  LogicalOp, ..., EstimateRows, ...
-            # Column indices: 0=StmtText, 4=PhysicalOp, 8=EstimateRows, 2=NodeId, 3=Parent
-            nodes: list[tuple[int, int, str, int]] = []  # (NodeId, ParentId, op, rows)
-            for row in rows:
-                node_id  = row[2] if row[2] is not None else 0
-                parent   = row[3] if row[3] is not None else 0
-                phys_op  = (row[4] or "").strip()
-                est_rows = int(float(row[8] or 1)) if row[8] else 1
-                if phys_op:
-                    pg_op = _MSSQL_OP_MAP.get(phys_op, phys_op)
-                    nodes.append((int(node_id), int(parent), pg_op, est_rows))
-        finally:
-            cur.execute("SET SHOWPLAN_ALL OFF")
-
-    if not nodes:
-        return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-    # Build tree from NodeId/Parent relationships
-    by_id: dict[int, dict] = {}
-    for nid, _, op, rows in nodes:
-        by_id[nid] = {"Node Type": op, "Plan Rows": rows, "Plans": []}
-    roots: list[dict] = []
-    for nid, parent_id, _, _ in nodes:
-        if parent_id in by_id and parent_id != nid:
-            by_id[parent_id]["Plans"].append(by_id[nid])
-        elif parent_id == 0 or parent_id not in by_id:
-            roots.append(by_id[nid])
-
-    return roots[0] if roots else {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-
-_ORA_OP_MAP = {
-    "TABLE ACCESS": {"FULL": "Seq Scan", "BY INDEX ROWID": "Index Scan",
-                     "BY INDEX ROWID BATCHED": "Index Scan", "SAMPLE": "Seq Scan"},
-    "INDEX": {"RANGE SCAN": "Index Scan", "UNIQUE SCAN": "Index Scan",
-              "FULL SCAN": "Seq Scan", "FAST FULL SCAN": "Seq Scan"},
-    "HASH JOIN": {"": "Hash Join", "OUTER": "Hash Join", "ANTI": "Hash Join"},
-    "NESTED LOOPS": {"": "Nested Loop", "OUTER": "Nested Loop"},
-    "MERGE JOIN": {"": "Merge Join", "CARTESIAN": "Merge Join"},
-    "SORT": {"GROUP BY": "Aggregate", "ORDER BY": "Sort", "AGGREGATE": "Aggregate",
-             "JOIN": "Merge Join", "UNIQUE": "Sort"},
-    "FILTER": {"": "Filter"},
-    "COUNT": {"STOPKEY": "Limit", "": "Aggregate"},
-    "VIEW": {"": "Subquery Scan"},
-    "WINDOW": {"SORT": "WindowAgg"},
-}
-
-
-def _ora_op_to_pg(operation: str, options: str) -> str:
-    op = (operation or "").strip().upper()
-    opt = (options or "").strip().upper()
-    sub = _ORA_OP_MAP.get(op, {})
-    return sub.get(opt, sub.get("", op.title()))
-
-
-def _explain_oracle(conn, sql: str, schema: str) -> dict:
-    """Run EXPLAIN PLAN FOR and parse PLAN_TABLE into a PG-compatible plan dict."""
-    _set_namespace_oracle(conn, schema)
-    with conn.cursor() as cur:
-        try:
-            cur.execute("DELETE FROM PLAN_TABLE WHERE STATEMENT_ID = 'IDENT'")
-        except Exception:
-            pass
-        cur.execute(f"EXPLAIN PLAN SET STATEMENT_ID = 'IDENT' FOR {sql}")
-        cur.execute("""
-            SELECT ID, PARENT_ID, OPERATION, OPTIONS, CARDINALITY
-            FROM PLAN_TABLE
-            WHERE STATEMENT_ID = 'IDENT'
-            ORDER BY ID
-        """)
-        rows = cur.fetchall()
-
-    if not rows:
-        return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-    by_id: dict[int, dict] = {}
-    for row in rows:
-        nid, pid, op, opts, card = row
-        pg_op = _ora_op_to_pg(op, opts)
-        by_id[int(nid)] = {"Node Type": pg_op, "Plan Rows": int(card or 1), "Plans": [], "_pid": pid}
-
-    roots: list[dict] = []
-    for nid, node in by_id.items():
-        pid = node.pop("_pid", None)
-        if pid is not None and int(pid) in by_id:
-            by_id[int(pid)]["Plans"].append(node)
-        else:
-            roots.append(node)
-
-    return roots[0] if roots else {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-
-_DB2_OP_MAP = {
-    "TBSCAN": "Seq Scan", "IXSCAN": "Index Scan", "IXSCAN (SORT)": "Index Scan",
-    "FETCH": "Index Scan", "RIDSCN": "Bitmap Index Scan",
-    "HSJOIN": "Hash Join", "NLJOIN": "Nested Loop", "MSJOIN": "Merge Join",
-    "SORT": "Sort", "GRPBY": "Aggregate", "FILTER": "Filter",
-    "TBFUNC": "Function Scan", "RETURN": "Result", "TEMP": "Materialize",
-}
-
-
-def _explain_db2(conn, sql: str, schema: str) -> dict:
-    """Use DB2 SET CURRENT EXPLAIN MODE and parse SYSTOOLS.EXPLAIN_{OPERATOR,STREAM}."""
-    _set_namespace_db2(conn, schema)
-    import datetime
-    with conn.cursor() as cur:
-        t_before = datetime.datetime.now(datetime.timezone.utc)
-        try:
-            cur.execute("SET CURRENT EXPLAIN MODE = EXPLAIN")
-            try:
-                cur.execute(sql)
-            except Exception:
-                pass  # expected — query is not actually executed
-            cur.execute("SET CURRENT EXPLAIN MODE = NO")
-        except Exception as e:
-            logger.warning("DB2 EXPLAIN failed: %s", e)
-            return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-        # Fetch operators for the most recent explain run
-        try:
-            cur.execute("""
-                SELECT OPERATOR_ID, OPERATOR_TYPE
-                FROM SYSTOOLS.EXPLAIN_OPERATOR
-                WHERE EXPLAIN_TIME >= ?
-                ORDER BY OPERATOR_ID
-            """, (t_before,))
-            op_rows = cur.fetchall()
-        except Exception:
-            return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-        # Fetch streams (parent/child links and cardinalities)
-        try:
-            cur.execute("""
-                SELECT SOURCE_ID, TARGET_ID, STREAM_COUNT
-                FROM SYSTOOLS.EXPLAIN_STREAM
-                WHERE EXPLAIN_TIME >= ?
-                  AND SOURCE_TYPE = 'Q'
-                  AND TARGET_TYPE = 'Q'
-            """, (t_before,))
-            stream_rows = cur.fetchall()
-        except Exception:
-            stream_rows = []
-
-    if not op_rows:
-        return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-    by_id: dict[int, dict] = {}
-    for op_id, op_type in op_rows:
-        pg_op = _DB2_OP_MAP.get((op_type or "").strip().upper(), (op_type or "Unknown").title())
-        by_id[int(op_id)] = {"Node Type": pg_op, "Plan Rows": 1, "Plans": [], "_parent": None}
-
-    # Stream: source → target.  source_id's output cardinality = STREAM_COUNT.
-    # target_id is the parent (consumer) of source_id.
-    for src_id, tgt_id, card in stream_rows:
-        if int(src_id) in by_id:
-            by_id[int(src_id)]["Plan Rows"] = int(float(card or 1))
-            by_id[int(src_id)]["_parent"] = int(tgt_id)
-
-    roots: list[dict] = []
-    for nid, node in by_id.items():
-        pid = node.pop("_parent", None)
-        if pid is not None and pid in by_id and pid != nid:
-            by_id[pid]["Plans"].append(node)
-        else:
-            roots.append(node)
-
-    return roots[0] if roots else {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-
 def _get_explain(conn, sql: str, schema: str, dialect: str) -> dict:
     """Dispatch to the correct EXPLAIN parser for the given dialect."""
-    if dialect in ("postgres", "neon", "cockroachdb", "lakebase"):
-        return _explain_pg(conn, sql, schema)
-    if dialect in ("mysql", "mariadb"):
-        return _explain_mysql(conn, sql, schema)
-    if dialect == "sqlserver":
-        return _explain_sqlserver(conn, sql, schema)
-    if dialect == "oracle":
-        return _explain_oracle(conn, sql, schema)
-    if dialect == "db2":
-        return _explain_db2(conn, sql, schema)
-    raise NotImplementedError(f"_get_explain: unsupported dialect {dialect!r}")
+    return _get_dialect(dialect).explain(conn, sql, schema)
 
 
 def _schema_table_ref(table_name: str, schema_name: str, dialect: str) -> str:
     """Return a fully-qualified, properly-quoted table reference for the dialect."""
-    if dialect in ("mysql", "mariadb"):
-        return f"`{schema_name}`.`{table_name}`"
-    if dialect == "sqlserver":
-        # SQL Server: schema_name is used as a database; tables live in [db].[dbo].[table].
-        return f"[{schema_name}].[dbo].[{table_name}]"
-    if dialect in ("oracle", "db2"):
-        return f"{schema_name.upper()}.{table_name.upper()}"
-    # postgres-wire family
-    return f'"{schema_name}"."{table_name}"'
+    return _get_dialect(dialect).table_ref(table_name, schema_name)
 
 
 def load_source(
@@ -1109,154 +443,6 @@ def load_source(
 # ---------------------------------------------------------------------------
 # Phase B: baseline EXPLAIN plans
 # ---------------------------------------------------------------------------
-
-def _explain_pg(conn, sql: str, schema: str) -> dict:
-    """
-    Run EXPLAIN (FORMAT JSON) with search_path set to schema.
-    Returns the parsed plan tree (the "Plan" dict from PostgreSQL JSON output).
-    Falls back to CockroachDB text EXPLAIN when FORMAT JSON is unsupported.
-    """
-    _set_search_path(conn, schema)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(f"EXPLAIN (FORMAT JSON) {sql}")
-            raw = cur.fetchone()[0]
-        plans = json.loads(raw) if isinstance(raw, str) else raw
-        return plans[0]["Plan"]
-    except Exception:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        return _explain_crdb_text(conn, sql, schema)
-
-
-def _explain_crdb_text(conn, sql: str, schema: str) -> dict:
-    """
-    Parse CockroachDB text EXPLAIN output into a PG-compatible plan dict.
-
-    CockroachDB does not support EXPLAIN (FORMAT JSON) with PostgreSQL-compatible
-    output.  Its text EXPLAIN returns rows with columns (tree, field, description)
-    where each node appears as a row with an empty field and then attribute rows
-    below it.  We parse that into the ``{"Node Type": ..., "Plan Rows": ...,
-    "Plans": [...]}`` structure expected by ``score_plans``.
-
-    Node types are mapped from CockroachDB names (e.g. "hash-join") to
-    PostgreSQL equivalents (e.g. "Hash Join") where possible.
-    """
-    _set_search_path(conn, schema)
-    with conn.cursor() as cur:
-        cur.execute(f"EXPLAIN {sql}")
-        rows = cur.fetchall()
-
-    # CockroachDB EXPLAIN can return 1 or 3 columns depending on version.
-    # 3-column: (tree, field, description)
-    # 1-column: plain text lines
-    if not rows:
-        return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-    _CRDB_TYPE_MAP = {
-        "hash-join": "Hash Join",
-        "merge-join": "Merge Join",
-        "lookup-join": "Nested Loop",
-        "cross-join": "Nested Loop",
-        "anti-join": "Hash Join",
-        "semi-join": "Hash Join",
-        "hash-group-by": "Aggregate",
-        "stream-group-by": "Aggregate",
-        "scalar-group-by": "Aggregate",
-        "filter": "Filter",
-        "scan": "Seq Scan",
-        "index-scan": "Index Scan",
-        "index-join": "Index Join",
-        "sort": "Sort",
-        "limit": "Limit",
-        "union": "Append",
-        "union-all": "Append",
-        "except": "SetOp",
-        "intersect": "SetOp",
-        "window": "WindowAgg",
-        "project": "Result",
-        "distinct": "Unique",
-        "values": "Result",
-        "insert": "Insert",
-        "update": "Update",
-        "delete": "Delete",
-        "render": "Result",
-        "root": "Result",
-    }
-
-    def _pg_type(crdb_name: str) -> str:
-        name = crdb_name.strip().lstrip("•").strip().lower()
-        # strip parenthetical qualifiers like "(inner)" or "(left outer)"
-        name = name.split("(")[0].strip()
-        return _CRDB_TYPE_MAP.get(name, crdb_name.strip().title())
-
-    def _parse_row_count(desc: str) -> int:
-        """Extract integer from strings like '12,385' or '125,000 (100% of table...)'."""
-        import re
-        m = re.match(r"[\d,]+", desc.replace(" ", ""))
-        if m:
-            try:
-                return int(m.group(0).replace(",", ""))
-            except ValueError:
-                pass
-        return 1
-
-    # Build a flat list of (node_type, plan_rows) pairs preserving order,
-    # then nest them into a minimal PG-compatible tree.
-    if len(rows[0]) >= 3:
-        # 3-column format
-        nodes_flat: list[tuple[str, int]] = []
-        pending_type: str | None = None
-        pending_rows = 1
-        for row in rows:
-            tree_col = (row[0] or "").strip()
-            field_col = (row[1] or "").strip()
-            desc_col  = (row[2] or "").strip()
-            if tree_col and not field_col:
-                # New node
-                if pending_type is not None:
-                    nodes_flat.append((_pg_type(pending_type), pending_rows))
-                pending_type = tree_col
-                pending_rows = 1
-            elif field_col.lower() in ("estimated row count", "estimated rows"):
-                pending_rows = _parse_row_count(desc_col)
-        if pending_type is not None:
-            nodes_flat.append((_pg_type(pending_type), pending_rows))
-    else:
-        # 1-column text format — extract "• node-type" and "estimated row count:" lines
-        import re
-        nodes_flat = []
-        pending_type = None
-        pending_rows = 1
-        for row in rows:
-            line = (row[0] or "").strip()
-            node_m = re.search(r"•\s+([\w\s\-]+?)(?:\s*$|\s*\()", line)
-            if node_m:
-                if pending_type is not None:
-                    nodes_flat.append((_pg_type(pending_type), pending_rows))
-                pending_type = node_m.group(1).strip()
-                pending_rows = 1
-            row_m = re.search(r"estimated row count:\s*([\d,]+)", line, re.IGNORECASE)
-            if row_m:
-                pending_rows = _parse_row_count(row_m.group(1))
-        if pending_type is not None:
-            nodes_flat.append((_pg_type(pending_type), pending_rows))
-
-    # Build a flat-but-valid PG-compatible plan tree (each node wraps the next as child)
-    # so that _extract_plan_nodes() and score_plans() work correctly.
-    if not nodes_flat:
-        return {"Node Type": "Unknown", "Plan Rows": 1, "Plans": []}
-
-    root: dict = {"Node Type": nodes_flat[0][0], "Plan Rows": nodes_flat[0][1], "Plans": []}
-    current = root
-    for ntype, nrows in nodes_flat[1:]:
-        child: dict = {"Node Type": ntype, "Plan Rows": nrows, "Plans": []}
-        current["Plans"].append(child)
-        current = child
-    return root
-
 
 def collect_baseline_plans(
     conn,
@@ -1776,6 +962,21 @@ def build_target(
                         pass
     conn.commit()
     print("done")
+
+    # Disable CockroachDB background auto-stats for the duration of Phase D → Phase E.
+    # Without this, auto-stats jobs triggered by data inserts can overwrite the ANALYZE
+    # results (or our injected stats) before Phase E reads them, causing non-deterministic
+    # within_2x scores.  Re-enabled after Phase E in the caller (run_identity_test).
+    if dialect == "cockroachdb":
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SET CLUSTER SETTING sql.stats.automatic_collection.enabled = false"
+                )
+            conn.autocommit = False
+        except Exception:
+            pass  # non-admin or older CRDB — proceed; may still have flaky stats
 
     ordered = resolve_load_order(tables)
     row_counts = resolve_row_counts(tables, scale_factor=sf)
@@ -2334,6 +1535,18 @@ def run_identity_test(
                                           verbose_plans=_verbose_plans,
                                           table_names=_table_names)
     result.phase_times["E_replay_explain"] = time.perf_counter() - t0
+
+    # Re-enable CockroachDB auto-stats after Phase E EXPLAIN is done.
+    if dialect == "cockroachdb":
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SET CLUSTER SETTING sql.stats.automatic_collection.enabled = true"
+                )
+            conn.autocommit = False
+        except Exception:
+            pass
 
     # ── Phase F: Score ─────────────────────────────────────────────────────────
     for qid in source_plans:
