@@ -93,6 +93,8 @@ def bulk_load_db2(  # pragma: no cover
     schema: Optional[str] = None,
     staging_dir: Optional[str] = None,
     col_types: Optional[list[str]] = None,
+    _container_spec: Optional[str] = None,
+    _force_multi_row: bool = False,
 ) -> int:
     """
     Load df into IBM Db2 LUW.
@@ -104,13 +106,16 @@ def bulk_load_db2(  # pragma: no cover
     2. Direct ADMIN_CMD with the host-side path (same CLOB restriction).
     3. MULTI_ROW fallback: parameterised batch INSERTs.
     """
-    container_name = os.environ.get("DB2_CONTAINER_NAME", "").strip()
+    # _container_spec from DeploymentContext takes priority; fall back to env var.
+    container_name = _container_spec or os.environ.get("DB2_CONTAINER_NAME", "").strip()
 
     # CLOB columns cannot be loaded inline via ADMIN_CMD DEL format.
     # Skip ADMIN_CMD for tables that contain canonical "string" / "clob" cols.
     _has_clob = col_types and any(
         t.lower() in ("string", "clob", "nclob") for t in col_types
     )
+    if _force_multi_row:
+        _has_clob = True  # treat as CLOB to force the multi-row fallback path
 
     cur = conn.cursor()
     if schema is None:
@@ -198,3 +203,89 @@ def bulk_load_db2(  # pragma: no cover
     conn.commit()
     logger.info("bulk_load_db2[MULTI_ROW]: loaded %d rows into %s", inserted, full)
     return inserted
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: topology-aware DB2 loader classes
+# These classes use DeploymentContext instead of the DB2_CONTAINER_NAME
+# env-var hack.  The old bulk_load_db2() function is kept intact for backward
+# compat; the classes delegate to it.
+# ---------------------------------------------------------------------------
+
+from ..base import TopologyAwareLoader
+
+
+class DB2AdminCmdLoader(TopologyAwareLoader):
+    """
+    Fast path: ADMIN_CMD LOAD from a staged DEL file.
+
+    Requires either:
+    - ctx.container_spec is set (file is copied into the DB container), OR
+    - ctx.topology == "collocated" (statschema runs on the DB host directly)
+
+    CLOB columns are not supported by ADMIN_CMD DEL format; falls back to
+    DB2ImportLoader (IMPORT) when CLOBs are present.
+    """
+
+    _CLOB_TYPES = frozenset({"string", "clob", "nclob"})
+
+    def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
+        if dialect != "db2":
+            return False
+        # Need to be able to stage the file where the server can see it.
+        if not (ctx.container_spec or ctx.is_collocated()):
+            return False
+        # ADMIN_CMD DEL format cannot handle inline CLOB data.
+        if col_types and any(t.lower() in self._CLOB_TYPES for t in col_types):
+            return False
+        return True
+
+    def bulk_load(self, ctx, conn, df, table, col_names, wait=True) -> int:
+        return bulk_load_db2(
+            conn, df, table, col_names,
+            staging_dir=ctx.server_staging_dir,
+            col_types=None,             # CLOB guard already applied in can_use
+            _container_spec=ctx.container_spec,
+        )
+
+
+class DB2ImportLoader(TopologyAwareLoader):
+    """
+    Medium path: IMPORT over the wire — works for CLOB columns but is slower
+    than ADMIN_CMD LOAD for large tables.
+
+    Requires ctx.container_spec or collocated topology (same as AdminCmd)
+    so the server can resolve the file path, but does NOT exclude CLOB columns.
+    """
+
+    def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
+        if dialect != "db2":
+            return False
+        return bool(ctx.container_spec or ctx.is_collocated())
+
+    def bulk_load(self, ctx, conn, df, table, col_names, wait=True) -> int:
+        return bulk_load_db2(
+            conn, df, table, col_names,
+            staging_dir=ctx.server_staging_dir,
+            col_types=None,
+            _container_spec=ctx.container_spec,
+        )
+
+
+class DB2MultiRowLoader(TopologyAwareLoader):
+    """
+    Fallback: parameterised multi-row INSERTs.  Always available.
+    Used when no ADMIN_CMD path is reachable (remote topology, no container spec).
+    """
+
+    def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
+        return dialect == "db2"
+
+    def bulk_load(self, ctx, conn, df, table, col_names, wait=True) -> int:
+        # Force the multi-row INSERT path by suppressing container staging.
+        return bulk_load_db2(
+            conn, df, table, col_names,
+            col_types=None,
+            _container_spec=None,       # no container staging
+            _force_multi_row=True,
+        )

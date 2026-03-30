@@ -1,0 +1,50 @@
+run_id: identity-20260330-203341
+timestamp: '2026-03-30T20:33:42.002125+00:00'
+git_commit: 060da0d5062da65c1f89875367f768230d27c685
+invocation:
+  argv:
+  - benchmarks/run_matrix.py
+  - identity
+  - --engines
+  - db2
+  - --schemas
+  - tpcb
+  cwd: /Users/robert.lee/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: 3.11.13
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines:
+  - db2
+  schemas:
+  - tpcb
+  phases:
+  - load_source
+  - explain_source
+  - collect_stats
+  - load_target
+  - explain_target
+  - score
+  - validate
+  schema_workers_override: null
+  schema_workers_resolved:
+    db2: 1
+  lpt_ordering: true
+  sweep_random: null
+  full_stats: false
+engines:
+  db2:
+    version: null
+    driver: ibm_db
+    driver_version: 3.2.8
+    error: 'ibm_db_dbi::OperationalError: [IBM][CLI Driver] SQL30081N  A communication
+      error has been detected. Communication protocol being used: "TCP/IP".  Communication
+      API being used: "SOCKETS".  Location where the error was detected: "127.0.0.1".  Communication
+      function detecting the error: "connect".  Protocol specific error code(s): "61",
+      "*", "*".  SQLSTATE=08001 SQLCODE=-30081'

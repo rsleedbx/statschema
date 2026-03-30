@@ -61,9 +61,46 @@ from .dialects._loader_shared import (
 from .dialects.postgres.loader   import bulk_load_postgres
 from .dialects.mysql.loader      import bulk_load_mysql
 from .dialects.sqlserver.loader  import bulk_load_sqlserver
-from .dialects.db2.loader        import bulk_load_db2, _db2_container_copy
+from .dialects.db2.loader        import (
+    bulk_load_db2, _db2_container_copy,
+    DB2AdminCmdLoader, DB2ImportLoader, DB2MultiRowLoader,
+)
+from .dialects.oracle.loader     import OracleDirectPathLoader, OracleMultiRowLoader
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: topology-aware loader registry
+# ---------------------------------------------------------------------------
+
+_LOADER_REGISTRY: dict[str, list] = {
+    "db2": [
+        DB2AdminCmdLoader(),
+        DB2ImportLoader(),
+        DB2MultiRowLoader(),
+    ],
+    "oracle": [
+        OracleDirectPathLoader(),
+        OracleMultiRowLoader(),
+    ],
+}
+
+
+def _select_loader(dialect: str, ctx: Any, col_types: list[str] | None):
+    """
+    Return the first loader in the registry that accepts the given dialect
+    and DeploymentContext.  Raises RuntimeError if none matches.
+    """
+    loaders = _LOADER_REGISTRY.get(dialect, [])
+    for loader in loaders:
+        if loader.can_use(ctx, dialect, col_types):
+            return loader
+    raise RuntimeError(
+        f"No topology-aware loader found for dialect={dialect!r}. "
+        f"ctx.topology={getattr(ctx, 'topology', '?')!r}, "
+        f"col_types_sample={col_types[:3] if col_types else None}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +119,7 @@ def load_dataframe(
     col_types: Optional[list[str]] = None,
     staging_dir: Optional[str] = None,
     commit: bool = True,
+    ctx: "Optional[Any]" = None,
 ) -> int:
     """
     Load a DataFrame into a live database table using one of three strategies.
@@ -116,6 +154,12 @@ def load_dataframe(
         )
     else:
         batch_size = _effective_batch_size(cfg, len(col_names))
+
+    # --- Topology-aware registry dispatch (Phase 1) ---
+    if ctx is not None and dialect in _LOADER_REGISTRY:
+        loader = _select_loader(dialect, ctx, col_types)
+        col_names = _col_names(df, cols)
+        return loader.bulk_load(ctx, conn, df, table, col_names)
 
     if dialect == "databricks":
         raise NotImplementedError(

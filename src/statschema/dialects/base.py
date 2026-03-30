@@ -107,3 +107,40 @@ class DataLoader(Protocol):
         config: BatchConfig | None = None,
     ) -> int:
         ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: topology-aware loader interface
+# New loaders (DB2, Oracle, Spark, Lakehouse) implement these two methods.
+# The old bulk_load(conn, df, table, config) signature stays on legacy loaders
+# (postgres, mysql, sqlserver) until they are migrated.
+# ---------------------------------------------------------------------------
+
+class TopologyAwareLoader:
+    """
+    Base class (not a Protocol) for Phase 1 loaders.
+
+    Subclass and implement ``can_use()`` and ``bulk_load()``.  Register
+    instances in ``data_loader._LOADER_REGISTRY``.
+    """
+
+    def can_use(
+        self,
+        ctx: Any,                    # DeploymentContext
+        dialect: str,
+        col_types: list[str] | None,
+    ) -> bool:
+        """Return True if this loader can handle the dialect + topology."""
+        return False  # pragma: no cover
+
+    def bulk_load(
+        self,
+        ctx: Any,                    # DeploymentContext
+        conn: Any,
+        df: Any,                     # pandas.DataFrame
+        table: str,
+        col_names: list[str],
+        wait: bool = True,
+    ) -> int:
+        """Load *df* into *table*. Returns row count."""
+        raise NotImplementedError  # pragma: no cover
