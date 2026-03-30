@@ -299,23 +299,34 @@ restore_vm() {
     run limactl start "$vm" 2>&1 | grep -E "READY|MESSAGE|ERROR|started" || true
     info "$vm is up from snapshot '${tag}'."
 
-    # SQL Server regenerates the SA password on every cloud-init run.
-    # After a restore, sync the new password to .env so bench_config.py finds it.
+    # The provision script guards with a sentinel file
+    # (/var/opt/mssql/.statschema-provisioned), which is on the diffdisk and
+    # therefore restored with it.  Password generation is skipped on every start
+    # after the first — including after an APFS restore.  This call only ensures
+    # SQLSERVER_PASS is populated in .env (e.g. on a fresh checkout or first use
+    # after the initial snap).
     if [[ "$vm" == sqlserver* ]]; then
         sync_sqlserver_pass "$vm"
     fi
 }
 
 # sync_sqlserver_pass VM
-# Extracts the current SA password from cloud-init-output.log inside the VM
-# and writes it to SQLSERVER_PASS in the repo .env file.
+# Reads the SA password from /var/opt/mssql/.sa_password (written once at
+# first-boot provisioning and never changed) and writes it to SQLSERVER_PASS
+# in the repo .env file.  Falls back to cloud-init-output.log for pre-sentinel
+# VMs.  Safe to call after every restore — it is a no-op when the password is
+# already correct in .env.
 sync_sqlserver_pass() {
     local vm="$1"
     local new_pass
-    new_pass=$(limactl shell "$vm" -- bash -c \
-        "sudo grep 'SQL Server sa password is' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | awk '{print \$NF}'" 2>/dev/null || true)
+    new_pass=$(limactl shell "$vm" -- \
+        sudo cat /var/opt/mssql/.sa_password 2>/dev/null || true)
     if [[ -z "$new_pass" ]]; then
-        warn "Could not extract SA password from $vm cloud-init log — update SQLSERVER_PASS in .env manually."
+        new_pass=$(limactl shell "$vm" -- bash -c \
+            "sudo grep 'SQL Server sa password is' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | awk '{print \$NF}'" 2>/dev/null || true)
+    fi
+    if [[ -z "$new_pass" ]]; then
+        warn "Could not read SA password from $vm — update SQLSERVER_PASS in .env manually."
         return
     fi
     local env_file="${REPO_ROOT}/.env"

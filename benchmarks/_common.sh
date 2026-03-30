@@ -300,6 +300,10 @@ export_bench_sqlserver_dsn() {
     local pass="${SQLSERVER_PASS:-}"
     if [[ -z "$pass" ]]; then
         pass=$(limactl shell sqlserver22 -- \
+                   sudo cat /var/opt/mssql/.sa_password 2>/dev/null || true)
+    fi
+    if [[ -z "$pass" ]]; then
+        pass=$(limactl shell sqlserver22 -- \
                    sudo grep "SQL Server sa password is" /var/log/cloud-init-output.log 2>/dev/null \
                | tail -1 | awk '{print $NF}' || true)
     fi

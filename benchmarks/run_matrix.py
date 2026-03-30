@@ -39,6 +39,7 @@ import argparse
 import concurrent.futures
 import logging
 import os
+import random
 import subprocess
 import sys
 import time
@@ -353,6 +354,7 @@ def run_identity_matrix(
     max_workers: int | None = None,
     schema_workers_override: int | None = None,
     full_stats: bool = False,
+    sweep_random: int | None = None,
 ) -> list[RunResult]:
     """
     Run the identity test matrix.  Engines run in parallel; schemas within
@@ -360,11 +362,14 @@ def run_identity_matrix(
 
     Parameters
     ----------
-    engines : list of engine names, default DEFAULT_ENGINES
-    schemas : list of TPC schema names, default DEFAULT_SCHEMAS
-    dsns    : dict mapping engine → DSN string; built from env if not provided
-    log_dir : directory for per-run log files
-    phases  : subset of ALL_PHASES to run; default = all phases
+    engines        : list of engine names, default DEFAULT_ENGINES
+    schemas        : list of TPC schema names, default DEFAULT_SCHEMAS
+    dsns           : dict mapping engine → DSN string; built from env if not provided
+    log_dir        : directory for per-run log files
+    phases         : subset of ALL_PHASES to run; default = all phases
+    sweep_random   : if set, randomly sample this many (engine, schema) pairs from
+                     the full matrix — useful for a quick smoke test that finds bugs
+                     without running all N×M combinations
     """
     _load_dotenv()
     engines = engines or DEFAULT_ENGINES
@@ -386,6 +391,48 @@ def run_identity_matrix(
             skipped.append(engine)
     active_engines = [e for e in engines if e not in skipped]
 
+    # --sweep-random: sample N (engine, schema) pairs from the full Cartesian product.
+    # Groups the sample by engine so each engine's thread runs only its selected schemas.
+    schemas_for_engine: dict[str, list[str]] = {e: list(schemas) for e in active_engines}
+    if sweep_random is not None:
+        all_pairs = [(e, s) for e in active_engines for s in schemas]
+        sample = random.sample(all_pairs, min(sweep_random, len(all_pairs)))
+        logger.info(
+            "sweep-random %d: selected %s",
+            sweep_random,
+            ", ".join(f"{e}×{s}" for e, s in sorted(sample)),
+        )
+        schemas_for_engine = {}
+        for e, s in sample:
+            schemas_for_engine.setdefault(e, []).append(s)
+
+    # Capture environment snapshot (DB versions, host, tools) before the run starts.
+    try:
+        from benchmarks import run_env  # noqa: PLC0415
+        env = run_env.collect(
+            engines=active_engines,
+            test_params={
+                "mode":                    "identity",
+                "engines":                 active_engines,
+                "schemas":                 schemas,
+                "phases":                  phases,
+                "schema_workers_override": schema_workers_override,
+                "schema_workers_resolved": {
+                    e: schema_workers_override or _SCHEMA_WORKERS.get(e, _DEFAULT_SCHEMA_WORKERS)
+                    for e in active_engines
+                },
+                "lpt_ordering":            True,
+                "sweep_random":            sweep_random,
+                "full_stats":              full_stats,
+            },
+            dsns=resolved_dsns,
+            log_dir=log_dir,
+        )
+        env_path = run_env.write(env, log_dir)
+        logger.info("Environment snapshot: %s", env_path)
+    except Exception as exc:
+        logger.warning("run_env capture failed (non-fatal): %s", exc)
+
     all_results: list[RunResult] = []
     # Default: one thread per engine, capped at 6 to avoid overwhelming the host.
     # Each engine thread may itself spawn up to _SCHEMA_WORKERS[engine] sub-threads
@@ -397,7 +444,7 @@ def run_identity_matrix(
         futures = {
             pool.submit(
                 _run_engine_identity,
-                engine, schemas, resolved_dsns[engine],
+                engine, schemas_for_engine[engine], resolved_dsns[engine],
                 log_dir, phases, skip_load, no_extended_stats,
                 schema_workers_override, full_stats,
             ): engine
@@ -623,6 +670,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "_SCHEMA_WORKERS). Use 1 to force fully sequential execution."
         ),
     )
+    ident.add_argument(
+        "--sweep-random", type=int, default=None, metavar="N",
+        help=(
+            "Randomly sample N (engine, schema) pairs from the full matrix instead of "
+            "running all combinations.  Useful as a quick smoke test — e.g. --sweep-random 6 "
+            "covers all 6 engines with one schema each.  Seed is random; re-run for different "
+            "coverage.  Pairs are logged at the start of the run for reproducibility."
+        ),
+    )
 
     # ── lakebase ──────────────────────────────────────────────────────────────
     lb = sub.add_parser("lakebase", help="Cross-engine Lakebase target test")
@@ -671,6 +727,7 @@ def main(argv: list[str] | None = None) -> int:
             phases=args.phases.split(","),
             schema_workers_override=getattr(args, "schema_workers", None),
             full_stats=getattr(args, "full_stats_db2_ora", False),
+            sweep_random=getattr(args, "sweep_random", None),
         )
         failed = sum(1 for r in results if not r.passed)
         return 1 if failed else 0

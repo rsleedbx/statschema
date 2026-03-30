@@ -1,0 +1,7 @@
+# 2026-03-30T02:56:42.023925+00:00
+
+FAIL  cockroachdb×tpch(sf=0.1)                    Overall: FAIL ✗  (mean_node_jaccard 0.000 < threshold 0.7)
+
+Passed : 0 / 1
+Failed : 1 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260330-025601

@@ -1,0 +1,47 @@
+run_id: identity-20260330-025642
+timestamp: '2026-03-30T02:56:42.497983+00:00'
+git_commit: 44105050bde87a4575195b0fe099909429ac16ba
+invocation:
+  argv:
+  - benchmarks/run_matrix.py
+  - identity
+  - --engines
+  - postgres
+  - --schemas
+  - tpce
+  - --phases
+  - explain_source,collect_stats,explain_target,score,validate
+  cwd: /Users/robert.lee/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: 3.11.13
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines:
+  - postgres
+  schemas:
+  - tpce
+  phases:
+  - explain_source
+  - collect_stats
+  - explain_target
+  - score
+  - validate
+  schema_workers_override: null
+  schema_workers_resolved:
+    postgres: 6
+  lpt_ordering: true
+  sweep_random: null
+  full_stats: false
+engines:
+  postgres:
+    version: PostgreSQL 18.3 (Debian 18.3-1.pgdg13+1) on aarch64-unknown-linux-gnu,
+      compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+    driver: psycopg2
+    driver_version: null
+    error: null

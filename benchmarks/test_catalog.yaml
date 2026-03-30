@@ -1,0 +1,249 @@
+# benchmarks/test_catalog.yaml
+#
+# Unified test catalog — single source of truth for every test in the project.
+# Inspired by Facebook Hydra: every test spec is self-describing and carries the
+# categories needed to filter it into a random sweep.
+#
+# Usage:
+#   python benchmarks/run_sweep.py --list               # show all tests
+#   python benchmarks/run_sweep.py --list-categories    # show categories + counts
+#   python benchmarks/run_sweep.py --categories tpch    # run all tpch tests
+#   python benchmarks/run_sweep.py --random 8           # 8 random tests from all
+#   python benchmarks/run_sweep.py --categories app --random 3  # 3 random app tests
+#
+# Category semantics
+# ------------------
+# A test matches a --categories filter if it carries ANY of the requested tags.
+# Categories are free-form strings; they compose naturally:
+#   --categories tpch,tpcdi     → all tests tagged tpch OR tpcdi
+#   --categories app,sqlserver  → app tests OR sqlserver tests (union)
+#
+# Identity matrix (engine × schema) is generated programmatically by
+# test_registry.py from the engine/schema lists below — not enumerated here.
+# All other tests are listed explicitly.
+
+# ---------------------------------------------------------------------------
+# Category definitions
+# ---------------------------------------------------------------------------
+# Human-readable descriptions; used by --list-categories.
+
+categories:
+  # TPC schema families
+  tpcb:  "TPC-B — simple single-table bank transactions (smallest/fastest)"
+  tpcc:  "TPC-C — OLTP warehouse with order/stock/district tables"
+  tpch:  "TPC-H — analytical star schema, 8 tables"
+  tpcdi: "TPC-DI — data-integration / slowly-changing-dimension workload"
+  tpcds: "TPC-DS — decision-support, wide tables, many histogram buckets"
+  tpce:  "TPC-E — stock exchange, complex FK graph, largest working set"
+
+  # Infrastructure tier
+  podman: "Podman-hosted engines — native ARM64, fast spin-up (postgres, mysql, crdb)"
+  qemu:   "Lima QEMU-hosted engines — x86_64 emulation (sqlserver, oracle, db2)"
+
+  # Test type
+  identity: "Same-engine identity test — stat injection fidelity (source == target dialect)"
+  app:      "Real application schemas — Gitea, AdventureWorks, Chinook, Mautic, Oracle HR"
+  dtypes:   "Data type and DDL coverage — canonical type × engine matrix"
+  ddl:      "DDL parse → emit → execute → introspect roundtrip correctness"
+  stats:    "Statistics collection, distribution accuracy, and cross-engine transpilation"
+  live:     "Any test that requires a live database connection"
+  bench:    "Load benchmark — TPC-C / TPC-H / TPC-B throughput measurement"
+
+  # Per-engine (set automatically from engine_categories below)
+  postgres:    "PostgreSQL engine tests"
+  cockroachdb: "CockroachDB engine tests"
+  mysql:       "MySQL engine tests"
+  mariadb:     "MariaDB engine tests"
+  sqlserver:   "SQL Server engine tests"
+  oracle:      "Oracle XE engine tests"
+  db2:         "IBM Db2 CE engine tests"
+  neon:        "Neon serverless PostgreSQL tests"
+
+  # Application / sample schema names (for surgical re-runs)
+  gitea:          "Gitea 1.x application schema (~112 tables on PostgreSQL)"
+  adventureworks: "Microsoft AdventureWorks LT + full schema on SQL Server"
+  chinook:        "Chinook music store sample on SQL Server"
+  mautic:         "Mautic 5 marketing platform on MySQL"
+  oracle_hr:      "Oracle HR + CO sample schemas (pre-installed on XE)"
+
+# ---------------------------------------------------------------------------
+# Engine → infra-tier mapping
+# (test_registry.py adds these tags automatically to identity test specs)
+# ---------------------------------------------------------------------------
+
+engine_categories:
+  postgres:    [podman]
+  cockroachdb: [podman]
+  mysql:       [podman]
+  mariadb:     [podman]
+  sqlserver:   [qemu]
+  oracle:      [qemu]
+  db2:         [qemu]
+  neon:        []       # remote cloud
+  lakebase:    []       # remote cloud
+
+# ---------------------------------------------------------------------------
+# Identity matrix — TPC schema categories
+# (engine × schema pairs are generated in test_registry.py)
+# ---------------------------------------------------------------------------
+
+identity_engines: [postgres, cockroachdb, mysql, sqlserver, oracle, db2]
+identity_schemas: [tpcb, tpcc, tpch, tpcdi, tpcds, tpce]
+
+# ---------------------------------------------------------------------------
+# Explicit test entries (everything NOT in the identity matrix)
+# ---------------------------------------------------------------------------
+# Fields:
+#   id          : unique dot-path identifier used in logs and --include filters
+#   categories  : list of tags for filtering; engine tag is added automatically
+#   runner      : "pytest" | "run_matrix_bench"
+#   file        : pytest file path (for runner=pytest)
+#   engine      : primary engine; used to gate the test when DB not reachable
+#   description : one-line human summary
+#   marks       : optional list of pytest -m markers to pass (e.g. [live])
+
+tests:
+
+  # ── Application schema tests (pytest) ──────────────────────────────────
+
+  - id: app.gitea
+    categories: [live, app, gitea, postgres]
+    runner: pytest
+    file: tests/test_live_gitea.py
+    engine: postgres
+    description: "Gitea 1.x application schema on PostgreSQL (~112 tables, FK graph, enums)"
+
+  - id: app.adventureworks
+    categories: [live, app, adventureworks, sqlserver]
+    runner: pytest
+    file: tests/test_live_adventureworks.py
+    engine: sqlserver
+    description: "AdventureWorks LT + AdventureWorks2022 on SQL Server"
+
+  - id: app.chinook
+    categories: [live, app, chinook, sqlserver]
+    runner: pytest
+    file: tests/test_live_chinook.py
+    engine: sqlserver
+    description: "Chinook music store sample schema on SQL Server"
+
+  - id: app.mautic
+    categories: [live, app, mautic, mysql]
+    runner: pytest
+    file: tests/test_live_mautic.py
+    engine: mysql
+    description: "Mautic 5 marketing platform schema on MySQL (200+ tables)"
+
+  - id: app.oracle_hr
+    categories: [live, app, oracle_hr, oracle]
+    runner: pytest
+    file: tests/test_live_oracle_hr.py
+    engine: oracle
+    description: "Oracle HR + CO sample schemas (pre-installed on XE)"
+
+  # ── Data type and DDL coverage (pytest) ────────────────────────────────
+
+  - id: dtypes.type_coverage
+    categories: [live, dtypes]
+    runner: pytest
+    file: tests/test_live_type_coverage.py
+    description: "Canonical data type × engine matrix (integer, decimal, datetime, binary, …)"
+
+  - id: dtypes.ddl_roundtrip
+    categories: [live, dtypes, ddl]
+    runner: pytest
+    file: tests/test_live_roundtrip.py
+    description: "DDL parse → emit → execute → introspect losslessness across all engines"
+
+  - id: dtypes.oracle_live
+    categories: [live, dtypes, oracle]
+    runner: pytest
+    file: tests/test_live_oracle.py
+    engine: oracle
+    description: "Oracle DDL emit + type introspection via ALL_TAB_COLUMNS"
+
+  - id: dtypes.sqlserver_live
+    categories: [live, dtypes, sqlserver]
+    runner: pytest
+    file: tests/test_live_sqlserver.py
+    engine: sqlserver
+    description: "SQL Server DDL emit + INFORMATION_SCHEMA roundtrip"
+
+  - id: dtypes.db2_live
+    categories: [live, dtypes, db2]
+    runner: pytest
+    file: tests/test_live_db2.py
+    engine: db2
+    description: "Db2 DDL emit + SYSCAT.COLUMNS introspection"
+
+  - id: dtypes.pg_live
+    categories: [live, dtypes, postgres]
+    runner: pytest
+    file: tests/test_live_pg.py
+    engine: postgres
+    description: "PostgreSQL DDL emit + pg_catalog introspection"
+
+  - id: dtypes.mysql_live
+    categories: [live, dtypes, mysql]
+    runner: pytest
+    file: tests/test_live_mysql.py
+    engine: mysql
+    description: "MySQL DDL emit + INFORMATION_SCHEMA introspection"
+
+  - id: dtypes.crdb_live
+    categories: [live, dtypes, cockroachdb]
+    runner: pytest
+    file: tests/test_live_cockroachdb.py
+    engine: cockroachdb
+    description: "CockroachDB DDL emit + pg_catalog introspection (single-node + multi-region)"
+
+  - id: dtypes.mariadb_live
+    categories: [live, dtypes, mariadb]
+    runner: pytest
+    file: tests/test_live_mariadb.py
+    engine: mariadb
+    description: "MariaDB DDL emit + INFORMATION_SCHEMA introspection"
+
+  # ── Statistics tests (pytest) ───────────────────────────────────────────
+
+  - id: stats.distribution
+    categories: [live, stats]
+    runner: pytest
+    file: tests/test_live_distribution.py
+    description: "Statistics distribution accuracy: histograms, NDV, nulls across engines"
+    marks: [live]
+
+  - id: stats.minmax
+    categories: [live, stats]
+    runner: pytest
+    file: tests/test_live_stats_minmax.py
+    description: "Min/max statistics bounds verification"
+
+  - id: stats.transpiler
+    categories: [live, stats, mysql, postgres]
+    runner: pytest
+    file: tests/test_live_stats_transpiler.py
+    description: "Cross-engine stats injection: MySQL 8 → PostgreSQL 18 with EXPLAIN estimate verification"
+
+  - id: stats.synth
+    categories: [live, stats]
+    runner: pytest
+    file: tests/test_live_synth.py
+    description: "Synthetic data generation + statistics fidelity (NDV, histograms)"
+
+  # ── Full identity pipeline (pytest, single-dialect quick smoke) ─────────
+
+  - id: live.identity_pg
+    categories: [live, identity, postgres]
+    runner: pytest
+    file: tests/test_live_identity.py
+    engine: postgres
+    description: "Full identity pipeline smoke test on PostgreSQL (relaxed thresholds)"
+    marks: [slow]
+
+  # ── Load benchmarks ─────────────────────────────────────────────────────
+
+  - id: bench.tpcc_tpch
+    categories: [bench, tpcc, tpch]
+    runner: run_matrix_bench
+    description: "TPC-C SF=1 + TPC-H SF=0.1 load throughput across all engines"

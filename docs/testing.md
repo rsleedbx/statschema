@@ -862,6 +862,72 @@ contain quick-start commands for all containers and VMs.
 
 After each test completes, `benchmarks/check_run.py` verifies that live row counts in the database match the counts recorded in the result JSON (see [Row-count verification](#row-count-verification) below).
 
+### Environment snapshot — `run_env.yaml`
+
+Every run writes a `run_env.yaml` file alongside `summary.txt` in the log directory.  It records the exact DB version, driver version, host, tool versions, and test parameters — making every run self-describing and reproducible.
+
+```yaml
+# benchmarks/logs/identity-20260329-213957/run_env.yaml
+run_id: identity-20260329-213957
+timestamp: "2026-03-29T21:39:57Z"
+git_commit: 44105050bde87a4575195b0fe099909429ac16ba
+invocation:
+  argv: ["benchmarks/run_matrix.py", "identity", "--engines", "sqlserver", "--schema-workers", "3"]
+  cwd: /Users/me/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: "3.11.13"
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines: [sqlserver]
+  schemas: [tpcb, tpch, tpcc, tpcdi, tpcds, tpce]
+  phases: [explain_source, collect_stats, explain_target, score, validate]
+  schema_workers_override: 3
+  schema_workers_resolved: {sqlserver: 3}
+  lpt_ordering: true
+engines:
+  sqlserver:
+    version: "Microsoft SQL Server 2022 (RTM-CU24) (KB5080999) - 16.0.4245.2 (X64)..."
+    driver: mssql_python
+    driver_version: "1.4.0"
+    error: null
+```
+
+This solved a real problem: `icr.io/db2_community/db2:latest` silently upgraded from 11.5.9 to 12.1.4.0 between runs.  The first-boot setup time jumped from ~10 min to ~26 min and the probe timeout needed tripling.  Without version capture, this was invisible.
+
+The snapshot is written by `benchmarks/run_env.py`, which queries each engine with a lightweight `SELECT @@VERSION` / `SELECT version()` / equivalent before the test starts.  Failure to collect the snapshot is non-fatal — the test continues and logs a warning.
+
+### Smoke testing with `--sweep-random`
+
+Instead of always running all N engines × 6 schemas = 36 combinations, use `--sweep-random N` to randomly sample N `(engine, schema)` pairs.  This is useful for catching regressions quickly when iterating on a config change.
+
+```bash
+# Quick smoke: 1 random schema per engine (~6 combinations)
+python benchmarks/run_matrix.py identity --sweep-random 6
+
+# Broader smoke: 2 random schemas per engine (~12 combinations)
+python benchmarks/run_matrix.py identity --sweep-random 12
+
+# Single-engine quick check
+python benchmarks/run_matrix.py identity --engines sqlserver --sweep-random 2
+```
+
+The selected pairs are logged at the start of the run and captured in `run_env.yaml` under `test_config.sweep_random`, so the exact sample is reproducible if needed.
+
+**When to use sweep vs full matrix:**
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Config change (schema_workers, recovery mode, ...) | `--sweep-random 6` — find failures fast, then confirm with full run |
+| New engine install / version upgrade | `--sweep-random 3` per engine — one schema each to confirm connectivity |
+| Pre-merge CI | Full matrix — catches all combinations |
+| Debugging a specific failure | `--engines db2 --schemas tpcds` — single cell |
+
 ### Target tests — `benchmarks/run_lakebase_target.sh`
 
 Runs the full cross-database → Lakebase target matrix: 6 source engines × 6 TPC schemas = 36 runs.  Each run loads data into the source engine, collects its statistics, then injects those statistics into a Lakebase endpoint and scores EXPLAIN plan fidelity.

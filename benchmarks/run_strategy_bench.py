@@ -86,7 +86,7 @@ TARGETS = [
     _mysql("MySQL 5.7",    3357),
     _mariadb("MariaDB 10.11", 3310),
     _mariadb("MariaDB 11.4",  3311),
-    DbTarget("SQL Server 2022", "sqlserver", {"BENCH_SQLSERVER_DSN": "SERVER=127.0.0.1,14330;DATABASE=master;UID=sa;PWD=Iedebaxoodoogee9choht7je1quohmuR"}),
+    DbTarget("SQL Server 2022", "sqlserver", {"BENCH_SQLSERVER_DSN": os.environ.get("BENCH_SQLSERVER_DSN", "SERVER=127.0.0.1,14330;DATABASE=master;UID=sa;PWD=")}),
     DbTarget("Oracle XE 21c",   "oracle",    {"BENCH_ORACLE_DSN": "127.0.0.1:1521/XE", "BENCH_ORACLE_USER": "system", "BENCH_ORACLE_PASS": "oracle"}),
     DbTarget("IBM Db2 CE 11.5", "db2",       {"BENCH_DB2_DSN": "DATABASE=testdb;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=testpass;"}),
 ]

@@ -102,8 +102,9 @@ TARGETS: list[DbTarget] = [
         strategy=LoadStrategy.MULTI_ROW,
         env={
             # Password resolved at runtime via BENCH_SQLSERVER_DSN env var
-            # (set by run_bench.sh from the Lima VM log).  Falls back to a
-            # placeholder so probe() fails gracefully if not set.
+            # (set by _common.sh export_bench_sqlserver_dsn, which reads from
+            # /var/opt/mssql/.sa_password inside the Lima VM).  Falls back to
+            # a placeholder so probe() fails gracefully if not set.
             "BENCH_SQLSERVER_DSN": os.environ.get(
                 "BENCH_SQLSERVER_DSN",
                 "SERVER=127.0.0.1,14330;DATABASE=master;UID=sa;PWD=",

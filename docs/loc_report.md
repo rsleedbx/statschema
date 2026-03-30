@@ -1,7 +1,7 @@
 # statschema — lines of code
 
-Generated: 2026-03-28 16:07 UTC  
-Commit: `b76e9dc`
+Generated: 2026-03-30 00:18 UTC  
+Commit: `4410505`
 
 
 ---
@@ -14,13 +14,13 @@ Layer            | Files |   Code | Comment | Blank |  Total | Note
   src/core       |    56 |  6_624 |     492 | 1_256 |  8_372 | stable domain logic — grows with features                                       
   src/generators |     5 |  1_143 |     161 |   251 |  1_555 | grows with each new generator backend                                           
   src/locale     |     5 |    544 |     112 |   156 |    812 | locale patterns + inference (grows per language)                                
-  src/dialects   |    34 |  3_638 |     245 |   662 |  4_545 | grows with each new database added                                              
-platform         |     7 |    558 |     342 |   117 |  1_017 | Lima/Podman/QEMU configs + Databricks Connect scripts (grows per cloud platform)
-benchmarks       |    21 |  5_914 |     614 | 1_051 |  7_579 |                                                                                 
+  src/dialects   |    34 |  3_662 |     245 |   666 |  4_573 | grows with each new database added                                              
+platform         |     8 |    695 |     415 |   149 |  1_259 | Lima/Podman/QEMU configs + Databricks Connect scripts (grows per cloud platform)
+benchmarks       |    25 |  6_983 |     821 | 1_227 |  9_031 |                                                                                 
   tests/core     |    19 | 11_862 |     845 | 2_090 | 14_797 | unit + offline integration                                                      
   tests/dialect  |    15 |  5_559 |     435 | 1_100 |  7_094 | live DB engine coverage                                                         
   tests/app      |     6 |  2_417 |     167 |   470 |  3_054 | real-world application schemas                                                  
-**TOTAL**        |   170 | 39_238 |   3_448 | 7_312 | 49_998 |                                                                                 
+**TOTAL**        |   175 | 40_468 |   3_728 | 7_524 | 51_720 |                                                                                 
 
 ### Dialect breakdown (src/statschema)
 
@@ -30,11 +30,11 @@ dialects/databricks |     3 |   144 |   172
 dialects/db2        |     5 |   419 |   493
 dialects/mysql      |     5 |   290 |   346
 dialects/oracle     |     4 |   218 |   261
-dialects/postgres   |     5 |   290 |   351
+dialects/postgres   |     5 |   314 |   379
 dialects/shared     |     7 | 2_056 | 2_652
 dialects/sqlserver  |     5 |   221 |   270
 interface           |     2 |   979 | 1_173
-**dialect total**   |    36 | 4_617 | 5_718
+**dialect total**   |    36 | 4_641 | 5_746
 
 ### Generator backend breakdown (src/statschema)
 
@@ -61,11 +61,11 @@ dialects/databricks |     3 |    144 |       0 |    28 |    172
 dialects/db2        |     5 |    419 |       2 |    72 |    493
 dialects/mysql      |     5 |    290 |       0 |    56 |    346
 dialects/oracle     |     4 |    218 |       0 |    43 |    261
-dialects/postgres   |     5 |    290 |       2 |    59 |    351
+dialects/postgres   |     5 |    314 |       2 |    63 |    379
 dialects/sqlserver  |     5 |    221 |       0 |    49 |    270
 generators/pandas   |     1 |    567 |      74 |   125 |    766
 generators/spark    |     4 |    576 |      87 |   126 |    789
-**TOTAL**           |   102 | 12_928 |   1_045 | 2_484 | 16_457
+**TOTAL**           |   102 | 12_952 |   1_045 | 2_488 | 16_485
 
 ### Per-file detail (≥ 50 total lines)
 
@@ -109,6 +109,7 @@ dialects/oracle/emitter.py      |   44 |       0 |     6 |    50
 dialects/oracle/injector.py     |  104 |       0 |    17 |   121
 dialects/postgres/collector.py  |   58 |       0 |    12 |    70
 dialects/postgres/injector.py   |  156 |       2 |    25 |   183
+dialects/postgres/loader.py     |   54 |       0 |    12 |    66
 dialects/sqlserver/collector.py |   58 |       0 |    12 |    70
 dialects/sqlserver/injector.py  |   61 |       0 |    14 |    75
 dialects/sqlserver/loader.py    |   49 |       0 |     9 |    58
@@ -139,16 +140,17 @@ v1_bridge.py                    |  395 |      54 |    57 |   506
 Each new target platform (AWS, GCloud, Azure) adds VM/container config files
 and startup scripts here — isolated from benchmark and test logic.
 
-File                       | Code | Comment | Blank | Total
--------------------------- | ---: | ------: | ----: | ----:
-_common.sh                 |  178 |      68 |    27 |   273
-config/lima/db2.yaml       |   68 |      62 |    14 |   144
-config/lima/oracle.yaml    |   46 |      51 |    11 |   108
-config/lima/sqlserver.yaml |   38 |      33 |     9 |    80
-run_lakebase_target.sh     |   49 |      35 |    11 |    95
-scripts/lakebase-down.sh   |   49 |      34 |    15 |    98
-scripts/lakebase-up.sh     |  130 |      59 |    30 |   219
-**TOTAL**                  |  558 |     342 |   117 | 1_017
+File                         | Code | Comment | Blank | Total
+---------------------------- | ---: | ------: | ----: | ----:
+_common.sh                   |  239 |      94 |    36 |   369
+config/lima/db2.yaml         |   74 |      78 |    16 |   168
+config/lima/oracle.yaml      |   49 |      54 |    13 |   116
+config/lima/sqlserver.yaml   |   38 |      26 |     9 |    73
+config/lima/sqlserver22.yaml |   67 |      35 |    19 |   121
+run_lakebase_target.sh       |   49 |      35 |    11 |    95
+scripts/lakebase-down.sh     |   49 |      34 |    15 |    98
+scripts/lakebase-up.sh       |  130 |      59 |    30 |   219
+**TOTAL**                    |  695 |     415 |   149 | 1_259
 
 ---
 
@@ -158,18 +160,21 @@ scripts/lakebase-up.sh     |  130 |      59 |    30 |   219
 
 File                      |  Code | Comment | Blank | Total
 ------------------------- | ----: | ------: | ----: | ----:
-bench_config.py           |   156 |      18 |    36 |   210
+bench_config.py           |   172 |      20 |    37 |   229
 build_row_count_report.py |   260 |      22 |    49 |   331
 check_run.py              |   299 |      26 |    62 |   387
-identity_test.py          | 1_462 |     160 |   191 | 1_813
+identity_test.py          | 1_482 |     165 |   193 | 1_840
 run_all_bench.py          |   252 |      21 |    42 |   315
 run_bench.py              |   464 |      45 |    83 |   592
-run_matrix.py             |   523 |      55 |    96 |   674
+run_env.py                |   165 |      13 |    29 |   207
+run_matrix.py             |   588 |      74 |    99 |   761
 run_strategy_bench.py     |   238 |      30 |    65 |   333
+run_sweep.py              |   223 |      22 |    48 |   293
 run_tpcb_bench.py         |   284 |      15 |    48 |   347
+test_registry.py          |   146 |       8 |    38 |   192
 tpc_generators.py         |   458 |      19 |    79 |   556
 tpc_schemas.py            |   312 |      11 |    34 |   357
-**total**                 | 4_708 |     422 |   785 | 5_915
+**total**                 | 5_343 |     491 |   906 | 6_740
 
 ### Python (dialect adapters — `benchmarks/dialects/`)
 
@@ -177,20 +182,21 @@ File                  | Code | Comment | Blank | Total
 --------------------- | ---: | ------: | ----: | ----:
 dialects/__init__.py  |   23 |       1 |     3 |    27
 dialects/_base.py     |   44 |      15 |    18 |    77
-dialects/db2.py       |  176 |      19 |    32 |   227
+dialects/db2.py       |  188 |      28 |    32 |   248
 dialects/mysql.py     |   85 |      18 |    29 |   132
-dialects/oracle.py    |  118 |      15 |    28 |   161
+dialects/oracle.py    |  130 |      26 |    28 |   184
 dialects/postgres.py  |  172 |      18 |    33 |   223
-dialects/sqlserver.py |  111 |      23 |    23 |   157
-**total**             |  729 |     109 |   166 | 1_004
+dialects/sqlserver.py |  111 |      30 |    23 |   164
+**total**             |  753 |     136 |   166 | 1_055
 
 ### Shell scripts (runners)
 
-File            | Code | Comment | Blank | Total
---------------- | ---: | ------: | ----: | ----:
-run_bench.sh    |   29 |      19 |     9 |    57
-run_identity.sh |   45 |      30 |     9 |    84
-**total**       |   74 |      49 |    18 |   141
+File              | Code | Comment | Blank | Total
+----------------- | ---: | ------: | ----: | ----:
+bench_baseline.sh |  367 |      88 |    50 |   505
+run_bench.sh      |   29 |      19 |     9 |    57
+run_identity.sh   |   88 |      53 |    14 |   155
+**total**         |  484 |     160 |    73 |   717
 
 ### Scripts / tools (`scripts/`)
 
