@@ -282,11 +282,15 @@ def _fetch_min_max(  # pragma: no cover
     PostgreSQL json), returns ``(None, None)`` without leaving the connection
     in an aborted state.
     """
+    # Python's bool.__str__ yields 'True'/'False'; databases expect 'true'/'false'.
+    def _to_str(v: object) -> str:
+        return str(v).lower() if isinstance(v, bool) else str(v)
+
     # Primary: single-pass aggregate (fastest when supported)
     try:
         row = _fetchone(conn, f"SELECT MIN({cref}), MAX({cref}) FROM {tref}")
-        lo = str(row[0]) if row and row[0] is not None else None
-        hi = str(row[1]) if row and row[1] is not None else None
+        lo = _to_str(row[0]) if row and row[0] is not None else None
+        hi = _to_str(row[1]) if row and row[1] is not None else None
         return lo, hi
     except Exception:
         _safe_rollback(conn)
@@ -305,14 +309,14 @@ def _fetch_min_max(  # pragma: no cover
     try:
         row = _fetchone(conn, lo_sql)
         if row and row[0] is not None:
-            lo = str(row[0])
+            lo = _to_str(row[0])
     except Exception:
         _safe_rollback(conn)
         return None, None   # non-orderable type (json, xml, etc.) — give up
     try:
         row = _fetchone(conn, hi_sql)
         if row and row[0] is not None:
-            hi = str(row[0])
+            hi = _to_str(row[0])
     except Exception:
         _safe_rollback(conn)
     return lo, hi

@@ -1,0 +1,48 @@
+run_id: identity-20260330-165544
+timestamp: '2026-03-30T16:55:44.951893+00:00'
+git_commit: c48c1adbf68ad6d0b0907656edceac19d17de1bc
+invocation:
+  argv:
+  - benchmarks/run_matrix.py
+  - identity
+  - --engines
+  - sqlserver
+  - --schemas
+  - tpcb
+  cwd: /Users/robert.lee/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: 3.11.13
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines:
+  - sqlserver
+  schemas:
+  - tpcb
+  phases:
+  - load_source
+  - explain_source
+  - collect_stats
+  - load_target
+  - explain_target
+  - score
+  - validate
+  schema_workers_override: null
+  schema_workers_resolved:
+    sqlserver: 3
+  lpt_ordering: true
+  sweep_random: null
+  full_stats: false
+engines:
+  sqlserver:
+    version: "Microsoft SQL Server 2022 (RTM-CU24) (KB5080999) - 16.0.4245.2 (X64)\
+      \ \n\tFeb 25 2026 15:01:38 \n\tCopyright (C) 2022 Microsoft Corporation\n\t\
+      Developer Edition (64-bit) on Linux (Ubuntu 20.04.6 LTS) <X64>"
+    driver: mssql_python
+    driver_version: 1.4.0
+    error: null

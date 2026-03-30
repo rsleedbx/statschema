@@ -68,6 +68,45 @@ These require the corresponding database container to be running:
 
 ---
 
+## QEMU VM snapshot states
+
+SQL Server, Oracle, and DB2 are managed through three named APFS snapshots (`cp -c`, zero-copy, instantaneous):
+
+| Tag | Contents | Script |
+|-----|----------|--------|
+| `state0` | Clean engine install — no test data | `bench_baseline.sh --mode=snap --tag=state0` |
+| `state1` | `state0` + identity test schemas (TPC-H, TPC-DS, TPC-C, TPC-DI) | Produced by `run_identity.sh` then snapped |
+| `state2` | `state1` + application schemas (AdventureWorks, Chinook, Oracle HR/CO) | `setup_app_schemas.sh --snap` |
+
+Restore a VM to any state in ~0.1s (disk swap) plus VM boot time (~2–5 min):
+
+```bash
+./benchmarks/bench_baseline.sh --mode=restore --engine=sqlserver --tag=state2
+```
+
+### First-time state2 setup
+
+Load app schemas into the running `state1` instance and snapshot immediately:
+
+```bash
+# SQL Server
+./benchmarks/setup_app_schemas.sh --engine=sqlserver --snap
+
+# Oracle
+./benchmarks/setup_app_schemas.sh --engine=oracle --snap
+```
+
+Podman-based app schemas (Gitea for PostgreSQL, Mautic for MySQL) are started by the same script but do not use APFS snapshots — the sidecar containers hold their state:
+
+```bash
+./benchmarks/setup_app_schemas.sh --engine=postgres   # starts Gitea sidecar
+./benchmarks/setup_app_schemas.sh --engine=mysql      # starts Mautic sidecar
+```
+
+The script is idempotent — it skips any schema or container that already exists.
+
+---
+
 ## Using these databases with the DDL tests
 
 The DDL round-trip tests (`tests/test_ddl_roundtrip.py`) run entirely on parsed DDL strings — no live database required.  The local databases are useful for:

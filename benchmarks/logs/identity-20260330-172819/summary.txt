@@ -1,0 +1,7 @@
+# 2026-03-30T17:30:35.881119+00:00
+
+PASS  cockroachdb×tpcdi(sf=5)                     Overall: PASS ✓
+
+Passed : 1 / 1
+Failed : 0 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260330-172819

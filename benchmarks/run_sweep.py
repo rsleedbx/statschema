@@ -58,7 +58,8 @@ from benchmarks.test_registry import TestRegistry, TestSpec
 
 logger = logging.getLogger(__name__)
 
-_PYTHON = sys.executable
+# -u forces unbuffered stdout/stderr so nohup + tail -f shows real-time progress.
+_PYTHON = [sys.executable, "-u"]
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ _PYTHON = sys.executable
 def _run_identity(spec: TestSpec, dry_run: bool) -> bool:
     """Dispatch to run_matrix.py for a single identity (engine × schema) test."""
     cmd = [
-        _PYTHON, "benchmarks/run_matrix.py", "identity",
+        *_PYTHON, "benchmarks/run_matrix.py", "identity",
         "--engines", spec.engine or "",
         "--schemas", spec.schema or "",
     ]
@@ -78,7 +79,7 @@ def _run_identity(spec: TestSpec, dry_run: bool) -> bool:
 def _run_pytest(spec: TestSpec, dry_run: bool) -> bool | None:
     """Dispatch to pytest for a live/pytest-based test."""
     assert spec.pytest_file, f"pytest runner requires 'file' for spec {spec.id}"
-    cmd = [_PYTHON, "-m", "pytest", spec.pytest_file, "-v", "--tb=short"]
+    cmd = [*_PYTHON, "-m", "pytest", spec.pytest_file, "-v", "--tb=short"]
     if spec.pytest_marks:
         cmd += ["-m", " and ".join(spec.pytest_marks)]
     return _exec(cmd, spec.id, dry_run, capture=True)
@@ -86,7 +87,7 @@ def _run_pytest(spec: TestSpec, dry_run: bool) -> bool | None:
 
 def _run_bench(spec: TestSpec, dry_run: bool) -> bool:
     """Dispatch to run_matrix.py bench mode."""
-    cmd = [_PYTHON, "benchmarks/run_matrix.py", "bench"]
+    cmd = [*_PYTHON, "benchmarks/run_matrix.py", "bench"]
     return _exec(cmd, spec.id, dry_run)
 
 
@@ -143,7 +144,7 @@ def _engine_reachable(engine: str) -> bool:
     """Return True if we can open a connection to the engine."""
     try:
         r = subprocess.run(
-            [_PYTHON, "benchmarks/bench_config.py", "ping", engine],
+            [*_PYTHON, "benchmarks/bench_config.py", "ping", engine],
             capture_output=True, timeout=15, cwd=str(_REPO_ROOT),
         )
         return r.returncode == 0

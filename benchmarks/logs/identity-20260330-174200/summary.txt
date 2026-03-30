@@ -1,0 +1,7 @@
+# 2026-03-30T17:42:02.768483+00:00
+
+FAIL  mysql×tpce(sf=0.01)                         exit=1
+
+Passed : 0 / 1
+Failed : 1 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260330-174200
