@@ -75,13 +75,13 @@ def _run_identity(spec: TestSpec, dry_run: bool) -> bool:
     return _exec(cmd, spec.id, dry_run)
 
 
-def _run_pytest(spec: TestSpec, dry_run: bool) -> bool:
+def _run_pytest(spec: TestSpec, dry_run: bool) -> bool | None:
     """Dispatch to pytest for a live/pytest-based test."""
     assert spec.pytest_file, f"pytest runner requires 'file' for spec {spec.id}"
     cmd = [_PYTHON, "-m", "pytest", spec.pytest_file, "-v", "--tb=short"]
     if spec.pytest_marks:
         cmd += ["-m", " and ".join(spec.pytest_marks)]
-    return _exec(cmd, spec.id, dry_run)
+    return _exec(cmd, spec.id, dry_run, capture=True)
 
 
 def _run_bench(spec: TestSpec, dry_run: bool) -> bool:
@@ -97,19 +97,41 @@ _RUNNERS = {
 }
 
 
-def _exec(cmd: list[str], label: str, dry_run: bool) -> bool:
-    """Run *cmd* and return True on success.  Honours dry_run."""
+_ALL_SKIPPED = __import__("re").compile(r"=+ ([\d\w ,]+) =+\s*$", __import__("re").MULTILINE)
+_PASSED_RE   = __import__("re").compile(r"\b(\d+) passed\b")
+
+
+def _is_all_skipped(output: str) -> bool:
+    """Return True when pytest ran but zero tests actually passed or failed."""
+    return bool(output) and not _PASSED_RE.search(output)
+
+
+def _exec(cmd: list[str], label: str, dry_run: bool, capture: bool = False) -> bool | None:
+    """Run *cmd* and return True on success, False on failure, None on all-skipped.
+
+    When *capture* is True (pytest runs), stdout/stderr are captured so we can
+    detect the all-skipped case, then forwarded to the terminal.
+    """
     cmd_str = " ".join(cmd)
     if dry_run:
         logger.info("[DRY-RUN] %s  →  %s", label, cmd_str)
         return True
     logger.info("START  %s", label)
     t0 = time.monotonic()
-    result = subprocess.run(cmd, cwd=str(_REPO_ROOT))
+    result = subprocess.run(
+        cmd, cwd=str(_REPO_ROOT),
+        capture_output=capture, text=capture,
+    )
     elapsed = time.monotonic() - t0
+    if capture:
+        sys.stdout.write(result.stdout or "")
+        sys.stderr.write(result.stderr or "")
+    if result.returncode == 0 and capture and _is_all_skipped(result.stdout or ""):
+        logger.warning("SKIP   %s  (%.0fs)  — all tests skipped; app schema may not be loaded",
+                       label, elapsed)
+        return None
     ok = result.returncode == 0
-    status = "PASS" if ok else "FAIL"
-    logger.info("%s   %s  (%.0fs)", status, label, elapsed)
+    logger.info("%s   %s  (%.0fs)", "PASS" if ok else "FAIL", label, elapsed)
     return ok
 
 
@@ -267,24 +289,36 @@ def main(argv: list[str] | None = None) -> int:
     if args.seed is not None:
         logger.info("Random seed: %d", args.seed)
 
-    passed, failed = [], []
+    passed, failed, skipped_all = [], [], []
     for spec in pool:
         runner_fn = _RUNNERS.get(spec.runner)
         if runner_fn is None:
             logger.error("Unknown runner '%s' for spec %s", spec.runner, spec.id)
             failed.append(spec)
             continue
-        ok = runner_fn(spec, dry_run=args.dry_run)
-        (passed if ok else failed).append(spec)
+        result = runner_fn(spec, dry_run=args.dry_run)
+        if result is None:
+            skipped_all.append(spec)
+        elif result:
+            passed.append(spec)
+        else:
+            failed.append(spec)
 
     # ── Summary ──────────────────────────────────────────────────────────
+    total = len(pool)
     print("\n" + "=" * 60)
-    print(f"Passed : {len(passed)} / {len(pool)}")
-    print(f"Failed : {len(failed)} / {len(pool)}")
+    print(f"Passed  : {len(passed)} / {total}")
+    if skipped_all:
+        print(f"Skipped : {len(skipped_all)} / {total}  (all tests skipped — app schema not loaded?)")
+    print(f"Failed  : {len(failed)} / {total}")
     if failed:
         print("\nFailed tests:")
         for s in failed:
             print(f"  FAIL  {s.id}")
+    if skipped_all:
+        print("\nAll-skipped tests:")
+        for s in skipped_all:
+            print(f"  SKIP  {s.id}")
     return 1 if failed else 0
 
 

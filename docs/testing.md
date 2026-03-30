@@ -928,6 +928,125 @@ The selected pairs are logged at the start of the run and captured in `run_env.y
 | Pre-merge CI | Full matrix — catches all combinations |
 | Debugging a specific failure | `--engines db2 --schemas tpcds` — single cell |
 
+### Sweep runner — `benchmarks/run_sweep.py`
+
+The sweep runner is a unified CLI that can dispatch any test in the project — identity matrix, app schema tests, data-type tests, statistics tests, and benchmarks — to the right runner (`run_matrix.py` or `pytest`).  It replaces the need to know which file runs which test; the catalog is the single source of truth.
+
+#### Three files, one system
+
+| File | Role |
+|------|------|
+| `benchmarks/test_catalog.yaml` | Declares every test: id, categories, runner, engine, description.  The identity matrix is generated from `identity_engines` × `identity_schemas`; all other tests are listed explicitly. |
+| `benchmarks/test_registry.py` | Loads the catalog, expands the identity matrix into `TestSpec` objects, and provides `by_category()`, `sample()`, and `get()` helpers. |
+| `benchmarks/run_sweep.py` | CLI entry point.  Filters by category, applies the engine-reachability gate, optionally samples randomly, then runs each spec. |
+
+#### Categories
+
+```bash
+python benchmarks/run_sweep.py --list-categories
+```
+
+| Category | Description |
+|----------|-------------|
+| `tpcb` | TPC-B — simple single-table bank transactions (smallest/fastest) |
+| `tpcc` | TPC-C — OLTP warehouse with order/stock/district tables |
+| `tpch` | TPC-H — analytical star schema, 8 tables |
+| `tpcdi` | TPC-DI — data-integration / slowly-changing-dimension workload |
+| `tpcds` | TPC-DS — decision-support, wide tables, many histogram buckets |
+| `tpce` | TPC-E — stock exchange, complex FK graph, largest working set |
+| `identity` | Same-engine identity test — stat injection fidelity |
+| `app` | Real application schemas — Gitea, AdventureWorks, Chinook, Mautic, Oracle HR |
+| `dtypes` | Data type and DDL coverage — canonical type × engine matrix |
+| `ddl` | DDL parse → emit → execute → introspect round-trip correctness |
+| `stats` | Statistics collection, distribution accuracy, cross-engine transpilation |
+| `bench` | Load benchmark — TPC-C / TPC-H / TPC-B throughput |
+| `podman` | Podman-hosted engines (postgres, mysql, crdb) |
+| `qemu` | Lima QEMU-hosted engines (sqlserver, oracle, db2) |
+| `live` | Any test requiring a live database connection |
+| `postgres`, `mysql`, … | Per-engine tags — added automatically |
+| `gitea`, `mautic`, … | Per-application tags — for surgical re-runs |
+
+Multiple categories compose as union: `--categories tpch,tpcdi` runs tests tagged `tpch` **or** `tpcdi`.
+
+#### CLI reference
+
+```bash
+# Discover what is available
+python benchmarks/run_sweep.py --list                         # all tests (before engine gate)
+python benchmarks/run_sweep.py --list-categories              # category counts + descriptions
+python benchmarks/run_sweep.py --categories app --list        # app tests only
+
+# Run by category
+python benchmarks/run_sweep.py --categories tpch              # all TPC-H identity tests
+python benchmarks/run_sweep.py --categories app               # all application schema tests
+python benchmarks/run_sweep.py --categories dtypes,ddl        # type coverage OR DDL roundtrip
+
+# Random sampling
+python benchmarks/run_sweep.py --random 8                     # 8 random tests from everything reachable
+python benchmarks/run_sweep.py --categories tpch --random 3   # 3 random TPC-H tests
+python benchmarks/run_sweep.py --random 10 --seed 42          # reproducible sample (fixed seed)
+
+# Dry run — print commands without executing
+python benchmarks/run_sweep.py --random 5 --dry-run
+
+# Skip engine connectivity check (run all regardless)
+python benchmarks/run_sweep.py --categories qemu --skip-engine-check
+```
+
+#### Engine-reachability gate
+
+Before running (and before random sampling), `run_sweep.py` pings each engine via `benchmarks/bench_config.py ping <engine>`.  Tests whose engine is unreachable are silently dropped from the pool.  This means `--random 10` always draws from the tests you can actually run right now.
+
+```
+Engine 'oracle' unreachable — skipping 6 tests
+Engine 'db2' unreachable — skipping 6 tests
+Running 10 test(s) [random seed: 42]
+```
+
+Pass `--skip-engine-check` to bypass the gate (useful in CI where all databases are known to be up).
+
+#### All-skipped detection
+
+App schema tests (`app.gitea`, `app.adventureworks`, etc.) require the application schema to be pre-loaded.  When the schema is absent, every pytest sub-test is skipped and pytest exits 0.  The sweep runner detects this case by parsing the pytest summary line — if no tests actually passed, the result is reported as `SKIP` (not `PASS`) and listed separately in the summary:
+
+```
+============================================================
+Passed  : 7 / 10
+Skipped : 2 / 10  (all tests skipped — app schema not loaded?)
+Failed  : 1 / 10
+
+All-skipped tests:
+  SKIP  app.adventureworks
+  SKIP  app.gitea
+```
+
+#### When to use sweep vs other runners
+
+| Scenario | Command |
+|----------|---------|
+| Quick smoke across all reachable engines | `run_sweep.py --random 8` |
+| Test one schema family on all engines | `run_sweep.py --categories tpcds` |
+| Test all app schemas | `run_sweep.py --categories app` |
+| Reproduce a specific past sample | `run_sweep.py --random 10 --seed 42` |
+| Full identity matrix | `bash benchmarks/run_identity.sh` |
+| Single engine, single schema | `python benchmarks/run_matrix.py identity --engines postgres --schemas tpch` |
+| Data type regression | `run_sweep.py --categories dtypes` |
+
+#### Adding a new test to the catalog
+
+Add an entry to `benchmarks/test_catalog.yaml`:
+
+```yaml
+- id: app.my_new_app
+  categories: [live, app, my_new_app, postgres]
+  runner: pytest
+  file: tests/test_live_my_new_app.py
+  engine: postgres
+  description: "My new application schema on PostgreSQL"
+```
+
+The test is immediately available in `--list`, `--categories app`, and random sweeps.  No changes to `run_sweep.py` or `test_registry.py` are required.
+
 ### Target tests — `benchmarks/run_lakebase_target.sh`
 
 Runs the full cross-database → Lakebase target matrix: 6 source engines × 6 TPC schemas = 36 runs.  Each run loads data into the source engine, collects its statistics, then injects those statistics into a Lakebase endpoint and scores EXPLAIN plan fidelity.
