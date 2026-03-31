@@ -1,0 +1,62 @@
+run_id: identity-20260331-163057
+timestamp: '2026-03-31T16:30:58.520523+00:00'
+git_commit: 5c983bc2c7bbf485f8fbf52f1315f12903a31937
+invocation:
+  argv:
+  - benchmarks/run_matrix.py
+  - identity
+  - --engines
+  - db2,oracle,sqlserver
+  - --schemas
+  - tpcb
+  cwd: /Users/robert.lee/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: 3.11.13
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines:
+  - db2
+  - oracle
+  - sqlserver
+  schemas:
+  - tpcb
+  phases:
+  - load_source
+  - explain_source
+  - collect_stats
+  - load_target
+  - explain_target
+  - score
+  - validate
+  schema_workers_override: null
+  schema_workers_resolved:
+    db2: 1
+    oracle: 1
+    sqlserver: 3
+  lpt_ordering: true
+  sweep_random: null
+  full_stats: false
+engines:
+  db2:
+    version: DB2 v12.1.4.0
+    driver: ibm_db
+    driver_version: 3.2.8
+    error: null
+  oracle:
+    version: Oracle Database 21c Express Edition Release 21.0.0.0.0 - Production
+    driver: oracledb
+    driver_version: 3.4.2
+    error: null
+  sqlserver:
+    version: "Microsoft SQL Server 2022 (RTM-CU24) (KB5080999) - 16.0.4245.2 (X64)\
+      \ \n\tFeb 25 2026 15:01:38 \n\tCopyright (C) 2022 Microsoft Corporation\n\t\
+      Developer Edition (64-bit) on Linux (Ubuntu 22.04.5 LTS) <X64>"
+    driver: mssql_python
+    driver_version: 1.4.0
+    error: null

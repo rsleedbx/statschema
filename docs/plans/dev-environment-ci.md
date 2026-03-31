@@ -200,11 +200,12 @@ The existing local registry on the macOS host (port 5000, managed by
 `bench_baseline.sh`) already holds the x86\_64-only images. The devbox VM
 configures `host.lima.internal:5000` as an insecure registry — the same mechanism
 used by the sqlserver22, oracle, and db2 Lima VMs. `db-up-x86_64.sh` inside the
-devbox pulls from there instead of the public internet.
+devbox pulls from there when available; if the registry is not running it falls back
+to the public registry (same auto-detect logic described in Task 2).
 
-Flow:
+Flow when local registry is seeded:
 ```
-macOS host (already done by bench_baseline.sh --mode=seed-registry):
+macOS host (bench_baseline.sh --mode=seed-registry, run once):
   localhost:5000/mssql/server:2022-latest      ← seeded once
   localhost:5000/gvenzl/oracle-xe:21-slim      ← seeded once
   localhost:5000/db2_community/db2:latest      ← seeded once
@@ -215,8 +216,53 @@ Lima devbox VM (db-up-x86_64.sh):
   podman pull host.lima.internal:5000/db2_community/db2:latest   ← fast, local
 ```
 
-`bench_baseline.sh --mode=ensure-registry` is a prerequisite before running
-`test-on-linux.sh`.
+**Status:** Not started
+
+---
+
+### Task 7 — SSL env vars for CockroachDB and SQL Server
+
+Two engines have hardcoded SSL assumptions in `tests/live_helpers.py` and
+`tests/test_live_cockroachdb.py` that block cloud database use.
+
+**`live_helpers.py` — `connect_cockroachdb`**
+
+`sslmode` is hardcoded to `"disable"`. CockroachDB Dedicated and Serverless require
+TLS. Fix: read from `CRDB_SSLMODE` env var.
+
+```python
+# before
+sslmode="disable"
+
+# after
+sslmode=os.environ.get("CRDB_SSLMODE", "disable")
+```
+
+**`test_live_cockroachdb.py`**
+
+Contains a second independent `psycopg2.connect` call with `sslmode="disable"`.
+Fix: same `CRDB_SSLMODE` env var.
+
+**`live_helpers.py` — `connect_sqlserver`**
+
+No TLS option passed to `pymssql.connect`. Azure SQL and RDS SQL Server with forced
+encryption reject unencrypted connections. Fix: read from `SQLSERVER_ENCRYPT` env var.
+
+```python
+# add to connect_sqlserver
+_encrypt = os.environ.get("SQLSERVER_ENCRYPT", "false").lower() in ("true", "1", "yes")
+# pass to pymssql.connect: conn_props["ssl"] = _encrypt  (pymssql ≥ 2.2)
+```
+
+**`.env.example` additions:**
+
+```bash
+# CockroachDB SSL — set to "require" for Dedicated/Serverless
+CRDB_SSLMODE=disable
+
+# SQL Server TLS — set to "true" for Azure SQL / RDS SQL Server with forced encryption
+SQLSERVER_ENCRYPT=false
+```
 
 **Status:** Not started
 
@@ -244,3 +290,35 @@ pytest tests/ -k "live"
 
 GitHub Actions sets the same variables via the workflow `env:` block, populated
 from the output of `db-up-x86_64.sh`.
+
+---
+
+## Cloud database support
+
+All hostnames, ports, and credentials are env-var driven with local defaults.
+Changing `.env` (or `.env.local`) to point at a cloud endpoint is sufficient for
+most engines. Two engines have hardcoded SSL assumptions addressed in Task 7.
+
+### Engine readiness
+
+| Engine | Cloud-ready | Notes |
+|---|---|---|
+| PostgreSQL | Yes | `sslmode="prefer"` works for RDS, Cloud SQL, Aurora, Neon |
+| Neon | Yes | `NEON_SSLMODE` env var present; SSL fallback loop in place |
+| MySQL | Yes | No SSL hardcoding; works for RDS MySQL, Cloud SQL MySQL |
+| Oracle | Mostly | DSN is env-var driven; cloud wallet auth needs extra config |
+| DB2 | Yes | Staging dirs env-var driven; skips cleanly when not set |
+| CockroachDB | After Task 7 | `sslmode="disable"` hardcoded in two places |
+| SQL Server | After Task 7 | No TLS/encrypt option; fails with forced encryption |
+
+### Progression model
+
+```
+1. Local dev   →  ./scripts/db-up.sh          →  .env.local (host)   →  pytest -k live
+2. Linux test  →  ./scripts/test-on-linux.sh  →  .env.local (in VM)  →  pytest -k live
+3. CI          →  ci-live.yml                 →  env: block           →  pytest -k live
+4. Cloud DB    →  edit .env (host/port/pass/ssl)                      →  pytest -k live
+```
+
+Steps 1–3 use local containers. Step 4 requires no code changes — only `.env`
+values change. After Task 7, all seven engines support step 4.

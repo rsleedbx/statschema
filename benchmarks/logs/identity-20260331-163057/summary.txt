@@ -1,0 +1,9 @@
+# 2026-03-31T16:31:38.861563+00:00
+
+PASS  db2×tpcb(sf=1)                              Overall: PASS ✓
+PASS  oracle×tpcb(sf=1)                           Overall: PASS ✓
+FAIL  sqlserver×tpcb(sf=1)                        exit=1
+
+Passed : 2 / 3
+Failed : 1 / 3
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260331-163057

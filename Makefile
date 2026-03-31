@@ -21,7 +21,7 @@ PYTHON_DEV := $(VENV_DEV)/bin/python
 
 # ---------------------------------------------------------------------------
 
-.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase test-live-identity test-live-distribution test-live-type-coverage lakebase-up lakebase-down lakebase-destroy test-obj1 test-obj2 test-obj3 test-obj4 test-obj5 test-obj6 test-obj7 test-obj8 test-obj9 test-obj10 lint clean
+.PHONY: venv-test test test-fast test-spark test-live-all test-live-roundtrip test-live-synth test-live-sqlserver test-live-mysql test-live-mariadb test-live-pg test-live-neon test-live-oracle test-live-mautic test-live-gitea test-live-adventureworks test-live-chinook test-live-oracle-hr test-live-stats-transpiler test-live-stats-databricks test-live-cockroachdb test-live-db2 test-live-lakebase test-live-identity test-live-distribution test-live-type-coverage lakebase-up lakebase-down lakebase-destroy test-obj1 test-obj2 test-obj3 test-obj4 test-obj5 test-obj6 test-obj7 test-obj8 test-obj9 test-obj10 bench-identity bench-lakebase bench-score lint clean
 
 ## Create / refresh the test venv (local PySpark, no databricks-connect)
 venv-test:
@@ -313,19 +313,45 @@ test-obj6:
 
 ## Obj 7: Plan fidelity — EXPLAIN plans match (identity test)
 test-obj7:
-	./benchmarks/run_identity.sh --schemas tpch --engines postgres --skip-setup
+	$(PYTHON_TEST) benchmarks/run_matrix.py identity --schemas tpch --engines postgres
 
 ## Obj 8: Cross-engine portability — any source → Lakebase target
 test-obj8:
-	./benchmarks/run_lakebase_target.sh --schemas tpch --engines postgres --skip-setup
+	$(PYTHON_TEST) benchmarks/run_matrix.py lakebase --schemas tpch --engines postgres
 
 ## Obj 9: Benchmark compatibility — synthetic data drives pgbench/TPC-C/TPC-H
 test-obj9:
-	./benchmarks/run_bench.sh --skip-setup
+	$(PYTHON_TEST) benchmarks/run_matrix.py bench
 
 ## Obj 10: Step-level testability — individual pipeline phases
 test-obj10:
 	$(PYTEST_TEST) tests/ -v -m obj10
+
+# ── Benchmark matrix targets ───────────────────────────────────────────────────
+# Always use $(PYTHON_TEST) so .venv_test is guaranteed.
+# Pass ENGINES / SCHEMAS / PHASES as make variables to override defaults.
+# Examples:
+#   make bench-identity                                 # all engines, all schemas
+#   make bench-identity ENGINES=db2,oracle,sqlserver SCHEMAS=tpcb
+#   make bench-identity ENGINES=postgres SCHEMAS=tpch PHASES=load_source,collect_stats
+#   make bench-lakebase ENGINES=postgres,mysql SCHEMAS=tpch
+#   make bench-score                                    # reprint latest result JSON
+BENCH_ENGINES := $(if $(ENGINES),--engines $(ENGINES),)
+BENCH_SCHEMAS := $(if $(SCHEMAS),--schemas $(SCHEMAS),)
+BENCH_PHASES  := $(if $(PHASES),--phases $(PHASES),)
+
+## Identity benchmark — same-engine round-trip fidelity across all engines × schemas.
+## Commit staged changes first (result JSON records git commit hash).
+bench-identity:
+	$(PYTHON_TEST) benchmarks/run_matrix.py identity $(BENCH_ENGINES) $(BENCH_SCHEMAS) $(BENCH_PHASES)
+
+## Lakebase benchmark — cross-engine source → Databricks Lakebase target.
+bench-lakebase:
+	$(PYTHON_TEST) benchmarks/run_matrix.py lakebase $(BENCH_ENGINES) $(BENCH_SCHEMAS) $(BENCH_PHASES)
+
+## Score — print a ranked summary of the most recent result JSONs.
+bench-score:
+	$(PYTHON_TEST) benchmarks/run_matrix.py score
 
 lint:
 	$(VENV_TEST)/bin/ruff check src/ tests/ || true

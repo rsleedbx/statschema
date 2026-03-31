@@ -25,20 +25,23 @@ def bulk_load_sqlserver(  # pragma: no cover
     """
     Load df into a SQL Server table using the fastest available path.
 
-    1. mssql-python (v1.4.0+) — uses conn.bulk_copy() via native BCP API.
+    1. mssql-python (v1.4.0+) — uses cursor.bulkcopy() via native BCP API.
     2. pyodbc / pymssql fallback — BULK INSERT from a staging CSV.
     """
     rows  = list(_iter_rows(df))
     count = len(rows)
 
     if type(conn).__module__.startswith("mssql_python"):
-        conn.bulk_copy(f"{schema}.{table}", rows)
+        # mssql-python exposes bulkcopy on the cursor (not the connection).
+        cur = conn.cursor()
+        result = cur.bulkcopy(f"{schema}.{table}", rows, column_mappings=col_names)
         conn.commit()
+        rows_copied = result.get("rows_copied", count) if isinstance(result, dict) else count
         logger.info(
             "bulk_load_sqlserver[mssql-python BCP]: loaded %d rows into %s.%s",
-            count, schema, table,
+            rows_copied, schema, table,
         )
-        return count
+        return rows_copied
 
     cur  = conn.cursor()
     full = f"[{schema}].[{table}]"

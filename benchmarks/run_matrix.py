@@ -6,9 +6,14 @@ Replaces the engine × schema loop previously embedded in run_identity.sh,
 run_lakebase_target.sh, and run_bench.sh.
 
 Callable from:
-  - Shell:             python benchmarks/run_matrix.py identity --engines postgres,mysql
-  - CI (Docker):       python benchmarks/run_matrix.py identity --engines postgres
+  - Make (preferred):  make bench-identity ENGINES=postgres,mysql SCHEMAS=tpcb
+  - Make (CI):         make bench-identity ENGINES=postgres
+  - Direct (testing):  .venv_test/bin/python benchmarks/run_matrix.py identity --engines postgres
   - Databricks notebook: from benchmarks.run_matrix import run_identity_matrix
+
+Always run via .venv_test — that venv has all DB drivers and PySpark.
+Using the bare ``python`` command will fail on macOS (no ``python`` in PATH).
+The Makefile targets guarantee the correct interpreter is used every time.
 
 Modes
 -----
