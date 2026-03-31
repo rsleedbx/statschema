@@ -41,7 +41,7 @@ def bulk_load_sqlserver(  # pragma: no cover
         full_table = f"[{current_db}].[dbo].[{table}]"
         result = cur.bulkcopy(full_table, rows, column_mappings=col_names)
         conn.commit()
-        rows_copied = result.get("rows_copied", count) if isinstance(result, dict) else count
+        rows_copied = (result.get("rows_copied") or count) if isinstance(result, dict) else count
         logger.info(
             "bulk_load_sqlserver[mssql-python BCP]: loaded %d rows into %s",
             rows_copied, full_table,

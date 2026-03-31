@@ -16,10 +16,11 @@ x86\_64 Linux setup locally.
 
 The two tiers drive the entire script structure.
 
-**Tier 1 — ARM64-native (Podman on every platform)**
+**Tier 1 — multi-arch (Podman on every platform)**
 
-These images have native ARM64 builds. They run in Podman identically on arm64
-macOS, x86\_64 Linux, Intel macOS, and GitHub Actions. No platform branching needed.
+These images publish both arm64 and x86\_64 builds. They run in Podman identically
+on arm64 macOS, x86\_64 Linux, Intel macOS, and GitHub Actions. No platform
+branching needed.
 
 ```
 postgres:18   ·   mysql:8   ·   cockroachdb/cockroach
@@ -45,6 +46,7 @@ depending on whether the host can run x86\_64 containers natively.
 ```
 scripts/
 ├── _db-common.sh          ← Tier 1 only: Podman start for PG, MySQL, CockroachDB
+│                             (multi-arch images — same commands on all platforms)
 │                             sourced by both platform scripts below
 │
 ├── db-up-x86_64.sh        ← Tier 1 (via _db-common.sh)
@@ -75,7 +77,7 @@ scripts/
 ### No-duplication map
 
 ```
-_db-common.sh           ← Tier 1 written once; sourced by both platform scripts
+_db-common.sh           ← Tier 1 (multi-arch) written once; sourced by both platform scripts
 db-up-x86_64.sh         ← used by: Linux devs, Intel Mac devs, GitHub Actions,
                            and test-on-linux.sh (arm64 Mac → Linux validation)
 db-up-arm64-macos.sh    ← used by: Apple Silicon Mac devs only

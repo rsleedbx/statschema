@@ -391,33 +391,47 @@ class TestLoadDataframe:
 
 
 class TestBulkLoadSqlServerBCP:
-    """Verify that mssql-python's conn.bulk_copy() is called when the driver is detected."""
+    """Verify that mssql-python's cursor.bulkcopy() is called when the driver is detected."""
 
-    def _mssql_python_conn(self):
-        """Return a fake connection whose type().__module__ == 'mssql_python.connection'."""
-        # type(conn).__module__ must start with "mssql_python" for BCP detection.
-        # Using a real class (not MagicMock's __class__ override) so that
-        # type(conn).__module__ resolves correctly at runtime.
+    def _mssql_python_conn(self, db_name: str = "testdb"):
+        """Return a fake connection whose type().__module__ == 'mssql_python.connection'.
+
+        The loader now calls conn.cursor() → cursor.execute("SELECT DB_NAME()") →
+        cursor.fetchone() → cursor.bulkcopy(table, rows, column_mappings=cols).
+        """
+        fake_cur = MagicMock()
+        fake_cur.fetchone.return_value = (db_name,)
+        fake_cur.bulkcopy.return_value = {"rows_copied": None}  # rows_copied=None → falls back to count
+
         FakeConn = type(
             "Connection",
             (),
-            {"__module__": "mssql_python.connection", "bulk_copy": None, "commit": None},
+            {"__module__": "mssql_python.connection"},
         )
         conn = FakeConn()
-        conn.bulk_copy = MagicMock()
-        conn.commit    = MagicMock()
+        conn.cursor = MagicMock(return_value=fake_cur)
+        conn.commit = MagicMock()
+        conn._fake_cur = fake_cur
         return conn
 
     def test_mssql_python_driver_calls_bulk_copy(self):
         from src.statschema.data_loader import bulk_load_sqlserver
 
         conn = self._mssql_python_conn()
-        rows = _rows(3)
-        bulk_load_sqlserver(conn, rows, "orders", COLS)
-        conn.bulk_copy.assert_called_once()
-        call_args = conn.bulk_copy.call_args
-        assert "orders" in call_args[0][0]        # table name in first positional arg
-        assert len(call_args[0][1]) == 3           # 3 rows passed
+        bulk_load_sqlserver(conn, _rows(3), "orders", COLS)
+        conn._fake_cur.bulkcopy.assert_called_once()
+        call_args = conn._fake_cur.bulkcopy.call_args
+        assert "orders" in call_args[0][0]         # table name in first positional arg
+        assert len(call_args[0][1]) == 3            # 3 rows passed
+
+    def test_mssql_python_driver_uses_three_part_name(self):
+        conn = self._mssql_python_conn(db_name="mydb")
+        from src.statschema.data_loader import bulk_load_sqlserver
+        bulk_load_sqlserver(conn, _rows(1), "orders", COLS)
+        table_arg = conn._fake_cur.bulkcopy.call_args[0][0]
+        assert "mydb" in table_arg
+        assert "dbo" in table_arg
+        assert "orders" in table_arg
 
     def test_mssql_python_driver_does_not_write_csv(self, tmp_path):
         from src.statschema.data_loader import bulk_load_sqlserver
