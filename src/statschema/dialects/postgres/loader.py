@@ -11,6 +11,7 @@ from typing import Any
 import psycopg2
 
 from .._loader_shared import _iter_rows, _quote_id
+from ..base import TopologyAwareLoader
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +65,28 @@ def bulk_load_postgres(  # pragma: no cover
 
     logger.info("bulk_load_postgres: copied %d rows into %s", count, table)
     return count
+
+
+# Redshift is intentionally excluded — it rejects COPY FROM STDIN and requires
+# an S3-staged load.  Dialect names "redshift" should never reach this loader.
+_POSTGRES_WIRE_DIALECTS = frozenset({
+    "postgres", "cockroachdb", "neon", "lakebase",
+})
+
+
+class PostgresCopyStdinLoader(TopologyAwareLoader):
+    """Topology-aware wrapper around ``bulk_load_postgres``."""
+
+    def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
+        return dialect in _POSTGRES_WIRE_DIALECTS
+
+    def bulk_load(
+        self,
+        ctx: Any,
+        conn: Any,
+        df: Any,
+        table: str,
+        col_names: list[str],
+        wait: bool = True,
+    ) -> int:
+        return bulk_load_postgres(conn, df, table, col_names)

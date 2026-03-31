@@ -22,67 +22,18 @@ from .._loader_shared import (
 logger = logging.getLogger(__name__)
 
 
-def _db2_container_copy(host_path: str, container_path: str, container_spec: str) -> bool:
-    """Copy a staging file into the filesystem that the Db2 server can see.
+def _staging_root(staging_dir: Optional[str] = None) -> str:
+    """Return the directory to use for staging DEL files.
 
-    ``container_spec`` supports three formats:
-    * ``lima:<vm>:<container>``  — host → Lima VM → podman container
-    * ``lima:<vm>``              — host → Lima VM only
-    * ``<container>``            — direct docker/podman cp on the host
+    ``staging_dir`` must come from ``ctx.staging_write_dir()``
+    (i.e. ``STATSCHEMA_CLIENT_STAGING_DIR``).  If unset, falls back to the
+    system temp directory — note that ADMIN_CMD will only succeed if the DB2
+    server process can also read that path (shared filesystem required).
     """
-    import subprocess
-
-    parts = container_spec.split(":")
-    if parts[0] == "lima" and len(parts) == 3:
-        _, lima_vm, inner_container = parts
-        try:
-            r1 = subprocess.run(
-                ["limactl", "copy", host_path, f"{lima_vm}:{container_path}"],
-                capture_output=True, timeout=300,
-            )
-            if r1.returncode != 0:
-                return False
-            r2 = subprocess.run(
-                [
-                    "limactl", "shell", lima_vm, "bash", "-c",
-                    f"sudo podman --root /var/lib/containers/storage cp "
-                    f"{container_path} {inner_container}:{container_path}"
-                    f" && sudo podman --root /var/lib/containers/storage exec {inner_container}"
-                    f" chmod 644 {container_path}",
-                ],
-                capture_output=True, timeout=300,
-            )
-            return r2.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-            import logging as _log
-            _log.getLogger(__name__).warning(
-                "bulk_load_db2: Lima container copy timed out or failed (%s)", e
-            )
-            return False
-
-    if parts[0] == "lima" and len(parts) == 2:
-        _, lima_vm = parts
-        try:
-            r = subprocess.run(
-                ["limactl", "copy", host_path, f"{lima_vm}:{container_path}"],
-                capture_output=True, timeout=60,
-            )
-            return r.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
-
-    container_name = container_spec
-    for runtime in ("podman", "docker"):
-        try:
-            result = subprocess.run(
-                [runtime, "cp", host_path, f"{container_name}:{container_path}"],
-                capture_output=True, timeout=30,
-            )
-            if result.returncode == 0:
-                return True
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-    return False
+    if staging_dir:
+        os.makedirs(staging_dir, exist_ok=True)
+        return staging_dir
+    return tempfile.gettempdir()
 
 
 def bulk_load_db2(  # pragma: no cover
@@ -93,24 +44,23 @@ def bulk_load_db2(  # pragma: no cover
     schema: Optional[str] = None,
     staging_dir: Optional[str] = None,
     col_types: Optional[list[str]] = None,
-    _container_spec: Optional[str] = None,
     _force_multi_row: bool = False,
+    _ctx: Optional[Any] = None,
 ) -> int:
     """
     Load df into IBM Db2 LUW.
 
     Strategy (tried in order):
-    1. Container copy + ADMIN_CMD: if ``DB2_CONTAINER_NAME`` is set AND the
-       table has no CLOB columns.  DB2 DEL-format LOAD does not support inline
-       CLOB data; tables with CLOB columns go straight to MULTI_ROW.
-    2. Direct ADMIN_CMD with the host-side path (same CLOB restriction).
-    3. MULTI_ROW fallback: parameterised batch INSERTs.
-    """
-    # _container_spec from DeploymentContext takes priority; fall back to env var.
-    container_name = _container_spec or os.environ.get("DB2_CONTAINER_NAME", "").strip()
+    1. Shared filesystem ADMIN_CMD: if ``ctx.server_staging_dir`` is set, the
+       DB server can read the staged file directly — uses ``ctx.to_server_path()``
+       to translate the write path to the server-side path (handles NFS mounts
+       where the two sides differ).
+    2. MULTI_ROW fallback: parameterised batch INSERTs.
 
+    CLOB columns are skipped in path 1 (DB2 DEL-format LOAD does not support
+    inline CLOB data); those tables go straight to MULTI_ROW.
+    """
     # CLOB columns cannot be loaded inline via ADMIN_CMD DEL format.
-    # Skip ADMIN_CMD for tables that contain canonical "string" / "clob" cols.
     _has_clob = col_types and any(
         t.lower() in ("string", "clob", "nclob") for t in col_types
     )
@@ -127,10 +77,14 @@ def bulk_load_db2(  # pragma: no cover
     rows  = list(_iter_rows(df))
     count = len(rows)
     base  = os.path.basename(table)
+
     fd, host_path = tempfile.mkstemp(
-        prefix=f"statschema_{base}_", suffix=".del",
-        dir=staging_dir,
+        prefix=f"ss_{schema}_{base}_", suffix=".del",
+        dir=_staging_root(staging_dir),
     )
+    # mkstemp creates files 0o600 (owner-only).  The DB2 server process runs as
+    # db2inst1 — make the file world-readable so ADMIN_CMD LOAD can open it.
+    os.chmod(host_path, 0o644)
 
     def _db2_csv_val(v: Any) -> Any:
         if v is None:
@@ -144,15 +98,16 @@ def bulk_load_db2(  # pragma: no cover
         for row in rows:
             writer.writerow([_db2_csv_val(v) for v in row])
 
-    suffix = os.path.basename(host_path)
-    admin_cmd_path = host_path
-    if container_name and not _has_clob:
-        container_path = f"/tmp/{suffix}"
-        if _db2_container_copy(host_path, container_path, container_name):
-            admin_cmd_path = container_path
-            logger.debug("bulk_load_db2: copied to %s:%s", container_name, container_path)
-        else:
-            logger.warning("bulk_load_db2: container copy to %s failed; will attempt ADMIN_CMD with host path", container_name)
+    # Translate client-side write path to server-side read path.
+    # When both dirs are the same (Lima / local disk) to_server_path is a no-op.
+    if _ctx is not None and _ctx.server_staging_dir:
+        admin_cmd_path = _ctx.to_server_path(host_path)
+        logger.debug(
+            "bulk_load_db2: shared filesystem — client=%s server=%s",
+            host_path, admin_cmd_path,
+        )
+    else:
+        admin_cmd_path = host_path
 
     actual = 0
     if _has_clob:
@@ -206,10 +161,7 @@ def bulk_load_db2(  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: topology-aware DB2 loader classes
-# These classes use DeploymentContext instead of the DB2_CONTAINER_NAME
-# env-var hack.  The old bulk_load_db2() function is kept intact for backward
-# compat; the classes delegate to it.
+# Topology-aware DB2 loader classes
 # ---------------------------------------------------------------------------
 
 from ..base import TopologyAwareLoader
@@ -219,9 +171,9 @@ class DB2AdminCmdLoader(TopologyAwareLoader):
     """
     Fast path: ADMIN_CMD LOAD from a staged DEL file.
 
-    Requires either:
-    - ctx.container_spec is set (file is copied into the DB container), OR
-    - ctx.topology == "collocated" (statschema runs on the DB host directly)
+    Requires topology="shared_fs": a filesystem path readable by both
+    statschema and the DB2 server process (NFS, bind-mount, Lima virtfs, etc.).
+    Set STATSCHEMA_SERVER_STAGING_DIR to enable.
 
     CLOB columns are not supported by ADMIN_CMD DEL format; falls back to
     DB2ImportLoader (IMPORT) when CLOBs are present.
@@ -232,20 +184,26 @@ class DB2AdminCmdLoader(TopologyAwareLoader):
     def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
         if dialect != "db2":
             return False
-        # Need to be able to stage the file where the server can see it.
-        if not (ctx.container_spec or ctx.is_collocated()):
+        if not ctx.has_shared_fs():
+            logger.info(
+                "DB2AdminCmdLoader: skipped — no shared filesystem configured. "
+                "Set STATSCHEMA_SERVER_STAGING_DIR to enable ADMIN_CMD LOAD."
+            )
             return False
-        # ADMIN_CMD DEL format cannot handle inline CLOB data.
         if col_types and any(t.lower() in self._CLOB_TYPES for t in col_types):
+            logger.info(
+                "DB2AdminCmdLoader: skipped — CLOB columns present; "
+                "ADMIN_CMD DEL format does not support inline CLOB data."
+            )
             return False
         return True
 
     def bulk_load(self, ctx, conn, df, table, col_names, wait=True) -> int:
         return bulk_load_db2(
             conn, df, table, col_names,
-            staging_dir=ctx.server_staging_dir,
-            col_types=None,             # CLOB guard already applied in can_use
-            _container_spec=ctx.container_spec,
+            staging_dir=ctx.staging_write_dir(),
+            col_types=None,
+            _ctx=ctx,
         )
 
 
@@ -254,38 +212,42 @@ class DB2ImportLoader(TopologyAwareLoader):
     Medium path: IMPORT over the wire — works for CLOB columns but is slower
     than ADMIN_CMD LOAD for large tables.
 
-    Requires ctx.container_spec or collocated topology (same as AdminCmd)
-    so the server can resolve the file path, but does NOT exclude CLOB columns.
+    Requires topology="shared_fs" (same gate as AdminCmd) so the server can
+    resolve the file path, but does NOT exclude CLOB columns.
     """
 
     def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
         if dialect != "db2":
             return False
-        return bool(ctx.container_spec or ctx.is_collocated())
+        if not ctx.has_shared_fs():
+            logger.info(
+                "DB2ImportLoader: skipped — no shared filesystem configured. "
+                "Set STATSCHEMA_SERVER_STAGING_DIR to enable IMPORT."
+            )
+            return False
+        return True
 
     def bulk_load(self, ctx, conn, df, table, col_names, wait=True) -> int:
         return bulk_load_db2(
             conn, df, table, col_names,
-            staging_dir=ctx.server_staging_dir,
+            staging_dir=ctx.staging_write_dir(),
             col_types=None,
-            _container_spec=ctx.container_spec,
+            _ctx=ctx,
         )
 
 
 class DB2MultiRowLoader(TopologyAwareLoader):
     """
     Fallback: parameterised multi-row INSERTs.  Always available.
-    Used when no ADMIN_CMD path is reachable (remote topology, no container spec).
+    Used when no shared filesystem is configured (remote topology).
     """
 
     def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
         return dialect == "db2"
 
     def bulk_load(self, ctx, conn, df, table, col_names, wait=True) -> int:
-        # Force the multi-row INSERT path by suppressing container staging.
         return bulk_load_db2(
             conn, df, table, col_names,
             col_types=None,
-            _container_spec=None,       # no container staging
             _force_multi_row=True,
         )

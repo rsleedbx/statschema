@@ -65,6 +65,24 @@ class TestSpec:
     pytest_marks: list[str] = field(default_factory=list)
     """Pytest -m markers to pass (e.g. ['live'])."""
 
+    requires_env: list[str] = field(default_factory=list)
+    """Env-var names that must be non-empty for this spec to run.
+
+    ``run_sweep._env_gate()`` skips the spec with a warning when any listed
+    var is absent or empty.  Example: ``["STATSCHEMA_CLOUD_STAGING_URI"]`` for
+    cloud-staged Databricks tests.
+    """
+
+    topology: str | None = None
+    """Optional DeploymentContext topology override for this spec.
+
+    When set, ``run_sweep._ctx_for_spec()`` replaces the topology resolved by
+    ``DeploymentContext.from_env()`` with this value, letting the catalog drive
+    which loader path is exercised without touching the credentials in ``.env``.
+    Valid values: remote | shared_fs | cloud_staged | spark_embedded |
+    spark_connect | databricks_connect
+    """
+
     def matches(self, *categories: str) -> bool:
         """Return True if this spec carries ANY of the given category tags."""
         return bool(self.categories & frozenset(categories))
@@ -188,5 +206,7 @@ class TestRegistry:
                 schema=None,
                 pytest_file=entry.get("file"),
                 pytest_marks=entry.get("marks", []),
+                requires_env=entry.get("requires_env", []),
+                topology=entry.get("topology"),
             ))
         return specs

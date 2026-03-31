@@ -167,25 +167,34 @@ setup_sqlserver() {
             "https://github.com/Microsoft/sql-server-samples/releases/download/adventureworks/AdventureWorks2022.bak" \
             "AdventureWorks2022.bak")
 
-        info "Copying .bak files into $vm…"
-        run limactl copy "$awlt_bak" "${vm}:/tmp/"
-        run limactl copy "$aw_bak"   "${vm}:/tmp/"
-        run limactl shell "$vm" -- sudo bash -c \
-            "mkdir -p /var/opt/mssql/backup && cp /tmp/AdventureWorks*.bak /var/opt/mssql/backup/ && chown -R mssql:mssql /var/opt/mssql/backup"
+        # Stage via the shared filesystem so the SQL Server container can read it.
+        # STATSCHEMA_CLIENT_STAGING_DIR defaults to /tmp/lima for Lima dev setups
+        # where /tmp/lima is bind-mounted into the SQL Server container.
+        local _staging_root="${STATSCHEMA_CLIENT_STAGING_DIR:-/tmp/lima}"
+        info "Staging .bak files via ${_staging_root} (shared with container)…"
+        mkdir -p "${_staging_root}"
+        cp "$awlt_bak" "${_staging_root}/AdventureWorksLT2022.bak"
+        cp "$aw_bak"   "${_staging_root}/AdventureWorks2022.bak"
+        chmod 644 "${_staging_root}/AdventureWorksLT2022.bak" "${_staging_root}/AdventureWorks2022.bak"
 
+        # The SQL Server container sees STATSCHEMA_SERVER_STAGING_DIR (may differ
+        # from the client path when using NFS or non-Lima bind-mounts).
+        local _server_root="${STATSCHEMA_SERVER_STAGING_DIR:-${_staging_root}}"
         info "Restoring AdventureWorksLT2022 and AdventureWorks2022…"
         run sqlcmd -S "127.0.0.1,${port}" -U sa -P "$pass" -C -Q "
 RESTORE DATABASE [AdventureWorksLT2022]
-FROM DISK = '/var/opt/mssql/backup/AdventureWorksLT2022.bak'
+FROM DISK = '${_server_root}/AdventureWorksLT2022.bak'
 WITH MOVE 'AdventureWorksLT2022_Data' TO '/var/opt/mssql/data/AdventureWorksLT2022.mdf',
      MOVE 'AdventureWorksLT2022_Log'  TO '/var/opt/mssql/data/AdventureWorksLT2022_log.ldf',
      REPLACE;
 RESTORE DATABASE [AdventureWorks2022]
-FROM DISK = '/var/opt/mssql/backup/AdventureWorks2022.bak'
+FROM DISK = '${_server_root}/AdventureWorks2022.bak'
 WITH MOVE 'AdventureWorks2022'     TO '/var/opt/mssql/data/AdventureWorks2022.mdf',
      MOVE 'AdventureWorks2022_log' TO '/var/opt/mssql/data/AdventureWorks2022_log.ldf',
      REPLACE;
 "
+        # Clean up staging files after successful restore
+        rm -f "${_staging_root}/AdventureWorksLT2022.bak" "${_staging_root}/AdventureWorks2022.bak"
         info "AdventureWorks restored."
     fi
 

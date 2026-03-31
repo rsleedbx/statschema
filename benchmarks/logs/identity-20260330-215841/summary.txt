@@ -1,0 +1,7 @@
+# 2026-03-30T22:00:03.684351+00:00
+
+PASS  sqlserver×tpcb(sf=1)                        Overall: PASS ✓
+
+Passed : 1 / 1
+Failed : 0 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260330-215841

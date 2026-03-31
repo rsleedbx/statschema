@@ -52,7 +52,8 @@ _FASTEST: dict[str, LoadStrategy] = {
     "db2":         LoadStrategy.BULK_COPY,
     "oracle":      LoadStrategy.MULTI_ROW,
     "sqlite":      LoadStrategy.MULTI_ROW,
-    "databricks":  LoadStrategy.MULTI_ROW,
+    "databricks":  LoadStrategy.BULK_COPY,  # registry dispatches to Spark loaders
+    "lakehouse":   LoadStrategy.BULK_COPY,  # DatabricksCopyIntoLoader / SparkInClusterLoader
 }
 
 _ALL_DIALECTS = sorted(set(SUPPORTED_DIALECTS) | set(_FASTEST))
@@ -398,6 +399,7 @@ def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
     """Create tables and load synthetic data into a live database."""
     import dataclasses
     import time
+    from .loader_context import DeploymentContext
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -414,6 +416,7 @@ def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
         if strategy
         else _FASTEST.get(dialect, LoadStrategy.MULTI_ROW)
     )
+    ctx = DeploymentContext.from_env()
     conn = _connect(dialect, dsn)
 
     if append:
@@ -461,6 +464,7 @@ def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
         loaded = load_dataframe(
             generate_rows(table, n, parent_row_counts=par_counts, seed=eff_seed, row_offset=row_offset),
             conn, insert_name, dialect, strategy=strat, cols=cols, commit=True,
+            ctx=ctx,
         )
         elapsed = time.perf_counter() - t0
         rps = loaded / elapsed if elapsed > 0 else 0

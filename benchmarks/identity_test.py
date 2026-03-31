@@ -342,6 +342,11 @@ def _get_explain(conn, sql: str, schema: str, dialect: str) -> dict:
     return _get_dialect(dialect).explain(conn, sql, schema)
 
 
+def _explain_pg(conn, sql: str, schema: str) -> dict:
+    """Convenience wrapper: run EXPLAIN on a PostgreSQL connection."""
+    return _get_explain(conn, sql, schema, "postgres")
+
+
 def _schema_table_ref(table_name: str, schema_name: str, dialect: str) -> str:
     """Return a fully-qualified, properly-quoted table reference for the dialect."""
     return _get_dialect(dialect).table_ref(table_name, schema_name)
@@ -354,6 +359,7 @@ def load_source(
     source_schema: str,
     dialect: str,
     seed: int = 42,
+    ctx: "Any | None" = None,
 ) -> dict[str, int]:
     """
     Phase A — create source_schema, load TPC-x data from the YAML generator,
@@ -418,6 +424,7 @@ def load_source(
             cols=_cols,
             col_types=_ctypes,
             commit=False,
+            ctx=ctx,
         )
         try:
             conn.commit()
@@ -896,7 +903,7 @@ def build_target(
     fk_range_overrides: dict[str, dict[str, tuple[int, int]]] | None = None,
     pred_col_map: dict | None = None,
     full_stats: bool = False,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], str]:
     """
     Phase D — create target_schema, load synthetic rows driven by collected
     statistics, then run inject_stats_postgres() to install the stats into

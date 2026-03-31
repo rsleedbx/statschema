@@ -9,6 +9,7 @@ import tempfile
 from typing import Any, Optional
 
 from .._loader_shared import _iter_rows, _quote_id
+from ..base import TopologyAwareLoader
 
 logger = logging.getLogger(__name__)
 
@@ -44,3 +45,21 @@ def bulk_load_mysql(  # pragma: no cover
     os.unlink(path)
     logger.info("bulk_load_mysql: loaded %d rows into %s", count, table)
     return count
+
+
+class MySQLLocalInfileLoader(TopologyAwareLoader):
+    """Topology-aware wrapper around ``bulk_load_mysql``."""
+
+    def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
+        return dialect in ("mysql", "mariadb")
+
+    def bulk_load(
+        self,
+        ctx: Any,
+        conn: Any,
+        df: Any,
+        table: str,
+        col_names: list[str],
+        wait: bool = True,
+    ) -> int:
+        return bulk_load_mysql(conn, df, table, col_names)

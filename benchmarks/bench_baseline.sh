@@ -25,6 +25,20 @@
 #             Stop+restore: ~0.1s.  VM restart: ~2-5 min (no crash recovery
 #             if snap was taken from a cleanly stopped VM).
 #
+#   setup     Idempotent full-environment setup: start local registry, seed
+#             missing images, provision/resume Lima VMs (sqlserver22, oracle,
+#             db2), start host Podman containers (pg18, mysql8, crdb-single)
+#             with named volumes.  Safe to run repeatedly.
+#
+#   seed-registry  Pull base image on the Mac host, push to local registry.
+#             Use before first provision or after limactl delete when no VM
+#             is running to push from.
+#
+#   push-images  Push all Podman images from running VMs to the local registry
+#             so they survive limactl delete.  commit-state pushes automatically.
+#
+#   ensure-registry  Start the local registry container if not running.
+#
 #   nuke      Full Podman container teardown + fresh start for native engines
 #             (postgres, cockroachdb, mysql).  Use when schema state is dirty.
 #             Takes ~1-5s per container.
@@ -254,8 +268,54 @@ start_vm() {
 
 LIMA_DIR="$HOME/.lima"
 
+# ── local registry ────────────────────────────────────────────────────────────
+# A local OCI registry on the host at localhost:5000 caches base images and
+# committed state images.  Lima VMs access it via host.lima.internal:5000.
+# Images survive limactl delete; reprovision pulls from the registry instead of
+# the internet (1.5 GB SQL Server, 3 GB DB2 saved as local layer cache).
+LOCAL_REGISTRY="localhost:5000"
+VM_REGISTRY="host.lima.internal:5000"
+
+# registry_path "mcr.microsoft.com/mssql/server:2022-latest" → "mssql/server:2022-latest"
+# registry_path "statschema/sqlserver22:baseline"            → "statschema/sqlserver22:baseline"
+registry_path() {
+    local img="$1"
+    local first="${img%%/*}"
+    if [[ "$first" == *"."* ]]; then
+        echo "${img#*/}"
+    else
+        echo "$img"
+    fi
+}
+
+ensure_registry() {
+    if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "^local-registry$"; then
+        return 0
+    fi
+    if podman ps -a --format "{{.Names}}" 2>/dev/null | grep -q "^local-registry$"; then
+        info "Starting existing local-registry container…"
+        run podman start local-registry
+        sleep 2
+        return 0
+    fi
+    info "Creating local registry at localhost:5000…"
+    run podman volume create local-registry-data 2>/dev/null || true
+    run podman run -d --name local-registry \
+        -p 5000:5000 \
+        -v local-registry-data:/var/lib/registry \
+        registry:2
+    sleep 2
+    info "Local registry started."
+}
+
 snap_vm() {
     local vm="$1" tag="$2"
+
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        info "snap skipped on $(uname -s) — APFS clonefiles are macOS-only (Phase 1-B: use podman commit instead)"
+        return 0
+    fi
+
     local diffdisk="$LIMA_DIR/$vm/diffdisk"
     local snap_file="$LIMA_DIR/$vm/diffdisk.snap-${tag}"
 
@@ -281,6 +341,12 @@ snap_vm() {
 
 restore_vm() {
     local vm="$1" tag="$2"
+
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        info "restore skipped on $(uname -s) — APFS clonefiles are macOS-only (Phase 1-B: use podman commit instead)"
+        return 0
+    fi
+
     local diffdisk="$LIMA_DIR/$vm/diffdisk"
     local snap_file="$LIMA_DIR/$vm/diffdisk.snap-${tag}"
 
@@ -311,34 +377,290 @@ restore_vm() {
 }
 
 # sync_sqlserver_pass VM
-# Reads the SA password from /var/opt/mssql/.sa_password (written once at
-# first-boot provisioning and never changed) and writes it to SQLSERVER_PASS
-# in the repo .env file.  Falls back to cloud-init-output.log for pre-sentinel
-# VMs.  Safe to call after every restore — it is a no-op when the password is
-# already correct in .env.
+# SA password is now fixed (Option D: Podman container with MSSQL_SA_PASSWORD=Bench1pass!).
+# No dynamic retrieval needed.  Kept as a no-op so existing callers continue to work.
 sync_sqlserver_pass() {
+    export SQLSERVER_PASS="${SQLSERVER_PASS:-Bench1pass!}"
+}
+
+# container_for_vm VM → the Podman container name running inside that VM
+container_for_vm() {
+    case "$1" in
+        sqlserver22) echo "sqlserver22" ;;
+        db2)         echo "db2ce"       ;;
+        oracle)      echo "oracle-xe"   ;;
+        *)           echo ""            ;;
+    esac
+}
+
+# yaml_for_vm VM → the Lima YAML filename (without .yaml) under config/lima/
+yaml_for_vm() {
+    case "$1" in
+        sqlserver22) echo "sqlserver22" ;;
+        oracle)      echo "oracle"      ;;
+        db2)         echo "db2"         ;;
+        *)           echo ""            ;;
+    esac
+}
+
+# start_or_resume_vm VM
+# Idempotent: create from YAML if VM doesn't exist, start if stopped, no-op if running.
+start_or_resume_vm() {
     local vm="$1"
-    local new_pass
-    new_pass=$(limactl shell "$vm" -- \
-        sudo cat /var/opt/mssql/.sa_password 2>/dev/null || true)
-    if [[ -z "$new_pass" ]]; then
-        new_pass=$(limactl shell "$vm" -- bash -c \
-            "sudo grep 'SQL Server sa password is' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | awk '{print \$NF}'" 2>/dev/null || true)
-    fi
-    if [[ -z "$new_pass" ]]; then
-        warn "Could not read SA password from $vm — update SQLSERVER_PASS in .env manually."
+    local status
+    status=$(limactl list 2>/dev/null | awk -v v="$vm" '$1==v {print $2}')
+
+    case "$status" in
+        Running)
+            info "$vm already running"
+            ;;
+        Stopped|Broken)
+            info "Starting stopped $vm…"
+            limactl start "$vm"
+            ;;
+        "")
+            local yaml
+            yaml=$(yaml_for_vm "$vm")
+            [[ -n "$yaml" ]] || { warn "start_or_resume_vm: unknown VM '$vm'"; return 1; }
+            info "Provisioning $vm from config/lima/${yaml}.yaml…"
+            limactl start --name="$vm" "${REPO_ROOT}/config/lima/${yaml}.yaml"
+            ;;
+    esac
+}
+
+# registry_has IMAGE_PATH → 0 if tag exists in local registry, 1 otherwise
+# IMAGE_PATH is e.g. "mssql/server:2022-latest"
+registry_has() {
+    local path="$1"
+    local repo="${path%:*}"
+    local tag="${path##*:}"
+    curl -sf "http://${LOCAL_REGISTRY}/v2/${repo}/tags/list" 2>/dev/null \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if '${tag}' in (d.get('tags') or []) else 1)" \
+        2>/dev/null
+}
+
+# base_image_for_vm VM → the upstream OCI image tag used in the YAML
+base_image_for_vm() {
+    case "$1" in
+        sqlserver22) echo "mcr.microsoft.com/mssql/server:2022-latest" ;;
+        db2)         echo "icr.io/db2_community/db2:latest"            ;;
+        oracle)      echo "docker.io/gvenzl/oracle-xe:21-slim"         ;;
+        *)           echo ""                                            ;;
+    esac
+}
+
+# seed_registry VM
+# Pull the base image on the Mac host's Podman store, then push it to the local
+# registry at localhost:5000.  Both tags (docker.io/... and localhost:5000/...)
+# share the same image layers — no extra disk cost.  The host copy is kept so
+# re-seeding after a registry wipe is instant (no re-pull needed).
+# Requires ~/.config/containers/registries.conf to trust localhost:5000 as insecure.
+seed_registry() {
+    local vm="$1"
+    local upstream
+    upstream=$(base_image_for_vm "$vm")
+    [[ -n "$upstream" ]] || { warn "seed_registry: unknown VM '$vm'"; return 1; }
+
+    ensure_registry
+
+    local path
+    path=$(registry_path "$upstream")
+    local local_tag="${LOCAL_REGISTRY}/${path}"
+
+    # Step 1: pull into host's Podman store (no-op if already present)
+    info "Pulling $upstream into host Podman store…"
+    run podman pull "$upstream"
+
+    # Step 2: tag for local registry
+    info "Tagging → ${local_tag}…"
+    run podman tag "$upstream" "$local_tag"
+
+    # Step 3: push to local registry — Lima VMs pull from here on provision
+    info "Pushing → ${local_tag}…"
+    run podman push --tls-verify=false "$local_tag"
+
+    info "Registry seeded: ${local_tag}"
+    info "Host store keeps: ${upstream}  (re-seed is instant if registry is wiped)"
+}
+
+# push_to_registry VM
+# Push every Podman image in the VM to the local registry at host.lima.internal:5000.
+# Images survive limactl delete and reprovision pulls from the registry instead
+# of the internet.  Run once after first successful provision and again after
+# committing a new state image (commit_state already calls this automatically).
+push_to_registry() {
+    local vm="$1"
+    ensure_registry
+
+    local images
+    images=$(limactl shell "$vm" -- sudo podman images \
+             --format "{{.Repository}}:{{.Tag}}" 2>/dev/null \
+             | grep -v "^<none>" || true)
+
+    if [[ -z "$images" ]]; then
+        warn "push_to_registry: no images found in $vm"
         return
     fi
-    local env_file="${REPO_ROOT}/.env"
-    if [[ -f "$env_file" ]]; then
-        if grep -q "^SQLSERVER_PASS=" "$env_file"; then
-            sed -i.bak "s|^SQLSERVER_PASS=.*|SQLSERVER_PASS=${new_pass}|" "$env_file"
-        else
-            echo "SQLSERVER_PASS=${new_pass}" >> "$env_file"
-        fi
-        info "SQLSERVER_PASS synced to .env (${new_pass:0:8}…)"
+
+    while IFS= read -r img; do
+        local path
+        path=$(registry_path "$img")
+        local remote="${VM_REGISTRY}/${path}"
+        info "Pushing $img → ${remote}…"
+        run limactl shell "$vm" -- sudo bash -c \
+            "podman push --tls-verify=false '$img' '$remote'"
+        info "Pushed: ${remote}"
+    done <<< "$images"
+}
+
+# commit_state VM TAG
+# Stop the DB cleanly inside the container, commit the filesystem to a local image,
+# then restart.  Image is stored in Podman's image store inside the VM — no registry needed.
+# Clean stop ensures no crash recovery is needed on the next podman run.
+commit_state() {
+    local vm="$1" tag="$2"
+    local ctr
+    ctr=$(container_for_vm "$vm")
+    [[ -n "$ctr" ]] || { warn "commit_state: unknown VM '$vm'"; return 1; }
+
+    local image="statschema/${ctr}:${tag}"
+    info "Stopping $ctr inside $vm for clean commit…"
+    run limactl shell "$vm" -- podman stop "$ctr"
+
+    info "Committing $ctr → $image …"
+    run limactl shell "$vm" -- sudo podman commit "$ctr" "$image"
+    info "Committed: $image"
+
+    local remote="${VM_REGISTRY}/$(registry_path "$image")"
+    info "Pushing $image → ${remote}…"
+    run limactl shell "$vm" -- sudo bash -c \
+        "podman push --tls-verify=false '$image' '$remote'"
+    info "Pushed to local registry: ${remote}"
+
+    info "Restarting $ctr…"
+    run limactl shell "$vm" -- podman start "$ctr"
+
+    # Wait for port to come back
+    local port
+    case "$vm" in
+        sqlserver22) port=14330 ;;
+        db2)         port=50000 ;;
+        oracle)      port=1521  ;;
+    esac
+    if [[ -n "$port" ]]; then
+        local elapsed=0
+        until limactl shell "$vm" -- nc -z localhost "$port" 2>/dev/null; do
+            sleep 5; elapsed=$(( elapsed + 5 ))
+            [[ $elapsed -ge 120 ]] && warn "$vm port $port did not reopen after 120s" && return 1
+        done
+        info "$vm is up on port $port after commit."
     fi
-    export SQLSERVER_PASS="$new_pass"
+}
+
+# restore_image VM TAG
+# Replace the running container with a fresh one started from a committed image.
+# Volume data comes from the committed image snapshot; the named volume is reused.
+restore_image() {
+    local vm="$1" tag="$2"
+    local ctr
+    ctr=$(container_for_vm "$vm")
+    [[ -n "$ctr" ]] || { warn "restore_image: unknown VM '$vm'"; return 1; }
+
+    local image="statschema/${ctr}:${tag}"
+    info "Restoring $vm from $image…"
+
+    # Stop and remove the running container; leave named volume intact
+    run limactl shell "$vm" -- podman stop "$ctr" 2>/dev/null || true
+    run limactl shell "$vm" -- podman rm -f "$ctr"
+
+    # Re-run using the committed image with the same flags as the original provisioning
+    case "$vm" in
+        sqlserver22)
+            run limactl shell "$vm" -- podman run -d \
+                --name "$ctr" \
+                --cap-add cap_net_bind_service \
+                -p 14330:14330 \
+                -e ACCEPT_EULA=Y \
+                -e MSSQL_SA_PASSWORD=Bench1pass! \
+                -e MSSQL_TCP_PORT=14330 \
+                -e MSSQL_MEMORY_LIMIT_MB=5632 \
+                -v sqlserver_data:/var/opt/mssql:Z \
+                -v /tmp/lima:/tmp/lima \
+                "$image"
+            ;;
+        db2)
+            run limactl shell "$vm" -- sudo podman run -d \
+                --name "$ctr" \
+                --privileged=true \
+                -p 50000:50000 \
+                -e LICENSE=accept \
+                -e DB2INST1_PASSWORD=testpass \
+                -e DBNAME=testdb \
+                -e ARCHIVE_LOGS=false \
+                -e AUTOCONFIG=false \
+                -v db2_data:/database:Z \
+                -v /tmp/lima:/tmp/lima \
+                "$image"
+            ;;
+        oracle)
+            run limactl shell "$vm" -- sudo podman run -d \
+                --name "$ctr" \
+                --platform linux/amd64 \
+                -p 1521:1521 \
+                -p 5500:5500 \
+                -e ORACLE_PASSWORD=oracle \
+                -v oracle_data:/opt/oracle/oradata \
+                "$image"
+            ;;
+    esac
+    info "Container $ctr started from $image."
+}
+
+list_committed_images() {
+    echo ""
+    echo "  Committed podman images (statschema/*):"
+    local found=0
+    for vm in "${ALL_QEMU_VMS[@]}"; do
+        is_vm_running "$vm" || continue
+        local out
+        out=$(limactl shell "$vm" -- sudo podman images \
+                --format "  $vm  {{.Repository}}:{{.Tag}}  {{.Size}}" 2>/dev/null \
+              | grep "statschema/" || true)
+        if [[ -n "$out" ]]; then
+            echo "$out"
+            found=1
+        fi
+    done
+    [[ $found -eq 0 ]] && echo "    (none — run --mode=commit-state to create one)"
+    echo ""
+}
+
+list_registry_images() {
+    echo ""
+    echo "  Local registry (localhost:5000) contents:"
+    if ! curl -sf "http://localhost:5000/v2/_catalog" >/dev/null 2>&1; then
+        echo "    (registry not running — run --mode=ensure-registry)"
+        echo ""
+        return
+    fi
+    local repos
+    repos=$(curl -sf "http://localhost:5000/v2/_catalog" 2>/dev/null \
+        | python3 -c "import sys, json; [print(r) for r in json.load(sys.stdin).get('repositories', [])]" \
+        2>/dev/null || true)
+    if [[ -z "$repos" ]]; then
+        echo "    (no images — run --mode=push-images first)"
+        echo ""
+        return
+    fi
+    while IFS= read -r repo; do
+        [[ -n "$repo" ]] || continue
+        local tags
+        tags=$(curl -sf "http://localhost:5000/v2/${repo}/tags/list" 2>/dev/null \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('tags') or []))" \
+            2>/dev/null || echo "?")
+        printf "  %-52s  tags: %s\n" "$repo" "$tags"
+    done <<< "$repos"
+    echo ""
 }
 
 list_snaps() {
@@ -362,56 +684,159 @@ list_snaps() {
     echo ""
 }
 
-# ── Podman container nuke ─────────────────────────────────────────────────────
-# Tear down a Podman container completely and restart it from a clean image.
-# This is the equivalent of "delete and redeploy" for native containers.
-# Measured time: ~1s for postgres (image already cached locally).
+# ── Podman container management ───────────────────────────────────────────────
+# nuke_*: full teardown including volume (clean slate, used by --mode=nuke)
+# ensure_*: idempotent start with named volume (used by --mode=setup)
 
 load_env() {
     local env_file="${REPO_ROOT}/.env"
     [[ -f "$env_file" ]] && set -o allexport && source <(grep -E '^[A-Z_][A-Z0-9_]*=' "$env_file") && set +o allexport || true
 }
 
-nuke_postgres() {
-    local port="${PG18_PORT:-5418}"
-    local pass="${PG18_PASS:-${PG_PASSWORD:-postgres}}"
-    info "Nuking pg18 (stop → rm → run)…"
-    run "podman stop pg18 2>/dev/null; podman rm pg18 2>/dev/null; \
-         podman run -d --name pg18 -e POSTGRES_PASSWORD='$pass' -p ${port}:5432 postgres:18 2>/dev/null"
+_wait_port() {
+    local name="$1" host="$2" port="$3" max="${4:-60}"
     local elapsed=0
-    while ! nc -z 127.0.0.1 "$port" 2>/dev/null; do
+    until nc -z "$host" "$port" 2>/dev/null; do
         sleep 1; elapsed=$(( elapsed + 1 ))
-        [[ $elapsed -ge 60 ]] && warn "pg18 port did not open after 60s" && return 1
+        [[ $elapsed -ge $max ]] && warn "$name port $port not open after ${max}s" && return 1
     done
-    info "pg18 up on port $port (${elapsed}s)"
+    info "$name up on port $port (${elapsed}s)"
+}
+
+# ── nuke (stop + rm container + rm volume → fresh container + fresh volume) ──
+
+nuke_postgres() {
+    local port="${PG18_PORT:-5418}" pass="${PG18_PASS:-${PG_PASSWORD:-postgres}}"
+    info "Nuking pg18…"
+    run "podman stop pg18 2>/dev/null; podman rm pg18 2>/dev/null
+         podman volume rm pg18_data 2>/dev/null || true
+         podman volume create pg18_data
+         podman run -d --name pg18 -e POSTGRES_PASSWORD='$pass' \
+           -p ${port}:5432 -v pg18_data:/var/lib/postgresql postgres:18"
+    _wait_port pg18 127.0.0.1 "$port"
 }
 
 nuke_mysql() {
-    local port="${MYSQL8_PORT:-3384}"
-    local pass="${MYSQL_ROOT_PASS:-testpass}"
-    info "Nuking mysql8 (stop → rm → run)…"
-    run "podman stop mysql8 2>/dev/null; podman rm mysql8 2>/dev/null; \
-         podman run -d --name mysql8 -e MYSQL_ROOT_PASSWORD='$pass' -p ${port}:3306 mysql:8 2>/dev/null"
-    local elapsed=0
-    while ! nc -z 127.0.0.1 "$port" 2>/dev/null; do
-        sleep 1; elapsed=$(( elapsed + 1 ))
-        [[ $elapsed -ge 120 ]] && warn "mysql8 port did not open after 120s" && return 1
-    done
-    info "mysql8 up on port $port (${elapsed}s)"
+    local port="${MYSQL8_PORT:-3384}" pass="${MYSQL_ROOT_PASS:-testpass}"
+    info "Nuking mysql8…"
+    run "podman stop mysql8 2>/dev/null; podman rm mysql8 2>/dev/null
+         podman volume rm mysql8_data 2>/dev/null || true
+         podman volume create mysql8_data
+         podman run -d --name mysql8 -e MYSQL_ROOT_PASSWORD='$pass' \
+           -p ${port}:3306 -v mysql8_data:/var/lib/mysql mysql:8"
+    _wait_port mysql8 127.0.0.1 "$port" 120
 }
 
 nuke_cockroachdb() {
     local port="${CRDB_SINGLE_PORT:-26257}"
-    info "Nuking crdb-single (stop → rm → run)…"
-    run "podman stop crdb-single 2>/dev/null; podman rm crdb-single 2>/dev/null; \
-         podman run -d --name crdb-single -p ${port}:${port} cockroachdb/cockroach:latest \
-           start-single-node --insecure 2>/dev/null"
-    local elapsed=0
-    while ! nc -z 127.0.0.1 "$port" 2>/dev/null; do
-        sleep 1; elapsed=$(( elapsed + 1 ))
-        [[ $elapsed -ge 60 ]] && warn "crdb-single port did not open after 60s" && return 1
+    info "Nuking crdb-single…"
+    run "podman stop crdb-single 2>/dev/null; podman rm crdb-single 2>/dev/null
+         podman volume rm crdb_data 2>/dev/null || true
+         podman volume create crdb_data
+         podman run -d --name crdb-single -p ${port}:${port} \
+           -v crdb_data:/cockroach/cockroach-data \
+           cockroachdb/cockroach:latest start-single-node --insecure"
+    _wait_port crdb-single 127.0.0.1 "$port"
+}
+
+# ── ensure (idempotent: no-op if running, start if stopped, create if absent) ──
+
+_container_has_volume() {
+    # _container_has_volume CONTAINER VOLUME_NAME → 0 if volume is mounted
+    podman inspect "$1" --format "{{json .Mounts}}" 2>/dev/null \
+        | python3 -c "import sys,json; mounts=json.load(sys.stdin); exit(0 if any(m.get('Name')=='$2' for m in mounts) else 1)" \
+        2>/dev/null
+}
+
+ensure_postgres() {
+    local port="${PG18_PORT:-5418}" pass="${PG18_PASS:-${PG_PASSWORD:-postgres}}"
+    if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "^pg18$" \
+       && _container_has_volume pg18 pg18_data; then
+        info "pg18 already running with volume"; return
+    fi
+    info "Starting pg18…"
+    podman volume create pg18_data 2>/dev/null || true
+    podman rm -f pg18 2>/dev/null || true
+    podman run -d --name pg18 -e POSTGRES_PASSWORD="$pass" \
+        -p ${port}:5432 -v pg18_data:/var/lib/postgresql postgres:18
+    _wait_port pg18 127.0.0.1 "$port"
+}
+
+ensure_mysql() {
+    local port="${MYSQL8_PORT:-3384}" pass="${MYSQL_ROOT_PASS:-testpass}"
+    if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "^mysql8$" \
+       && _container_has_volume mysql8 mysql8_data; then
+        info "mysql8 already running with volume"; return
+    fi
+    info "Starting mysql8…"
+    podman volume create mysql8_data 2>/dev/null || true
+    podman rm -f mysql8 2>/dev/null || true
+    podman run -d --name mysql8 -e MYSQL_ROOT_PASSWORD="$pass" \
+        -p ${port}:3306 -v mysql8_data:/var/lib/mysql mysql:8
+    _wait_port mysql8 127.0.0.1 "$port" 120
+}
+
+ensure_cockroachdb() {
+    local port="${CRDB_SINGLE_PORT:-26257}"
+    if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "^crdb-single$" \
+       && _container_has_volume crdb-single crdb_data; then
+        info "crdb-single already running with volume"; return
+    fi
+    info "Starting crdb-single…"
+    podman volume create crdb_data 2>/dev/null || true
+    podman rm -f crdb-single 2>/dev/null || true
+    podman run -d --name crdb-single -p ${port}:${port} \
+        -v crdb_data:/cockroach/cockroach-data \
+        cockroachdb/cockroach:latest start-single-node --insecure
+    _wait_port crdb-single 127.0.0.1 "$port"
+}
+
+# ── setup_all: idempotent full-environment setup ──────────────────────────────
+# Starts registry, seeds missing images, provisions Lima VMs, starts host containers.
+# Safe to run repeatedly — each step is a no-op when already satisfied.
+
+setup_all() {
+    echo ""
+    info "=== Step 1: Local registry ==="
+    ensure_registry
+
+    echo ""
+    info "=== Step 2: Seed registry for Lima VMs (skip if already present) ==="
+    for vm in sqlserver22 oracle db2; do
+        local upstream path
+        upstream=$(base_image_for_vm "$vm")
+        path=$(registry_path "$upstream")
+        if registry_has "$path"; then
+            info "  $path ✓ (already in registry)"
+        else
+            info "  $path missing — seeding…"
+            seed_registry "$vm"
+        fi
     done
-    info "crdb-single up on port $port (${elapsed}s)"
+
+    echo ""
+    info "=== Step 3: Lima VMs (sqlserver22, oracle, db2) ==="
+    for vm in sqlserver22 oracle db2; do
+        start_or_resume_vm "$vm" &
+    done
+    wait
+    info "All Lima VMs are up."
+
+    echo ""
+    info "=== Step 4: Host Podman containers (pg18, mysql8, crdb-single) ==="
+    load_env
+    ensure_postgres     &
+    ensure_mysql        &
+    ensure_cockroachdb  &
+    wait
+
+    echo ""
+    info "=== Environment ready ==="
+    limactl list 2>/dev/null | awk 'NR==1 || /sqlserver22|oracle|db2/' | sed 's/^/  /'
+    echo ""
+    podman ps --format "  {{.Names}}\t{{.Status}}" 2>/dev/null \
+        | grep -E "pg18|mysql8|crdb-single" || true
+    list_registry_images
 }
 
 # ── final load check ─────────────────────────────────────────────────────────
@@ -497,13 +922,73 @@ case "$MODE" in
         check_load_ok
         ;;
 
+    commit-state)
+        list_committed_images
+        read -ra _target_vms <<< "$(vms_for_engine)"
+        for vm in "${_target_vms[@]}"; do
+            commit_state "$vm" "$SNAP_TAG"
+        done
+        list_committed_images
+        ;;
+
+    restore-image)
+        list_committed_images
+        read -ra _target_vms <<< "$(vms_for_engine)"
+        for vm in "${_target_vms[@]}"; do
+            restore_image "$vm" "$SNAP_TAG"
+        done
+        check_load_ok
+        ;;
+
+    setup)
+        setup_all
+        exit 0
+        ;;
+
+    ensure-registry)
+        ensure_registry
+        list_registry_images
+        exit 0
+        ;;
+
+    seed-registry)
+        # Pull base image on host, push to local registry, remove host copy.
+        # Use for engines whose image isn't already inside a running VM
+        # (e.g. oracle before first provision, or after limactl delete).
+        ensure_registry
+        read -ra _target_vms <<< "$(vms_for_engine)"
+        for vm in "${_target_vms[@]}"; do
+            seed_registry "$vm"
+        done
+        list_registry_images
+        ;;
+
+    push-images)
+        # Push all Podman images from the VM to the local registry so they
+        # survive limactl delete.  Run once after first healthy provision and
+        # again after commit-state (commit-state pushes automatically).
+        ensure_registry
+        read -ra _target_vms <<< "$(vms_for_engine)"
+        for vm in "${_target_vms[@]}"; do
+            push_to_registry "$vm"
+        done
+        list_registry_images
+        ;;
+
+    list-images)
+        list_registry_images
+        exit 0
+        ;;
+
     list-snaps)
         list_snaps
+        list_committed_images
+        list_registry_images
         exit 0
         ;;
 
     *)
-        echo "Unknown mode: $MODE (use isolate, clean, snap, restore, nuke, wait, list-snaps)" >&2
+        echo "Unknown mode: $MODE (use setup, isolate, clean, snap, restore, commit-state, restore-image, seed-registry, push-images, ensure-registry, nuke, wait, list-snaps, list-images)" >&2
         exit 1
         ;;
 esac

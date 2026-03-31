@@ -1,0 +1,246 @@
+# Dev Environment & CI Plan: Cross-Platform Database Setup
+
+**Status:** In progress
+
+Database setup differs between arm64 macOS (Lima VMs for x86\_64-only engines) and
+x86\_64 Linux (Podman only, no Lima). The test code is identical on both platforms —
+all connections read from environment variables. This plan adds structured setup
+scripts, a live-database CI job, and a path for arm64 macOS developers to test the
+x86\_64 Linux setup locally.
+
+---
+
+## Architecture
+
+```
+scripts/
+├── db-up.sh               ← entry point: detects arch + OS, delegates
+├── db-up-x86_64.sh        ← x86_64 (Linux + Intel macOS): all DBs in Podman
+├── db-up-arm64-macos.sh   ← arm64 macOS: Lima for x86_64 DBs + Podman for rest
+├── _db-common.sh          ← shared Podman databases (PG, MySQL, CockroachDB)
+├── db-down.sh             ← stop all containers and VMs (platform-aware)
+└── test-on-linux.sh       ← arm64 macOS: runs Linux setup inside Lima devbox
+
+.github/workflows/
+├── ci.yml                 ← existing: offline tests, every push (unchanged)
+└── ci-live.yml            ← new: live DB tests, calls db-up-x86_64.sh
+```
+
+### Why the split is architecture, not OS
+
+Lima is only needed on arm64 macOS because SQL Server, Oracle XE, and IBM DB2 CE
+have no ARM64 container images. On x86\_64 (Linux or Intel macOS), all three run
+directly in Podman.
+
+| Platform | arch | Lima needed | Script used |
+|---|---|---|---|
+| Apple Silicon macOS | arm64 | Yes | `db-up-arm64-macos.sh` |
+| Intel macOS | x86\_64 | No | `db-up-x86_64.sh` |
+| Linux (any distro) | x86\_64 | No | `db-up-x86_64.sh` |
+| GitHub Actions (`ubuntu-latest`) | x86\_64 | No | `db-up-x86_64.sh` |
+
+### No-duplication map
+
+```
+_db-common.sh           ← written once; sourced by both platform scripts
+db-up-x86_64.sh         ← used by: Linux devs, Intel Mac devs, GitHub Actions,
+                           and test-on-linux.sh (arm64 Mac → Linux validation)
+db-up-arm64-macos.sh    ← used by: Apple Silicon Mac devs only
+ci-live.yml             ← calls db-up-x86_64.sh directly; no duplicated commands
+conftest.py             ← env-var driven already; untouched
+```
+
+---
+
+## Database mapping
+
+### Shared Podman databases (`_db-common.sh`)
+
+Native ARM64 images available — identical setup on all platforms.
+
+| Container | Image | Port | Notes |
+|---|---|---|---|
+| `pg18` | `postgres:18` | 5418 | |
+| `mysql8` | `mysql:8` | 3384 | |
+| `crdb-single` | `cockroachdb/cockroach:latest` | 26257 | `--memory=2g` required |
+
+### x86\_64-only databases
+
+No ARM64 images. On x86\_64, run directly in Podman. On arm64 macOS, run via Lima.
+
+| Engine | x86\_64 Podman image | arm64 macOS (Lima VM) | Port |
+|---|---|---|---|
+| SQL Server 2022 | `mcr.microsoft.com/mssql/server:2022-latest` | `sqlserver22` Lima VM | 14330 |
+| Oracle XE 21c | `gvenzl/oracle-xe:21-slim` | `oracle` Lima VM | 1521 |
+| IBM DB2 CE 11.5 | `icr.io/db2_community/db2` | `db2` Lima VM | 50000 |
+
+---
+
+## Tasks
+
+### Task 1 — `scripts/_db-common.sh`
+
+Shared Podman startup for Postgres 18, MySQL 8, CockroachDB single-node. Sourced
+(not executed directly) by both `db-up-x86_64.sh` and `db-up-arm64-macos.sh`.
+
+Defines functions: `start_postgres`, `start_mysql`, `start_crdb`.
+Writes shared env vars to stdout (to be appended to `.env.local`).
+
+**Status:** Not started
+
+---
+
+### Task 2 — `scripts/db-up-x86_64.sh`
+
+Sources `_db-common.sh`, then starts SQL Server, Oracle XE, and DB2 CE directly
+in Podman. Writes a `.env.local` file with all connection variables matching
+`.env.example` names.
+
+This script is the single source of truth for the x86\_64 database setup. GitHub
+Actions calls it directly.
+
+Staging directory for file-based bulk loaders (DB2, Oracle):
+
+```
+STATSCHEMA_CLIENT_STAGING_DIR=/tmp/statschema
+STATSCHEMA_SERVER_STAGING_DIR=/tmp/statschema
+```
+
+Both sides use the same path because the DB server process runs on the same host
+(same container network or localhost port mapping).
+
+#### Image source by environment
+
+`db-up-x86_64.sh` is called in two different contexts with different image sources:
+
+| Caller | Image source for SQL Server / Oracle / DB2 |
+|---|---|
+| GitHub Actions (`ubuntu-latest`) | Public registries (mcr.microsoft.com, docker.io, icr.io) — no local registry |
+| Lima devbox (`test-on-linux.sh`) | `host.lima.internal:5000` — local registry seeded by `bench_baseline.sh` |
+
+The script detects which source is available. If `host.lima.internal:5000` is
+reachable it pulls from there; otherwise it falls back to the public registry.
+This keeps the script usable in both contexts without separate scripts.
+
+**Status:** Not started
+
+---
+
+### Task 3 — `.github/workflows/ci-live.yml`
+
+New workflow alongside the existing `ci.yml`. Calls `db-up-x86_64.sh`, waits for
+databases to be ready, runs `pytest tests/ -k "live"`.
+
+Triggers:
+- Pull request to `main`
+- Nightly schedule (`0 2 * * *` UTC)
+
+`ci.yml` (offline tests, every push) is unchanged.
+
+**Status:** Not started
+
+---
+
+### Task 4 — `scripts/db-up-arm64-macos.sh` + `scripts/db-up.sh`
+
+`db-up-arm64-macos.sh`: sources `_db-common.sh`, then starts the three Lima VMs
+(`sqlserver22`, `oracle`, `db2`) and the database services inside them.
+
+`db-up.sh`: single entry point for all developers. Detects `uname -m` and
+`uname -s`, delegates to the appropriate script:
+
+```bash
+arch=$(uname -m)
+os=$(uname -s)
+
+if [[ "$os" == "Darwin" && "$arch" == "arm64" ]]; then
+    exec "$(dirname "$0")/db-up-arm64-macos.sh" "$@"
+else
+    exec "$(dirname "$0")/db-up-x86_64.sh" "$@"
+fi
+```
+
+**Status:** Not started
+
+---
+
+### Task 5 — `scripts/db-down.sh`
+
+Stops and removes Podman containers on all platforms. On arm64 macOS, also stops
+Lima VMs. Platform detection uses the same `uname -m` + `uname -s` pattern as
+`db-up.sh`.
+
+**Status:** Not started
+
+---
+
+### Task 6 — `scripts/test-on-linux.sh`
+
+arm64 macOS developers use this to validate the x86\_64 Linux path without leaving
+macOS.
+
+Creates a Lima Ubuntu devbox VM (not a database VM), mounts the workspace via
+Lima virtfs, runs `db-up-x86_64.sh` inside the VM, then runs the live test suite.
+
+```
+[arm64 macOS host]
+  └── Lima devbox VM (x86_64 Ubuntu)
+        ├── workspace mounted at /workspace
+        ├── Podman: pg18, mysql8, crdb-single
+        ├── Podman: sqlserver, oracle, db2   ← pulled from local registry (see below)
+        └── pytest tests/ -k "live"
+```
+
+All databases are native x86\_64 inside the VM. No Lima nesting, no emulation of
+emulation.
+
+#### Local registry integration
+
+The existing local registry on the macOS host (port 5000, managed by
+`bench_baseline.sh`) already holds the x86\_64-only images. The devbox VM
+configures `host.lima.internal:5000` as an insecure registry — the same mechanism
+used by the sqlserver22, oracle, and db2 Lima VMs. `db-up-x86_64.sh` inside the
+devbox pulls from there instead of the public internet.
+
+Flow:
+```
+macOS host (already done by bench_baseline.sh --mode=seed-registry):
+  localhost:5000/mssql/server:2022-latest      ← seeded once
+  localhost:5000/gvenzl/oracle-xe:21-slim      ← seeded once
+  localhost:5000/db2_community/db2:latest      ← seeded once
+
+Lima devbox VM (db-up-x86_64.sh):
+  podman pull host.lima.internal:5000/mssql/server:2022-latest   ← fast, local
+  podman pull host.lima.internal:5000/gvenzl/oracle-xe:21-slim   ← fast, local
+  podman pull host.lima.internal:5000/db2_community/db2:latest   ← fast, local
+```
+
+`bench_baseline.sh --mode=ensure-registry` is a prerequisite before running
+`test-on-linux.sh`.
+
+**Status:** Not started
+
+---
+
+## CI trigger strategy
+
+| Workflow | Trigger | Duration | Purpose |
+|---|---|---|---|
+| `ci.yml` | Every push to `main`/`dev`, every PR | ~2 min | Offline unit tests, import checks |
+| `ci-live.yml` | PR to `main` + nightly 02:00 UTC | ~15–20 min | Live database integration tests |
+
+---
+
+## Environment variables
+
+All tests read from environment variables. `.env.example` is the authoritative
+list. Setup scripts write `.env.local` (git-ignored) with the same variable names.
+
+Developers load `.env.local` before running tests:
+```bash
+set -a && source .env.local && set +a
+pytest tests/ -k "live"
+```
+
+GitHub Actions sets the same variables via the workflow `env:` block, populated
+from the output of `db-up-x86_64.sh`.

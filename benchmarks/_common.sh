@@ -120,8 +120,7 @@ start_sqlserver() {
     fi
     info "Starting sqlserver22 Lima VM…"
     limactl start sqlserver22 2>&1 | grep -v '^$' || true
-    # mssql-server does not auto-start on VM boot — start it explicitly.
-    limactl shell sqlserver22 -- sudo systemctl start mssql-server 2>/dev/null || true
+    # container-sqlserver22.service auto-starts the container on VM boot.
     wait_port 127.0.0.1 "$port" "SQL Server" 90
     wait_db sqlserver "SQL Server" 120
 }
@@ -268,22 +267,9 @@ dsn_oracle()      { "$VENV" benchmarks/bench_config.py dsn oracle;      }
 dsn_db2()         { "$VENV" benchmarks/bench_config.py dsn db2;         }
 
 dsn_sqlserver() {
-    # Prefer the persistent password file written by the provision script.
-    # Falls back to the cloud-init output log (legacy VMs without sentinel).
-    if [[ -z "${SQLSERVER_PASS:-}" ]]; then
-        local pass
-        # New VMs: password persisted at /var/opt/mssql/.sa_password
-        pass=$(limactl shell sqlserver22 -- \
-                   sudo cat /var/opt/mssql/.sa_password 2>/dev/null || true)
-        # Legacy fallback: read from cloud-init output log
-        if [[ -z "$pass" ]]; then
-            pass=$(limactl shell sqlserver22 -- \
-                       sudo grep "SQL Server sa password is" /var/log/cloud-init-output.log 2>/dev/null \
-                   | tail -1 | awk '{print $NF}' || true)
-        fi
-        [[ -n "$pass" ]] || die "SQL Server password unknown.  Set SQLSERVER_PASS in .env or start the sqlserver22 Lima VM."
-        export SQLSERVER_PASS="$pass"
-    fi
+    # SA password is fixed at provisioning time (Option D: Podman container).
+    # Override with SQLSERVER_PASS env var if needed (e.g. legacy bare-apt VM).
+    export SQLSERVER_PASS="${SQLSERVER_PASS:-Bench1pass!}"
     "$VENV" benchmarks/bench_config.py dsn sqlserver
 }
 
@@ -297,22 +283,9 @@ export_bench_sqlserver_dsn() {
         info "BENCH_SQLSERVER_DSN already set"
         return
     fi
-    local pass="${SQLSERVER_PASS:-}"
-    if [[ -z "$pass" ]]; then
-        pass=$(limactl shell sqlserver22 -- \
-                   sudo cat /var/opt/mssql/.sa_password 2>/dev/null || true)
-    fi
-    if [[ -z "$pass" ]]; then
-        pass=$(limactl shell sqlserver22 -- \
-                   sudo grep "SQL Server sa password is" /var/log/cloud-init-output.log 2>/dev/null \
-               | tail -1 | awk '{print $NF}' || true)
-    fi
-    if [[ -n "$pass" ]]; then
-        export BENCH_SQLSERVER_DSN="SERVER=127.0.0.1,${SQLSERVER_PORT:-14330};DATABASE=master;UID=sa;PWD=${pass}"
-        info "SQL Server DSN resolved (port ${SQLSERVER_PORT:-14330})"
-    else
-        warn "SQL Server password unknown — SQL Server targets will be skipped by Python bench scripts"
-    fi
+    local pass="${SQLSERVER_PASS:-Bench1pass!}"
+    export BENCH_SQLSERVER_DSN="SERVER=127.0.0.1,${SQLSERVER_PORT:-14330};DATABASE=master;UID=sa;PWD=${pass}"
+    info "SQL Server DSN resolved (port ${SQLSERVER_PORT:-14330})"
 }
 
 # run_check_run OUT_FILE LOG_FILE DIALECT DSN [TARGET_DIALECT [TARGET_DSN]]

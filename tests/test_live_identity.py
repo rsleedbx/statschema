@@ -268,7 +268,7 @@ def test_tpcb_identity_quick(pg16_conn):
 
     source_rc = load_source(conn, "tpcb", 0.1, "tpcb_src_test", "postgres", seed=42)
     stats     = collect_stats(conn, ordered, "tpcb_src_test", "postgres")
-    target_rc = build_target(
+    target_rc, _ = build_target(
         conn, ordered, stats, "tpcb_tgt_test", "postgres", sf=0.1, seed=99
     )
 

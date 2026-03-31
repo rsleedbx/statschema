@@ -265,8 +265,9 @@ def _run_one_identity(
         cmd += ["--phases", phases_str]
 
     env = {**os.environ, **(extra_env or {})}
-    if engine == "db2":
-        env.setdefault("DB2_CONTAINER_NAME", os.environ.get("DB2_CONTAINER_NAME", ""))
+    for var in ("STATSCHEMA_SERVER_STAGING_DIR", "STATSCHEMA_CLIENT_STAGING_DIR"):
+        if os.environ.get(var):
+            env.setdefault(var, os.environ[var])
 
     t0 = time.monotonic()
     proc = subprocess.run(

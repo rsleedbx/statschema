@@ -35,13 +35,20 @@ macOS host (Apple Silicon)
 
 ---
 
+## Options (A → D → C → B, decreasing VM count)
+
+Options are ordered from least change (A) to most consolidated (B).
+The recommended migration path is A → D → C.
+
+---
+
 ## Option A — Status Quo (keep three separate VMs)
 
 No changes.
 
 **Pros**
 - Blast radius is isolated: a DB2 STMM runaway or SQL Server OOM cannot kill Oracle or SQL Server.
-- Independent APFS snapshots (`state0`, `state1`, `state2`) per engine — restore one without touching others.
+- Independent per-engine VM disks — APFS safety snap and `podman commit` state images are isolated per engine.
 - Different Ubuntu versions per engine (SQL Server needs Ubuntu 20.04; DB2/Oracle prefer 22.04).
 - VM-level resource caps (`memory:`, `cpus:`) are per-engine and easy to tune independently.
 - `limactl stop --force sqlserver22` in 65 ms — stops only the engine under test, leaves others warm.
@@ -54,7 +61,7 @@ No changes.
 
 ---
 
-## Option B — Single shared Lima VM (all three as Podman containers)
+## Option B — Single shared Lima VM (all three as Podman containers, 1 VM)
 
 Collapse SQL Server, DB2, and Oracle into one Lima VM.  SQL Server would become
 a container (`mcr.microsoft.com/mssql/server:2022-latest`) instead of a bare apt install.
@@ -84,22 +91,16 @@ macOS host (Apple Silicon)
   - SQL Server buffer pool grows to fill available RAM unless `memorylimitmb` is set.
   - Oracle SGA is hard-capped at 2 GB by XE edition, but PGA is not.
   Memory cap config works per-container but requires careful per-container tuning.
-- APFS snapshots capture the entire VM disk — one snapshot includes all three databases.
-  Restoring SQL Server to `state0` also resets DB2 and Oracle.  The per-engine
-  snapshot isolation that makes bench runs reproducible is lost.
-- SQL Server `mcr.microsoft.com/mssql/server` container requires the same `--privileged`
-  or specific capabilities as DB2, making the compose stack heavier.
-- The SA password for SQL Server is generated at first container start, not first VM boot.
-  The `bench_baseline.sh` password-retrieval logic (reads from cloud-init log or
-  `/var/opt/mssql/.sa_password`) must be adapted for the container case.
-- Ubuntu 20.04 requirement for the SQL Server apt repo is no longer relevant with the
-  container image (which bundles its own glibc), but this is also a non-issue once
-  moving to containers.
+- APFS safety snap covers the entire VM — restoring the VM resets all three databases.
+  With `podman commit` as primary state management this matters less, but it means the
+  VM-level safety net is not per-engine.
+- SQL Server `mcr.microsoft.com/mssql/server` does not require `--privileged` (unlike DB2),
+  but SA password handling and sqlcmd access change from the bare-apt pattern.
 - Single VM = single QEMU failure kills all three engines simultaneously.
 
 ---
 
-## Option D — Three VMs, all Lima + Podman (uniform stack)
+## Option D — Three VMs, all Lima + Podman (uniform stack, 3 VMs)
 
 Containerise SQL Server exactly as DB2 and Oracle already are — `mcr.microsoft.com/mssql/server:2022-latest`
 inside its own Lima VM — while keeping each engine in its own VM for independent snapshots.
@@ -176,16 +177,17 @@ digit + symbol), so the fixed password must satisfy them: e.g. `Bench1pass!`.
 
 ---
 
-## Option C — Two VMs (SQL Server alone; DB2 + Oracle consolidated)
+## Option C — Two VMs (SQL Server alone; DB2 + Oracle consolidated, 2 VMs)
 
-DB2 and Oracle are already both Lima + Podman containers running Ubuntu 22.04.
-Merge them into one VM, keep SQL Server alone.
+In the recommended migration path Option C follows Option D, so SQL Server is already
+a Podman container on Ubuntu 22.04.  This step merges DB2 and Oracle into one VM.
 
 ```
 macOS host (Apple Silicon)
 │
-├── Lima VM: sqlserver22   (x86_64 Ubuntu 20.04, 4 CPU / 8 GB)   ← unchanged
-│   └── mssql-server (bare apt install)
+├── Lima VM: sqlserver22   (x86_64 Ubuntu 22.04, 4 CPU / 8 GB)   ← from Option D
+│   └── Podman container: sqlserver22  (mcr.microsoft.com/mssql/server:2022-latest)
+│       /tmp/lima ←────────── writable shared mount (host ↔ VM ↔ container)
 │
 └── Lima VM: xdb           (x86_64 Ubuntu 22.04, 4 CPU / 12 GB)
     ├── Podman container: db2ce       (icr.io/db2_community/db2)
@@ -196,28 +198,22 @@ macOS host (Apple Silicon)
 **Pros**
 - Reduces QEMU overhead from 3 VMs to 2.
 - DB2 and Oracle share the same Ubuntu 22.04 base, same Podman version — no divergence.
-- APFS snapshots still isolate SQL Server from DB2+Oracle.  DB2 and Oracle share snapshots,
-  which is acceptable because their test data is independent and the combined disk is smaller
-  than separate 40 GB + 100 GB images.
-- `/tmp/lima` shared mount into both containers immediately available (see §File Staging).
-- SQL Server stays bare-metal in its VM — the current `BULK INSERT` path continues to work
-  with the host-path `/tmp/lima` already mounted into the VM.
-- No changes to `bench_baseline.sh`, `_common.sh`, or the SA password retrieval logic.
-- Preserves the Ubuntu 20.04 VM for SQL Server if that proves necessary (SQL Server 2022
-  container image is Ubuntu 22.04-based internally, so the apt-install path still works
-  on Ubuntu 20.04).
+- SQL Server VM-level safety snap and `podman commit` images remain independent from DB2+Oracle.
+- `/tmp/lima` shared mount into all containers already in place from Option D.
+- `bench_baseline.sh`, `_common.sh`, and `dsn_sqlserver()` already updated in Option D — no further changes needed here.
 
 **Cons**
 - DB2 and Oracle share RAM in one VM: a DB2 STMM spike can starve Oracle.
   Mitigation: `--memory` Podman flags per-container (works reliably for OOM protection).
-- Snapshots for DB2 and Oracle are not independent — restoring one resets the other.
-  In practice this is fine because `bench_baseline.sh` already restores both to the
-  same `state1` before a full matrix run.
+- `podman commit` images for DB2 and Oracle remain independent (per-container), but
+  the VM-level APFS safety snap covers both — restoring the VM resets both containers.
+  In practice this is fine because `bench_baseline.sh` restores from committed images,
+  not from the VM-level snap.
 - Still requires two separate `limactl start` calls.
 
 ---
 
-## File Staging Simplification (applies to Options B and C)
+## File Staging Simplification (applies to Options B, C, and D)
 
 ### Current DB2 staging path (3 hops)
 
@@ -253,18 +249,19 @@ fd, host_path = tempfile.mkstemp(
 admin_cmd_path = host_path    # no copy step needed
 ```
 
-The `_db2_container_copy()` function and `DB2_CONTAINER_NAME` env var become
-unnecessary for the Lima topology.  A new topology value `lima_shared` (or simply
-checking that `staging_dir` points into `/tmp/lima`) would select this fast path
-in `DeploymentContext`.
+The `_db2_container_copy()` function and container-copy path have been removed.
+`topology="shared_fs"` is selected when `STATSCHEMA_SERVER_STAGING_DIR` is set.
+For the Lima dev setup both sides see `/tmp/lima/statschema` via virtfs, so no
+path translation is needed (`client_staging_dir == server_staging_dir`).
 
-### SQL Server staging (already works via shared mount)
+### SQL Server staging
 
-SQL Server `BULK INSERT` reads a file path relative to the **server** filesystem.
-Since `/tmp/lima` is mounted into the Lima VM (but SQL Server is a bare apt install,
-not a container), writing to `/tmp/lima` on the host already makes the file visible
-inside the VM at `/tmp/lima`.  No further mount is needed.  Option C preserves this
-without change.
+In the current bare-apt setup (Option A), `/tmp/lima` is already mounted into the VM,
+so `BULK INSERT` can read files written by the host with no extra steps.
+
+After Option D (SQL Server containerised), the container needs `-v /tmp/lima:/tmp/lima`
+exactly as DB2 and Oracle do — this is item 1 in the concrete changes list and is
+handled identically to the DB2 case above.
 
 ### Oracle staging (not currently needed)
 
@@ -518,75 +515,182 @@ affect the VM boundary.  Option C is still a reasonable second step once D is in
 
 ## Recommendation
 
-**Option D + `podman commit` state management**, then Option C:
+Two valid Phase 1 paths exist depending on whether macOS-only tooling is acceptable.
 
-### Phase 1 — Uniform stack (Option D) + cross-platform state workflow
+---
 
-Containerise SQL Server inside its own Lima VM, matching DB2 and Oracle exactly.
-Simultaneously adopt `podman commit` as the primary state0/state1/state2 mechanism
-for all engines — QEMU-hosted and native Podman alike.
+### Local registry
 
-**One-time APFS safety snapshot per VM (macOS only)**
+A `registry:2` Podman container runs on the macOS host at `localhost:5000`, backed by a
+named Podman volume (`local-registry-data`) that persists across host reboots.  Lima VMs
+reach it via `host.lima.internal:5000`.
 
-After provisioning each Lima VM with its empty containers running and confirmed
-healthy, take a single APFS snapshot as a VM-level safety net:
+**Data flow (seed-registry path):**
+
+```
+internet (mcr.microsoft.com / icr.io / docker.io)
+    │  podman pull  (on macOS host)
+    ▼
+host Podman store  (gvenzl/oracle-xe:21-slim, etc.)
+    │  podman push --tls-verify=false localhost:5000/...
+    ▼
+local-registry container  (localhost:5000, volume: local-registry-data)
+    │  host.lima.internal:5000  (Lima VM's provision script)
+    ▼
+Lima VM Podman store  →  running container
+```
+
+Each Lima VM's provision script pulls exclusively from `host.lima.internal:5000`.  If the
+image is not in the registry the provision script exits with an error and instructs the user
+to run `seed-registry` first.  There is no fallback to the upstream registry — a missing
+image is always a signal that the registry was not seeded, not a reason to pull 3 GB from
+the internet silently.  A `limactl delete` + `limactl start` therefore pulls from localhost
+(DB2 ≈ 3 GB, SQL Server ≈ 1.5 GB, Oracle ≈ 800 MB) as long as the registry is warm.
+
+`commit-state` pushes the committed image to the local registry automatically, so state
+images (`statschema/<engine>:state0/1/2`) also survive VM deletion.
+
+**Two ways to seed the registry:**
+
+| Mode | When to use |
+|---|---|
+| `seed-registry --engine=<vm>` | Before first provision, or after `limactl delete` with no VM running.  Pulls base image from internet onto the host, pushes to local registry, keeps host copy for fast re-seeding. |
+| `push-images --engine=<vm>` | After first provision when a VM is already running.  Pushes images directly from the VM to the registry (skips the host Podman store). |
 
 ```bash
-limactl stop sqlserver22 && limactl stop db2 && limactl stop oracle
-
-cp -c ~/.lima/sqlserver22/diffdisk  ~/.lima/sqlserver22/diffdisk.snap-empty
-cp -c ~/.lima/db2/diffdisk          ~/.lima/db2/diffdisk.snap-empty
-cp -c ~/.lima/oracle/diffdisk       ~/.lima/oracle/diffdisk.snap-empty
-
-limactl start sqlserver22 && limactl start db2 && limactl start oracle
+bench_baseline.sh --mode=ensure-registry   # start registry if not running
+bench_baseline.sh --mode=list-images       # show registry contents
+curl -sf http://localhost:5000/v2/_catalog # direct registry API
 ```
 
-This `empty` snapshot is taken **once** and rarely touched.  Its purpose is VM-level
-recovery: if Lima, QEMU, or the Podman daemon itself becomes corrupt, restore the
-`empty` diffdisk and re-run `podman run` from the committed images rather than
-reprovisioning from scratch (which takes 20-30 min for DB2).
+---
 
-**State0/state1/state2 via `podman commit` (all platforms)**
+### Phase 1-A — Uniform stack + `podman commit` + APFS safety net (macOS)
 
-All state transitions are managed at the container layer, not the VM layer:
+Containerise SQL Server to match DB2 and Oracle.  Use `podman commit` for all
+state0/state1/state2 transitions.  Take one APFS snapshot per VM after initial
+provisioning as a VM-level safety net — taken once, rarely touched.
 
 ```
-After provisioning (containers empty, no test data):
-  → podman commit  →  statschema/sqlserver22:state0
-  → podman commit  →  statschema/db2ce:state0
-  → podman commit  →  statschema/oracle-xe:state0
-  → podman commit  →  statschema/pg18:state0        ← first time PG has state mgmt
-  → podman commit  →  statschema/mysql8:state0       ← first time MySQL has state mgmt
+Provisioning (one-time, macOS):
+  bench_baseline.sh --mode=ensure-registry              ← start localhost:5000 if not running
+  bench_baseline.sh --mode=seed-registry --engine=all  ← pull base images on host, push to registry
+  limactl start all VMs  → provision pulls from host.lima.internal:5000, not the internet
+  limactl stop all VMs
+  cp -c diffdisk  diffdisk.snap-empty   ← VM safety net (3 VMs, <1s each)
+  limactl start all VMs
 
-After identity test data loaded (clean DB stop before commit):
-  → podman commit  →  statschema/*:state1
+State management (daily, all platforms via podman commit):
+  stop DB cleanly inside container → podman commit → statschema/<engine>:state0/1/2
+  (commit-state auto-pushes committed image to local registry)
+  restore: podman rm -f <ctr>  +  podman run statschema/<engine>:state1
 
-After app schemas loaded (clean DB stop before commit):
-  → podman commit  →  statschema/*:state2
+VM recovery (macOS, if Lima/QEMU/Podman itself is corrupt):
+  cp -c diffdisk.snap-empty  diffdisk  → limactl start
+  (provision script pulls base image from registry — no internet pull)
+  podman run statschema/<engine>:state0  ← start from last committed state image
 
-Restore to state1 (VM stays running, ~1-2 min vs ~4-5 min APFS + boot):
-  podman rm -f db2ce
-  podman run -d --name db2ce ... statschema/db2ce:state1
+VM rebuild from scratch (limactl delete + limactl start):
+  (provision script pulls from registry automatically; no manual load step)
+  bench_baseline.sh --mode=commit-state --tag=state0   ← rebuild state images if missing from registry
 ```
 
-This is faster than APFS restore for containerised engines because the VM never
-restarts.  It works identically on macOS, Linux, and WSL2.  MySQL and PostgreSQL
-get state management for the first time.
+The APFS `empty` snap is not part of the daily workflow — it exists so a corrupt VM
+can be reset in seconds rather than re-provisioned from scratch (20-30 min for DB2).
+All actual state cycling goes through `podman commit`.
 
-**Concrete changes for Phase 1:**
+**Concrete changes:**
 
-1. Update `config/lima/sqlserver22.yaml` — Ubuntu 22.04, `podman run mcr.microsoft.com/mssql/server:2022-latest` with `-v /tmp/lima:/tmp/lima`, fixed SA password, memory cap via env var.
-2. Add `-v /tmp/lima:/tmp/lima` to `db2ce` and `oracle-xe` in their YAMLs.
-3. Simplify `benchmarks/_common.sh` `dsn_sqlserver()` — fixed password, no cloud-init fallback.
-4. Update `bulk_load_db2()` to write staging files to `/tmp/lima/` directly.
-5. Add `bench_baseline.sh --mode=commit-state` and `--mode=restore-image` to replace the current `snap`/`restore` modes with `podman commit`/`podman rm + run` across all engines.
-6. Keep `--mode=snap` / `--mode=restore` for the one-time `empty` APFS snapshot and emergency VM recovery.
+1. `config/lima/sqlserver22.yaml` — Ubuntu 22.04, `podman run mcr.microsoft.com/mssql/server:2022-latest` with `-v /tmp/lima:/tmp/lima`, fixed SA password, memory cap via env var.
+2. Add insecure registry conf (`host.lima.internal:5000`) and local-pull-with-fallback block to all three Lima YAMLs (`sqlserver22.yaml`, `db2.yaml`, `oracle.yaml`).
+3. Add `-v /tmp/lima:/tmp/lima` to `db2ce` and `oracle-xe` in their YAMLs.
+4. Simplify `benchmarks/_common.sh` `dsn_sqlserver()` — fixed password, no cloud-init fallback.
+5. Update `bulk_load_db2()` to write staging files to `/tmp/lima/` directly.
+6. `benchmarks/bench_baseline.sh` — add `podman commit`-based state management and registry modes:
+   - `--mode=ensure-registry` — start `localhost:5000` Podman container if not running.
+   - `--mode=seed-registry --engine=<vm>` — pull base image on host, push to registry, keep host copy.
+   - `--mode=push-images --engine=<vm>` — push images from a running VM to registry.
+   - `--mode=commit-state --tag=state1` — stop DB cleanly, commit, push to registry, restart.
+   - `--mode=restore-image --tag=state1` — `podman rm -f + podman run` from committed image.
+7. Keep `--mode=snap --tag=empty` / `--mode=restore --tag=empty` for VM-level recovery only (macOS).
+
+---
+
+### Phase 1-B — Uniform stack + `podman commit` only (all platforms, no APFS)
+
+Identical to Phase 1-A except no APFS safety snapshot is taken.  Recovery from a
+corrupt VM means re-provisioning from the Lima YAML; the provision script pulls base
+images from the local registry (no internet pull), and state images are rebuilt by
+re-loading test data and committing.  On a machine without APFS this is the only
+recovery path.
+
+```
+Provisioning (one-time, any platform):
+  bench_baseline.sh --mode=ensure-registry              ← start localhost:5000 if not running
+  bench_baseline.sh --mode=seed-registry --engine=all  ← pull base images on host, push to registry
+  limactl start all VMs  → provision pulls from host.lima.internal:5000, not the internet
+  stop DB cleanly → podman commit → statschema/<engine>:state0
+  (commit-state auto-pushes state0 to local registry)
+
+State management (daily):
+  stop DB cleanly → podman commit → statschema/<engine>:state1/2
+  restore: podman rm -f <ctr>  +  podman run statschema/<engine>:state1
+
+VM recovery (VM disk destroyed — limactl delete + limactl start):
+  (provision script pulls from registry automatically — no manual step)
+  bench_baseline.sh --mode=commit-state --tag=state0   ← rebuild state images if missing from registry
+```
+
+**Bulk load staging is also solved by the same YAML changes.** The three-way path
+requires two mechanisms working together:
+
+1. **Lima `mounts:` entry** (`location: /tmp/lima, writable: true` in each Lima YAML) —
+   Lima uses virtfs/9p to expose the macOS host's `/tmp/lima` inside the Lima VM at
+   the same path.  This is the macOS → VM bridge.  Without this entry, `/tmp/lima`
+   inside the VM is the VM's own empty directory and macOS-written files never appear.
+2. **Podman `-v /tmp/lima:/tmp/lima`** — bind-mounts the Lima VM's `/tmp/lima` (which is
+   the macOS `/tmp/lima` via the Lima mount above) into the container.  This is the
+   VM → container bridge.
+
+Both entries are added together: the Lima `mounts:` block and the Podman `-v` flag are
+both part of items 1–4 in the concrete changes list.  Once both are in place, DB2
+`ADMIN_CMD LOAD`, SQL Server `BULK INSERT`, and any future Oracle `sqlldr` call can all
+read staging files written by the Python loader on the macOS host at `/tmp/lima/` —
+no `limactl copy`, no `podman cp`, no manual transfer.
+
+**9p read performance is not the bottleneck.**  Lima's 9p mount delivers 50–150 MB/s
+sequential reads.  SQL Server and DB2 running under QEMU x86_64 emulation on Apple
+Silicon are CPU-bound at 5–15× emulation overhead; their effective CSV-parse-and-ingest
+rate is roughly 10–40 MB/s — well below the 9p ceiling.  The file read sits in a kernel
+buffer waiting on the database, not the other way around.  9p would only become a
+bottleneck if it fell below ~10 MB/s, which does not occur for sequential reads of
+staging files in normal operation.
+
+**Concrete changes:** same items 1–5 from Phase 1-A; skip item 6 (no APFS commands).
+
+---
+
+### Choosing between 1-A and 1-B
+
+| | Phase 1-A (with APFS) | Phase 1-B (without APFS) |
+|---|---|---|
+| Platform | macOS only | macOS, Linux, WSL2 |
+| VM recovery time | Seconds (APFS restore + `podman run`) | ~20-30 min (re-provision + re-commit) |
+| Daily state restore | Same (`podman commit` + local registry) | Same (`podman commit` + local registry) |
+| Extra tooling | `cp -c` (built into macOS) | None |
+| Bulk load staging fix | Same (Lima `mounts:` + Podman `-v /tmp/lima:/tmp/lima`) | Same |
+
+Both paths use `podman commit` for state management and are equally fast for daily
+bench cycles.  The difference is VM-level recovery speed when something goes wrong.
+macOS developers should use 1-A; Linux/WSL developers use 1-B.
+
+---
 
 ### Phase 2 — VM consolidation (Option C, optional)
 
 Once Phase 1 is complete, consolidating DB2 and Oracle into a single VM (`xdb`) is a
-YAML edit.  All containers and their committed images transfer unchanged.  SQL Server
-stays in its own VM.
+YAML edit.  All containers and committed images transfer unchanged.  SQL Server stays
+in its own VM.
 
 **Option B** (single VM) only if a developer has ≤ 16 GiB RAM and cannot run three
 QEMU VMs simultaneously.
@@ -628,10 +732,13 @@ QEMU VMs simultaneously.
    - Default `staging_dir` to `/tmp/lima`; set `admin_cmd_path = host_path` (skip `_db2_container_copy()`).
    - Add `lima_shared` topology to `DeploymentContext`.
 
-6. **`benchmarks/bench_baseline.sh`** — add `podman commit`-based state management:
-   - `--mode=commit-state --tag=state1` — stop DB cleanly inside each container, commit, restart.
+6. **`benchmarks/bench_baseline.sh`** — state management and image caching:
+   - `--mode=commit-state --tag=state1` — stop DB cleanly, commit, push to local registry, restart.
    - `--mode=restore-image --tag=state1` — `podman rm -f + podman run` from committed image.
-   - `--mode=snap --tag=empty` — one-time APFS snapshot of empty provisioned VM (safety net).
+   - `--mode=ensure-registry` — start `localhost:5000` registry container if not running.
+   - `--mode=seed-registry --engine=<vm>` — pull base image on host, push to registry (use before first provision or after `limactl delete` when no VM is running).
+   - `--mode=push-images --engine=<vm>` — push all images from a running VM to the registry.
+   - `--mode=snap --tag=empty` — one-time APFS snapshot of empty provisioned VM (macOS only, safety net).
    - Keep existing `--mode=restore` for emergency VM-level recovery from `empty` APFS snap.
 
 7. **`docs/local-databases.md`** — update SQL Server row; document `podman commit` state workflow
@@ -649,7 +756,7 @@ QEMU VMs simultaneously.
 10. **`benchmarks/bench_baseline.sh`** — `--mode=snap --tag=empty` targets `xdb` for the combined VM.
 
 11. **Test**
-    - Provision from scratch; take `empty` APFS snap for each VM.
+    - Provision from scratch; on macOS (Phase 1-A), take `empty` APFS snap for each VM as a safety net.
     - Build state0/state1/state2 via `podman commit` for all six engines.
     - Run identity sweep; verify restore from committed image gives a clean run.
     - Verify DB2 staging file appears at `/tmp/lima/statschema_*.del` inside `db2ce` without `limactl copy`.

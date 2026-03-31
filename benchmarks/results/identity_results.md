@@ -911,7 +911,7 @@ The results above were produced against a native `cockroach start-single-node --
 | Schema namespace | `CREATE DATABASE` + `USE` | `CREATE DATABASE` + `USE` | `CREATE USER` + `ALTER SESSION SET CURRENT_SCHEMA` | `CREATE SCHEMA` + `SET SCHEMA` |
 | Data loading | `LOAD DATA LOCAL INFILE` | `mssql_python.bulkcopy()` | `oracledb.direct_path_load()` | `SYSPROC.ADMIN_CMD('LOAD FROM … OF DEL …')` |
 | `local_infile` server setting | must be ON (`SET GLOBAL local_infile = ON`) | — | — | — |
-| DB2 `ADMIN_CMD` prerequisite | — | — | — | set `DB2_CONTAINER_NAME` env var (see below) |
+| DB2 `ADMIN_CMD` prerequisite | — | — | — | set `STATSCHEMA_SERVER_STAGING_DIR` (see below) |
 
 **DB2 plan granularity.**  DB2's `SYSTOOLS.EXPLAIN_OPERATOR` returns one row per operator but the root node collapses the full plan into a single `RETURN` operator for simple queries.  The identity test extracts the root node's `TOTAL_COST` as the sole cardinality proxy, so node_jaccard is always 1.0 and within_2x measures only the root estimate.  For TPC-B and TPC-C this is sufficient (root estimate ≈ total output rows of the final sort/aggregate).
 
@@ -919,18 +919,20 @@ The results above were produced against a native `cockroach start-single-node --
 
 **SQL Server isolation.**  SQL Server schemas are implemented as full databases (not SQL schemas).  `_create_schema_sqlserver` drops and recreates the database; `_set_namespace_sqlserver` issues `USE [db_name]`.  Tables are created in `dbo` inside that database.
 
-**DB2 bulk loading.**  `SYSPROC.ADMIN_CMD('LOAD FROM … OF DEL …')` requires the staging CSV to be visible to the Db2 server process.  When Db2 runs inside a container (e.g. in a Lima VM), set `DB2_CONTAINER_NAME` to the container path before running the identity test:
+**DB2 bulk loading.**  `SYSPROC.ADMIN_CMD('LOAD FROM … OF DEL …')` requires the staging CSV to be visible to the Db2 server process via a shared filesystem.  Mount a path accessible to both statschema and the DB2 server (NFS, bind-mount, or Lima virtfs), then set:
 
 ```bash
-# Lima VM with inner Podman container — the typical statschema test topology
-export DB2_CONTAINER_NAME=lima:db2:db2ce
+# Lima dev setup — both sides see the same path via virtfs bind-mount
+export STATSCHEMA_SERVER_STAGING_DIR=/tmp/lima/statschema
+export STATSCHEMA_CLIENT_STAGING_DIR=/tmp/lima/statschema
 python benchmarks/identity_test.py --schema tpcdi --sf 1 --dialect db2 …
 
-# Direct Podman container on the host
-export DB2_CONTAINER_NAME=db2ce
+# NFS example (different mount points on statschema host vs. DB server)
+# export STATSCHEMA_CLIENT_STAGING_DIR=/mnt/nfs/statschema
+# export STATSCHEMA_SERVER_STAGING_DIR=/data/shared/statschema
 ```
 
-`data_loader.bulk_load_db2` copies the staging file into the target using `limactl copy` + `podman cp` (Lima topology) or `podman/docker cp` (direct), then calls `ADMIN_CMD` with the container-side path.
+`data_loader.bulk_load_db2` writes a DEL file to `STATSCHEMA_CLIENT_STAGING_DIR` and calls `ADMIN_CMD` with the translated `STATSCHEMA_SERVER_STAGING_DIR` path.
 
 **SQL Server TPC-DI.**  TPC-DI on SQL Server previously scored `within_2x = 0.44` when `bigint` and `smallint` canonical types were mapped to `NVARCHAR(MAX)` in the DDL emitter (both were missing from `DEFAULTS`).  After adding explicit `bigint → BIGINT` and `smallint → SMALLINT` mappings in all six dialect emitters and normalising those types in the data generators, SQL Server TPC-DI now scores `node_jaccard = 0.933`, `within_2x = 0.938` — a passing result.
 
@@ -1060,7 +1062,7 @@ SQL Server loading is slow because BULK INSERT requires server-side file access 
 | Oracle     | 1   | 599 K |      47 s |     0.5 s |      3 s |       46 s |    0.3 s |
 | DB2        | 1   | 599 K |     773 s |     0.23 s |     0.2 s |      554 s |    0.2 s |
 
-DB2 bulk loading uses `SYSPROC.ADMIN_CMD` with `DB2_CONTAINER_NAME=lima:db2:db2ce`.  Without the env var, loading falls back to parameterised MULTI_ROW inserts (~2 rows/ms for wide TPC-C tables).
+DB2 bulk loading uses `SYSPROC.ADMIN_CMD` with a shared filesystem staging directory (`STATSCHEMA_SERVER_STAGING_DIR`).  Without the env var, loading falls back to parameterised MULTI_ROW inserts (~2 rows/ms for wide TPC-C tables).
 
 ### Phase timings — TPC-H SF=0.01
 
@@ -1112,8 +1114,9 @@ DB2_DSN="DATABASE=TESTDB;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2ins
 # MySQL 8: enable local_infile before first run
 python3 -c "import pymysql; c=pymysql.connect(host='127.0.0.1',port=3384,user='root',password='testpass'); c.cursor().execute('SET GLOBAL local_infile = ON')"
 
-# DB2: tell the loader where the container lives so ADMIN_CMD can see staging files
-export DB2_CONTAINER_NAME=lima:db2:db2ce
+# DB2: shared filesystem staging — both sides see the same path via Lima virtfs
+export STATSCHEMA_SERVER_STAGING_DIR=/tmp/lima/statschema
+export STATSCHEMA_CLIENT_STAGING_DIR=/tmp/lima/statschema
 
 for SCHEMA in tpcb tpcc; do
     python benchmarks/identity_test.py --schema $SCHEMA --sf 1 --dialect mysql    --dsn "$MYSQL_DSN" --no-extended-stats

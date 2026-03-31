@@ -358,14 +358,14 @@ class TestLoadDataframe:
         assert n == 6
         assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 6
 
-    def test_bulk_copy_falls_back_for_sqlite(self):
-        """BULK_COPY is not implemented for sqlite — falls back to MULTI_ROW."""
+    def test_bulk_copy_raises_for_unsupported_dialect(self):
+        """BULK_COPY with no registered loader raises RuntimeError — no silent fallback."""
         conn = _conn()
-        n = load_dataframe(
-            _rows(3), conn, "t", "sqlite",
-            strategy=LoadStrategy.BULK_COPY, cols=COLS,
-        )
-        assert n == 3
+        with pytest.raises(RuntimeError, match="BULK_COPY not implemented for dialect='sqlite'"):
+            load_dataframe(
+                _rows(3), conn, "t", "sqlite",
+                strategy=LoadStrategy.BULK_COPY, cols=COLS,
+            )
 
     def test_commit_false_does_not_autocommit(self):
         conn = _conn()
@@ -379,11 +379,15 @@ class TestLoadDataframe:
         with pytest.raises((ValueError, AttributeError)):
             load_dataframe(_rows(2), conn, "t", "sqlite", strategy="bad_strategy", cols=COLS)
 
-    def test_databricks_raises_not_implemented(self):
-        """Databricks uses df.write.saveAsTable(), not a DBAPI2 loader."""
+    def test_databricks_no_spark_raises_runtime_error(self):
+        """Databricks BULK_COPY dispatch fails with RuntimeError when no Spark session is set."""
         conn = _conn()
-        with pytest.raises(NotImplementedError, match="df.write.saveAsTable"):
-            load_dataframe(_rows(2), conn, "t", "databricks", cols=COLS)
+        # strategy=BULK_COPY → registry dispatch.
+        # ctx=None → DeploymentContext.from_env() (topology='remote', spark_session=None)
+        # All Databricks loaders require a live spark_session → RuntimeError from _select_loader.
+        with pytest.raises(RuntimeError, match="No topology-aware loader found"):
+            load_dataframe(_rows(2), conn, "t", "databricks",
+                           strategy=LoadStrategy.BULK_COPY, cols=COLS)
 
 
 class TestBulkLoadSqlServerBCP:

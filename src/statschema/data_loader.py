@@ -7,24 +7,15 @@ SINGLETON   INSERT INTO t (cols) VALUES (row)          — one row at a time; ma
                                                           compatibility, slowest path.
 MULTI_ROW   INSERT INTO t (cols) VALUES (r1),(r2),…   — batched; 10–100× faster than
                                                           singleton for medium tables.
-BULK_COPY   dialect-native bulk path                  — fastest for large tables:
-              PostgreSQL / CockroachDB / Neon  — COPY FROM STDIN (no temp file)
-              MySQL / MariaDB                 — LOAD DATA LOCAL INFILE
-              SQL Server (mssql-python)       — conn.bulk_copy() via native BCP/DDBC
-              SQL Server (pyodbc/pymssql)     — BULK INSERT from a staging CSV (fallback)
-              IBM Db2 LUW                     — LOAD FROM … OF DEL FORMAT via ADMIN_CMD
+BULK_COPY   dialect-native bulk path                  — fastest for large tables;
+              see _LOADER_REGISTRY for per-dialect loaders.
 
-Databricks
-----------
-Databricks is not supported by this loader. dbldatagen produces a PySpark DataFrame
-and Databricks does not use a DBAPI2 connection for writes. Use Spark's native write
-methods on the generated DataFrame:
-
-    df.write.saveAsTable("catalog.schema.table")          # managed Delta table
-    df.write.format("delta").save("/path/to/table")       # external Delta table
-
-Spark's write path is already a distributed bulk write — there is no faster alternative
-for Databricks.
+Registry dispatch (Phase 1)
+---------------------------
+All dialects are registered in _LOADER_REGISTRY.  load_dataframe() uses
+DeploymentContext.from_env() when no ctx is supplied, then delegates to the
+first TopologyAwareLoader whose can_use() returns True.  SINGLETON and
+MULTI_ROW strategies still use the direct INSERT path for non-bulk workloads.
 """
 
 from __future__ import annotations
@@ -57,15 +48,20 @@ from .dialects._loader_shared import (
     discover_max_batch_size,
 )
 
-# Per-dialect bulk loaders
-from .dialects.postgres.loader   import bulk_load_postgres
-from .dialects.mysql.loader      import bulk_load_mysql
-from .dialects.sqlserver.loader  import bulk_load_sqlserver
+# Per-dialect bulk loaders (legacy functions kept for direct callers)
+from .dialects.postgres.loader   import bulk_load_postgres, PostgresCopyStdinLoader
+from .dialects.mysql.loader      import bulk_load_mysql, MySQLLocalInfileLoader
+from .dialects.sqlserver.loader  import bulk_load_sqlserver, SQLServerBCPLoader
 from .dialects.db2.loader        import (
-    bulk_load_db2, _db2_container_copy,
+    bulk_load_db2,
     DB2AdminCmdLoader, DB2ImportLoader, DB2MultiRowLoader,
 )
-from .dialects.oracle.loader     import OracleDirectPathLoader, OracleMultiRowLoader
+from .dialects.oracle.loader     import (
+    OracleDirectPathLoader, OracleMultiRowLoader,
+    OracleExternalTableLoader, OracleSqlldrLoader,
+)
+from .dialects.spark.loader      import SparkInClusterLoader, SparkCloudStagedLoader
+from .dialects.databricks.loader import DatabricksSparkLoader, DatabricksCopyIntoLoader
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +71,45 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _LOADER_REGISTRY: dict[str, list] = {
+    # --- Postgres wire-compatible ---
+    "postgres":     [PostgresCopyStdinLoader()],
+    "cockroachdb":  [PostgresCopyStdinLoader()],
+    "neon":         [PostgresCopyStdinLoader()],
+    "lakebase":     [PostgresCopyStdinLoader()],
+    # --- MySQL family ---
+    "mysql":        [MySQLLocalInfileLoader()],
+    "mariadb":      [MySQLLocalInfileLoader()],
+    # --- SQL Server ---
+    "sqlserver":    [SQLServerBCPLoader()],
+    # --- IBM Db2 ---
     "db2": [
         DB2AdminCmdLoader(),
         DB2ImportLoader(),
         DB2MultiRowLoader(),
     ],
+    # --- Oracle (fastest-first; file-based loaders disabled under QEMU) ---
     "oracle": [
+        OracleSqlldrLoader(),
         OracleDirectPathLoader(),
+        OracleExternalTableLoader(),
         OracleMultiRowLoader(),
+    ],
+    # --- Spark / Databricks (SparkCloudStagedLoader tried first when URI set) ---
+    "spark": [
+        SparkCloudStagedLoader(),
+        SparkInClusterLoader(),
+    ],
+    "databricks": [
+        DatabricksCopyIntoLoader(),
+        DatabricksSparkLoader(),
+        SparkCloudStagedLoader(),
+        SparkInClusterLoader(),
+    ],
+    "lakehouse": [
+        DatabricksCopyIntoLoader(),
+        DatabricksSparkLoader(),
+        SparkCloudStagedLoader(),
+        SparkInClusterLoader(),
     ],
 }
 
@@ -156,18 +183,16 @@ def load_dataframe(
         batch_size = _effective_batch_size(cfg, len(col_names))
 
     # --- Topology-aware registry dispatch (Phase 1) ---
-    if ctx is not None and dialect in _LOADER_REGISTRY:
+    # Only use registry (= bulk path) for BULK_COPY strategy.
+    # MULTI_ROW and SINGLETON callers that explicitly choose a strategy must not
+    # be silently upgraded to BULK_COPY.
+    if strategy == LoadStrategy.BULK_COPY and dialect in _LOADER_REGISTRY:
+        if ctx is None:
+            from .loader_context import DeploymentContext
+            ctx = DeploymentContext.from_env()
         loader = _select_loader(dialect, ctx, col_types)
         col_names = _col_names(df, cols)
         return loader.bulk_load(ctx, conn, df, table, col_names)
-
-    if dialect == "databricks":
-        raise NotImplementedError(
-            "load_dataframe() does not support dialect='databricks'. "
-            "Databricks does not use a DBAPI2 connection for writes. "
-            "Use df.write.saveAsTable('catalog.schema.table') or "
-            "df.write.format('delta').save(path) on the PySpark DataFrame directly."
-        )
 
     if type(conn).__module__.split(".")[0] == "oracledb":
         _qcur = conn.cursor()
@@ -290,12 +315,9 @@ def load_dataframe(
                 conn, df, table, col_names, staging_dir=staging_dir, col_types=col_types
             )
         else:
-            logger.warning(
-                "BULK_COPY not implemented for dialect=%s; falling back to MULTI_ROW",
-                dialect,
-            )
-            inserted = _insert_multi_row(
-                cur, table, col_names, _iter_rows(df), dialect, paramstyle, batch_size
+            raise RuntimeError(
+                f"BULK_COPY not implemented for dialect={dialect!r}. "
+                "Use LoadStrategy.MULTI_ROW or register a TopologyAwareLoader for this dialect."
             )
     else:
         raise ValueError(f"Unknown strategy: {strategy}")

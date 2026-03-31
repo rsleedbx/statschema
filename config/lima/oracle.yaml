@@ -84,22 +84,43 @@ provision:
       # Allow the lima user to run Podman in rootless mode
       loginctl enable-linger lima 2>/dev/null || true
 
-      # Pull and start Oracle XE using gvenzl/oracle-xe from Docker Hub.
-      # No Oracle registry login required — publicly available image.
-      # gvenzl/oracle-xe:21-slim is Oracle 21c Express Edition (~800 MB, vs
-      # ~2.5 GB for the official Oracle registry image).
-      # The --platform flag is explicit so Podman doesn't complain about arch mismatch.
+      # Trust the local registry running on the macOS host.
+      # Reprovision pulls from here instead of docker.io (~800 MB saved).
+      mkdir -p /etc/containers/registries.conf.d
+      printf '[[ registry ]]\nlocation = "host.lima.internal:5000"\ninsecure = true\n' \
+        > /etc/containers/registries.conf.d/local.conf
+
+      # Pull from local registry (localhost:5000 on the macOS host).
+      # If the image is missing, fail immediately — do NOT fall back to the internet.
+      # Fix: run  bench_baseline.sh --mode=seed-registry --engine=oracle  on the host first.
+      BASE_IMAGE="docker.io/gvenzl/oracle-xe:21-slim"
+      LOCAL_IMAGE="host.lima.internal:5000/gvenzl/oracle-xe:21-slim"
+      if ! podman pull --tls-verify=false "$LOCAL_IMAGE"; then
+        echo >&2 "ERROR: $LOCAL_IMAGE not found in local registry."
+        echo >&2 "On the macOS host run: bench_baseline.sh --mode=seed-registry --engine=oracle"
+        exit 1
+      fi
+      podman tag "$LOCAL_IMAGE" "$BASE_IMAGE"
+
+      # Named volume for Oracle data — persists across container/VM restarts.
+      # gvenzl/oracle-xe detects existing data in /opt/oracle/oradata/XE and skips
+      # re-initialization, so second start is fast.
+      podman volume create oracle_data
+
+      # --pull=never: image was just pulled from the local registry above;
+      # prevents Docker Hub rate-limit hits on every systemd service restart.
       podman run -d \
         --name oracle-xe \
-        --platform linux/amd64 \
+        --pull=never \
         -p 1521:1521 \
         -p 5500:5500 \
         -e ORACLE_PASSWORD=oracle \
-        docker.io/gvenzl/oracle-xe:21-slim
+        -v oracle_data:/opt/oracle/oradata \
+        -v /tmp/lima:/tmp/lima \
+        "$BASE_IMAGE"
 
       # Enable auto-restart so oracle-xe survives limactl start/stop cycles
-      podman generate systemd --new --name oracle-xe \
-        > /etc/systemd/system/container-oracle-xe.service
+      podman generate systemd --new --name oracle-xe > /etc/systemd/system/container-oracle-xe.service
       systemctl enable --now container-oracle-xe
 
 probes:

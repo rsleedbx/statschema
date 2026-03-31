@@ -1,4 +1,4 @@
-# Lima VM – IBM Db2 Community Edition 11.5 (x86_64 Ubuntu 22.04, Podman)
+# Lima VM – IBM Db2 Community Edition (x86_64 Ubuntu 22.04, Podman)
 #
 # Image: icr.io/db2_community/db2  (replaces the deprecated ibmcom/db2 on Docker Hub)
 # Note: No ARM64 image exists for Db2. Lima + QEMU emulates x86_64 stably.
@@ -10,14 +10,18 @@
 #   limactl delete db2                               # destroy VM and all data
 #
 # Wait for Db2 to be ready (first boot, ~8 min):
-#   until limactl shell db2 -- podman logs db2ce 2>/dev/null \
+#   until limactl shell db2 -- sudo podman logs db2ce 2>/dev/null \
 #         | grep -q "Setup has completed"; do echo "waiting..."; sleep 15; done
 #
-# OWNERSHIP INVARIANT — the Lima host user (UID 502) owns /opt/db2data by default,
-# but DB2 containers need db2inst1(1000):db2iadm1 and db2fenc1(1001):db2fadm1 ownership,
-# with fencedid specifically at root:db2iadm1 (0:1000).
-# The container-db2ce.service has ExecStartPre steps that fix ownership on every start.
-# Do NOT do chown -R on /opt/db2data manually — that breaks fencedid ownership.
+# OWNERSHIP INVARIANT — DB2 startup (db2iupdt) requires:
+#   db2inst1(1000):db2iadm1(1000) on /database/config/db2inst1
+#   db2fenc1(1001):db2fadm1(1001) on /database/config/db2fenc1
+#   root:db2iadm1(0:1000) on fencedid specifically
+#
+# With a named Podman volume, ownership changes persist across VM restarts
+# (unlike a Lima host bind-mount which can revert).  A lightweight fix script
+# at /usr/local/bin/db2ce-fixown.sh is still injected as ExecStartPre to guard
+# against any edge cases.  Do NOT chown -R the whole volume — fencedid breaks.
 #
 # Connection (from macOS host):
 #   Python (ibm_db_dbi):
@@ -27,20 +31,12 @@
 #         "", "")
 #   db2 CLI (inside VM):
 #     limactl shell db2 -- su - db2inst1 -c "db2 connect to testdb"
-#
-# Why Lima + QEMU instead of Podman directly on macOS?
-#   IBM Db2 has no ARM64 Linux image. Lima + QEMU provides stable x86_64
-#   emulation independently of Rosetta 2.
-#
-# Why Podman inside the VM?
-#   Daemonless, rootless-capable, no commercial licence requirement.
 
 arch: "x86_64"
 
-# icr.io/db2_community/db2:latest (11.5.9+) requires x86-64-v2 microarchitecture
-# (SSE4.2, POPCNT, etc.).  QEMU's default "qemu64" CPU model is baseline x86-64 (v1)
-# and triggers "Fatal glibc error: CPU does not support x86-64-v2".
-# Haswell emulates a 2013-era Intel Core i7 which satisfies all x86-64-v2 requirements.
+# icr.io/db2_community/db2 requires x86-64-v2 microarchitecture (SSE4.2, POPCNT).
+# QEMU's default "qemu64" CPU model is baseline x86-64-v1 and triggers
+# "Fatal glibc error: CPU does not support x86-64-v2".
 cpuType:
   x86_64: "Haswell-noTSX-IBRS"
 
@@ -48,18 +44,8 @@ images:
   - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
 
 # ── VM resources ─────────────────────────────────────────────────────────────
-# DB2's STMM (Self-Tuning Memory Manager) grows DATABASE_MEMORY automatically
-# to fill available RAM.  At idle, db2sysc already consumes ~2.2 GB RSS.
-# With 4 GB VM and no swap, adding a concurrent schema load (200–400 MB) pushes
-# available memory to the edge.
-#
-# The provision script sets DATABASE_MEMORY = 524288 (2 GB in 4KB pages) to
-# cap STMM growth and leave ≈ 1.2 GB for OS + concurrent loads.
-# This supports 1 schema load at a time safely (schema_workers=1).
-#
-# Upgrade to 8 GB for 2 concurrent schema loads:
-#   memory: "8GiB"  # STMM naturally caps at ~3.5 GB; 4.5 GB free for OS+loads
-#   Then set LIMA_VM_LARGE_RAM=1 to enable schema_workers=2 in run_matrix.py.
+# DB2's STMM (Self-Tuning Memory Manager) grows DATABASE_MEMORY automatically.
+# At idle, db2sysc ≈ 2.2 GB RSS.  8 GiB leaves ≈ 4.5 GB for OS + concurrent loads.
 memory: "8GiB"
 cpus: 4
 disk: "40GiB"
@@ -83,9 +69,8 @@ provision:
       #!/bin/bash
       set -e
 
-      # Lima runs provision scripts on EVERY start.  Guard with a sentinel so
-      # the image pull + container setup only happens once.
-      # On subsequent starts, container-db2ce.service restarts automatically.
+      # Lima runs provision scripts on EVERY start.  Guard so the image pull +
+      # container setup only runs once; systemd restarts the container thereafter.
       if systemctl is-enabled container-db2ce 2>/dev/null | grep -q enabled; then
         exit 0
       fi
@@ -93,17 +78,35 @@ provision:
       apt-get update -y
       apt-get install -y podman netcat-openbsd
 
-      # Allow the lima user to run Podman in rootless mode
       loginctl enable-linger lima 2>/dev/null || true
 
-      # Create a directory for persistent Db2 database storage
-      mkdir -p /opt/db2data
-      chown -R lima:lima /opt/db2data
+      # Trust the local registry running on the macOS host.
+      # Reprovision pulls from here instead of icr.io (~3 GB saved).
+      mkdir -p /etc/containers/registries.conf.d
+      printf '[[ registry ]]\nlocation = "host.lima.internal:5000"\ninsecure = true\n' \
+        > /etc/containers/registries.conf.d/local.conf
+
+      # Named volume for DB2 data — Podman manages ownership and SELinux labels,
+      # and changes persist across VM restarts (unlike a Lima host bind-mount).
+      podman volume create db2_data
+
+      # Pull from local registry (localhost:5000 on the macOS host).
+      # If the image is missing, fail immediately — do NOT fall back to the internet.
+      # Fix: run  bench_baseline.sh --mode=seed-registry --engine=db2  on the host first.
+      BASE_IMAGE="icr.io/db2_community/db2:latest"
+      LOCAL_IMAGE="host.lima.internal:5000/db2_community/db2:latest"
+      if ! podman pull --tls-verify=false "$LOCAL_IMAGE"; then
+        echo >&2 "ERROR: $LOCAL_IMAGE not found in local registry."
+        echo >&2 "On the macOS host run: bench_baseline.sh --mode=seed-registry --engine=db2"
+        exit 1
+      fi
+      podman tag "$LOCAL_IMAGE" "$BASE_IMAGE"
 
       # Pull and start IBM Db2 Community Edition.
-      # Requires --privileged (Db2 needs kernel capabilities for IPC and shared memory).
-      # icr.io/db2_community/db2 is the IBM Container Registry location;
-      # ibmcom/db2 on Docker Hub is deprecated/sunsetted.
+      # --privileged required by DB2 for IPC shared memory and kernel capabilities.
+      # /tmp/lima bind-mount gives DB2 the same staging path as the macOS host —
+      # ADMIN_CMD LOAD reads files written by the Python loader at
+      # /tmp/lima/statschema/ with no copy steps (see loader.py).
       podman run -d \
         --name db2ce \
         --privileged=true \
@@ -113,26 +116,39 @@ provision:
         -e DBNAME=testdb \
         -e ARCHIVE_LOGS=false \
         -e AUTOCONFIG=false \
-        -v /opt/db2data:/database \
-        icr.io/db2_community/db2
+        -v db2_data:/database:Z \
+        -v /tmp/lima:/tmp/lima \
+        "$BASE_IMAGE"
 
-      # Enable auto-restart on VM start/stop cycles.
-      # We generate the base unit then patch in ExecStartPre ownership fixes
-      # so that db2iupdt succeeds on every restart (Lima host UID 502 owns
-      # the volume files; container db2inst1=1000/db2fenc1=1001 must own theirs).
-      podman generate systemd --new --name db2ce \
-        > /etc/systemd/system/container-db2ce.service
-      # Inject ownership-fix steps before ExecStart
-      sed -i '/^ExecStart=/i ExecStartPre=/bin/bash -c '"'"'chown -R 1000:1000 /opt/db2data/config/db2inst1 2>/dev/null || true'"'"'\nExecStartPre=/bin/bash -c '"'"'chown -R 1001:1001 /opt/db2data/config/db2fenc1 2>/dev/null || true'"'"'\nExecStartPre=/bin/bash -c '"'"'f=/opt/db2data/config/db2inst1/sqllib/adm/fencedid; [ -f $f ] \&\& chown 0:1000 $f || true'"'"'' \
-        /etc/systemd/system/container-db2ce.service
+      # ── Ownership fix script ──────────────────────────────────────────────
+      # db2iupdt requires specific UIDs on config subdirs.  A host bind-mount
+      # could revert ownership on VM restart; with a named volume it's stable,
+      # but we keep the fix script as a guard.  It uses `podman volume inspect`
+      # so the path is never hardcoded.
+      cat > /usr/local/bin/db2ce-fixown.sh << 'FIXOWN'
+      #!/bin/bash
+      VOL=$(podman volume inspect db2_data --format "{{.Mountpoint}}" 2>/dev/null)
+      if [[ -z "$VOL" ]]; then exit 0; fi
+      if [[ ! -d "$VOL/config/db2inst1" ]]; then exit 0; fi
+      chown -R 1000:1000 "$VOL/config/db2inst1" 2>/dev/null || true
+      chown -R 1001:1001 "$VOL/config/db2fenc1" 2>/dev/null || true
+      f="$VOL/config/db2inst1/sqllib/adm/fencedid"
+      [[ -f "$f" ]] && chown 0:1000 "$f" || true
+      FIXOWN
+      chmod +x /usr/local/bin/db2ce-fixown.sh
+
+      # Auto-restart on VM start/stop cycles.
+      # --new: systemd recreates the container from the image on each start,
+      # preserving named volume data while giving a clean process tree.
+      podman generate systemd --new --name db2ce > /etc/systemd/system/container-db2ce.service
+
+      # Inject the ownership fix before ExecStart
+      sed -i '/^ExecStart=/i ExecStartPre=/usr/local/bin/db2ce-fixown.sh' /etc/systemd/system/container-db2ce.service
+
       systemctl daemon-reload
       systemctl enable --now container-db2ce
 
       # Cap DB2 STMM database memory at 2 GB (524288 × 4KB pages).
-      # Without a cap, STMM grows DATABASE_MEMORY to fill all available VM RAM.
-      # At idle, db2sysc already uses ~2.2 GB; STMM growth during concurrent
-      # loads can push the VM over 4 GB (no swap) → OOM kill.
-      # container-db2ce runs as root, so use sudo podman.
       # Wait for DB2 to finish first-boot setup (20-30 min under QEMU) before applying.
       timeout 2100 bash -c "
         until sudo podman exec db2ce su - db2inst1 -c 'db2 connect to testdb' >/dev/null 2>&1; do
@@ -146,7 +162,6 @@ probes:
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      # container-db2ce.service runs as root; use sudo for log access.
       # First boot under QEMU emulation takes 20-30 min; timeout set to 35 min.
       if ! timeout 2100s bash -c "
         until sudo podman logs db2ce 2>/dev/null | grep -q 'Setup has completed'; do
@@ -156,7 +171,6 @@ probes:
         echo >&2 "Db2 CE did not finish setup within 35 minutes"
         exit 1
       fi
-      # Extra wait for port to be ready after setup completes
       sleep 15
       if ! nc -z localhost 50000; then
         echo >&2 "Db2 port 50000 not listening after setup"

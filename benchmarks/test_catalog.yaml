@@ -48,6 +48,7 @@ categories:
   stats:    "Statistics collection, distribution accuracy, and cross-engine transpilation"
   live:     "Any test that requires a live database connection"
   bench:    "Load benchmark — TPC-C / TPC-H / TPC-B throughput measurement"
+  loader:   "Loader topology test — exercises a specific bulk-load path (topology × engine)"
 
   # Per-engine (set automatically from engine_categories below)
   postgres:    "PostgreSQL engine tests"
@@ -78,6 +79,7 @@ engine_categories:
   mariadb:     [podman]
   sqlserver:   [qemu]
   oracle:      [qemu]
+  lakebase:    []
   db2:         [qemu]
   neon:        []       # remote cloud
   lakebase:    []       # remote cloud
@@ -240,6 +242,94 @@ tests:
     engine: postgres
     description: "Full identity pipeline smoke test on PostgreSQL (relaxed thresholds)"
     marks: [slow]
+
+  # ── Loader topology tests ────────────────────────────────────────────────
+  # Each spec exercises a specific loader path (topology × engine).
+  # Specs with requires_env are skipped when those vars are absent.
+
+  - id: loader.postgres.copy_stdin
+    categories: [live, loader, postgres]
+    runner: pytest
+    file: tests/test_live_identity.py
+    engine: postgres
+    topology: remote
+    description: "PostgreSQL bulk load via COPY FROM STDIN (primary path)"
+
+  - id: loader.lakebase.copy_stdin
+    categories: [live, loader, lakebase]
+    runner: pytest
+    file: tests/test_live_lakebase.py
+    engine: lakebase
+    topology: remote
+    description: "Lakebase bulk load via COPY FROM STDIN (primary path; Lakebase-as-OLTP)"
+
+  - id: loader.lakebase.copy_into
+    categories: [live, loader, lakebase]
+    runner: pytest
+    file: tests/test_live_lakebase.py
+    engine: lakebase
+    topology: cloud_staged
+    requires_env: [STATSCHEMA_CLOUD_STAGING_URI, DATABRICKS_HOST]
+    description: "Lakebase bulk load via COPY INTO (Delta source-of-truth path)"
+
+  - id: loader.db2.admin_cmd
+    categories: [live, loader, db2, qemu]
+    runner: pytest
+    file: tests/test_live_db2.py
+    engine: db2
+    topology: shared_fs
+    requires_env: [STATSCHEMA_SERVER_STAGING_DIR]
+    description: "DB2 bulk load via ADMIN_CMD LOAD (fastest; requires shared filesystem — NFS/bind-mount/Lima virtfs)"
+
+  - id: loader.db2.import
+    categories: [live, loader, db2, qemu]
+    runner: pytest
+    file: tests/test_live_db2.py
+    engine: db2
+    topology: remote
+    description: "DB2 bulk load via IMPORT (remote-safe; fallback path)"
+
+  - id: loader.oracle.direct_path
+    categories: [live, loader, oracle, qemu]
+    runner: pytest
+    file: tests/test_live_oracle.py
+    engine: oracle
+    topology: remote
+    description: "Oracle bulk load via oracledb direct_path_load (works remote and under QEMU)"
+
+  - id: loader.oracle.sqlldr
+    categories: [live, loader, oracle, qemu]
+    runner: pytest
+    file: tests/test_live_oracle.py
+    engine: oracle
+    topology: shared_fs
+    requires_env: [ORACLE_SQLLDR_BINARY]
+    description: "Oracle bulk load via sqlldr DIRECT=TRUE (local sqlldr binary on statschema host; connects Oracle over TCP)"
+
+  - id: loader.oracle.ext_table
+    categories: [live, loader, oracle, qemu]
+    runner: pytest
+    file: tests/test_live_oracle.py
+    engine: oracle
+    topology: shared_fs
+    requires_env: [ORACLE_SERVER_DIRECTORY, STATSCHEMA_SERVER_STAGING_DIR]
+    description: "Oracle bulk load via External Table + INSERT SELECT (native x86_64; shared filesystem required — Oracle DIRECTORY object on NFS/bind-mount)"
+
+  - id: loader.sqlserver.bcp
+    categories: [live, loader, sqlserver, qemu]
+    runner: pytest
+    file: tests/test_live_sqlserver.py
+    engine: sqlserver
+    topology: remote
+    description: "SQL Server bulk load via mssql-python BCP / BULK INSERT"
+
+  - id: loader.mysql.local_infile
+    categories: [live, loader, mysql, podman]
+    runner: pytest
+    file: tests/test_live_mysql.py
+    engine: mysql
+    topology: remote
+    description: "MySQL bulk load via LOAD DATA LOCAL INFILE"
 
   # ── Load benchmarks ─────────────────────────────────────────────────────
 

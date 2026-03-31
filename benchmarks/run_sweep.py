@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -58,8 +59,11 @@ from benchmarks.test_registry import TestRegistry, TestSpec
 
 logger = logging.getLogger(__name__)
 
-# -u forces unbuffered stdout/stderr so nohup + tail -f shows real-time progress.
-_PYTHON = [sys.executable, "-u"]
+# Prefer .venv_test (has mssql_python, ibm_db, oracledb, etc.) so that all
+# dialects are available regardless of which Python launched this script.
+# Fall back to sys.executable if .venv_test is absent (e.g. CI environments).
+_VENV_PYTHON = _REPO_ROOT / ".venv_test" / "bin" / "python"
+_PYTHON = [str(_VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable, "-u"]
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +154,33 @@ def _engine_reachable(engine: str) -> bool:
         return r.returncode == 0
     except Exception:
         return False
+
+
+def _env_gate(spec: TestSpec) -> bool:
+    """Return False (and log a warning) when any required env var is absent or empty."""
+    missing = [v for v in spec.requires_env if not os.environ.get(v, "").strip()]
+    if missing:
+        logger.warning(
+            "SKIP  %s — missing required env vars: %s", spec.id, ", ".join(missing)
+        )
+        return False
+    return True
+
+
+def _ctx_for_spec(spec: TestSpec) -> "Any":
+    """Build a DeploymentContext for *spec* by reading the current environment.
+
+    If *spec* declares a ``topology``, it overrides the value resolved by
+    ``from_env()``; credential values (cloud_staging_uri, oracle_directory, etc.)
+    still come from the environment.  This lets the catalog control which loader
+    path is exercised for each spec without touching the credentials in ``.env``.
+    """
+    import dataclasses
+    from src.statschema.loader_context import DeploymentContext
+    base = DeploymentContext.from_env()
+    if spec.topology:
+        return dataclasses.replace(base, topology=spec.topology)  # type: ignore[arg-type]
+    return base
 
 
 def _filter_reachable(specs: list[TestSpec]) -> tuple[list[TestSpec], list[TestSpec]]:
@@ -264,6 +295,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {spec.id:<43} {spec.runner:<14} {cats_str}")
         print(f"\nTotal: {len(pool)} tests")
         return 0
+
+    # ── Env-var gate (requires_env) ──────────────────────────────────────
+    # Applied before engine check so cloud-only tests are filtered early.
+    _env_ok: list[bool] = [_env_gate(s) for s in pool]
+    env_skipped = [s for s, ok in zip(pool, _env_ok) if not ok]
+    pool = [s for s, ok in zip(pool, _env_ok) if ok]
+    if env_skipped:
+        logger.info("Skipped %d test(s) with missing required env vars", len(env_skipped))
 
     # ── Engine-reachability filter (before random sample) ────────────────
     # Gate first so --random N draws only from reachable tests.

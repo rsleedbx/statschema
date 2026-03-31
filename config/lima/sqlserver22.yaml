@@ -1,35 +1,38 @@
-# Lima VM – Microsoft SQL Server 2022 (x86_64 Ubuntu 20.04)
+# Lima VM – Microsoft SQL Server 2022 (x86_64 Ubuntu 22.04, Podman)
+#
+# Option D: SQL Server runs as a Podman container inside this VM,
+# matching the same Lima + Ubuntu 22.04 + Podman stack used by IBM Db2 and Oracle XE.
 #
 # Usage:
-#   limactl start --name=sqlserver22 config/lima/sqlserver22.yaml   # first time
+#   limactl start --name=sqlserver22 config/lima/sqlserver22.yaml  # first boot ~5 min
 #   limactl stop  sqlserver22
-#   limactl start sqlserver22
+#   limactl start sqlserver22                                        # container restarts via systemd
 #   limactl delete sqlserver22
 #
 # Connection (from macOS host):
-#   sqlcmd -S 127.0.0.1,14330 -U sa -P "$(grep 'SQL Server sa password is' \
-#       ~/.lima/sqlserver22/serial.log | tail -1 | awk '{print $NF}')"
+#   sqlcmd -S 127.0.0.1,14330 -U sa -P 'Bench1pass!'
 #
-# SA password: generated randomly by pwgen at first boot.
-# Retrieve it:
-#   grep 'SQL Server sa password is' ~/.lima/sqlserver22/serial.log | tail -1
-#
+# SA password: fixed — Bench1pass! (meets SQL Server complexity requirements)
 # Port: 14330  (avoids conflict with sqlserver19 on 1433 if both VMs exist)
 
 arch: "x86_64"
 
+# SQL Server 2022 on Ubuntu 22.04 requires x86-64-v2 microarchitecture (SSE4.2, POPCNT).
+# QEMU's default "qemu64" CPU model is baseline x86-64-v1.
+# Haswell-noTSX-IBRS satisfies x86-64-v2 — same as the DB2 VM.
+cpuType:
+  x86_64: "Haswell-noTSX-IBRS"
+
 # ── VM resources ──────────────────────────────────────────────────────────────
-# SQL Server 2022 at idle ≈ 2.7 GB RSS; buffer pool grows to fill all RAM
-# unless capped.  Without a cap, SQL Server OOM-kills concurrent schema loads.
-#
-# 8 GiB VM + 5632 MB memory cap leaves ≈ 2.4 GB for OS + 2 concurrent
-# identity-test schema loads (~500 MB peak each).
+# SQL Server at idle ≈ 2.7 GB RSS; buffer pool grows to fill RAM unless capped.
+# MSSQL_MEMORY_LIMIT_MB=5632 leaves ≈ 2.4 GB for OS + concurrent schema loads
+# (~500 MB peak each), supporting schema_workers=2 safely.
 cpus: 4
 memory: "8GiB"
 disk: "100GiB"
 
 images:
-  - location: "https://cloud-images.ubuntu.com/releases/20.04/release/ubuntu-20.04-server-cloudimg-amd64.img"
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
 
 mounts:
   - location: "~"
@@ -47,75 +50,78 @@ provision:
   - mode: system
     script: |
       #!/bin/bash
-      set -euo pipefail
+      set -e
 
-      # Lima runs provision scripts on EVERY start.  Guard with a sentinel file
-      # so the install + password-generation only happens once.
-      SENTINEL=/var/opt/mssql/.statschema-provisioned
-      if [[ -f "$SENTINEL" ]]; then
-          # Already provisioned — just ensure the service is running.
-          systemctl start mssql-server 2>/dev/null || true
-          exit 0
+      # Lima runs provision scripts on EVERY start.  Guard so the image pull +
+      # container setup only runs once; systemd restarts the container thereafter.
+      if systemctl is-enabled container-sqlserver22 2>/dev/null | grep -q enabled; then
+        exit 0
       fi
 
-      # ── Install SQL Server 2022 ────────────────────────────────────────────
-      wget -qO- https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
-      add-apt-repository -y \
-        "$(wget -qO- "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/mssql-server-2022.list")"
       apt-get update -y
-      apt-get install -y pwgen mssql-server
+      apt-get install -y podman netcat-openbsd
 
-      # ── Configure: port + memory cap + telemetry off ──────────────────────
-      cat > /var/opt/mssql/mssql.conf <<EOF
-      [network]
-      tcpport = 14330
+      loginctl enable-linger lima 2>/dev/null || true
 
-      [memory]
-      memorylimitmb = 5632
+      # Trust the local registry running on the macOS host.
+      # Reprovision pulls from here instead of mcr.microsoft.com (~1.5 GB saved).
+      mkdir -p /etc/containers/registries.conf.d
+      printf '[[ registry ]]\nlocation = "host.lima.internal:5000"\ninsecure = true\n' \
+        > /etc/containers/registries.conf.d/local.conf
 
-      [telemetry]
-      customerfeedback = false
+      # Named volume for SQL Server data (WAL, databases, errorlog).
+      # Podman manages ownership and SELinux labels automatically.
+      podman volume create sqlserver_data
 
-      [EULA]
-      accepteula = Y
-      EOF
-
-      # ── Generate SA password once and persist it ──────────────────────────
-      PASS_FILE=/var/opt/mssql/.sa_password
-      export MSSQL_SA_PASSWORD="$(pwgen -s 32 1)"
-      echo "$MSSQL_SA_PASSWORD" > "$PASS_FILE"
-      chmod 600 "$PASS_FILE"
-      /opt/mssql/bin/mssql-conf set-sa-password
-      systemctl start mssql-server
-
-      # Log the password so bench_baseline.sh / _common.sh can retrieve it.
-      echo "SQL Server sa password is ${MSSQL_SA_PASSWORD}"
-
-      # ── Install sqlcmd (mssql-tools18) ────────────────────────────────────
-      curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" \
-        | tee /etc/apt/sources.list.d/mssql-release.list
-      apt-get update -y
-      ACCEPT_EULA=Y apt-get install -y mssql-tools18
-      chmod a+rx /var/opt/mssql
-
-      # ── Wait for SQL Server to be ready ───────────────────────────────────
-      if ! timeout 60s bash -c "until nc -z localhost 14330; do sleep 3; done"; then
-        echo >&2 "SQL Server did not come up on port 14330 after 60s"
+      # Pull from local registry (localhost:5000 on the macOS host).
+      # If the image is missing, fail immediately — do NOT fall back to the internet.
+      # Fix: run  bench_baseline.sh --mode=seed-registry --engine=sqlserver  on the host first.
+      BASE_IMAGE="mcr.microsoft.com/mssql/server:2022-latest"
+      LOCAL_IMAGE="host.lima.internal:5000/mssql/server:2022-latest"
+      if ! podman pull --tls-verify=false "$LOCAL_IMAGE"; then
+        echo >&2 "ERROR: $LOCAL_IMAGE not found in local registry."
+        echo >&2 "On the macOS host run: bench_baseline.sh --mode=seed-registry --engine=sqlserver"
         exit 1
       fi
+      podman tag "$LOCAL_IMAGE" "$BASE_IMAGE"
 
-      # ── Mark as provisioned (idempotency) ─────────────────────────────────
-      touch "$SENTINEL"
+      # Pull and start SQL Server 2022.
+      # No --privileged needed (unlike DB2).
+      # /tmp/lima bind-mount gives SQL Server the same staging path as the macOS host —
+      # BULK INSERT reads files written by the Python loader at /tmp/lima/ with no copy steps.
+      podman run -d \
+        --name sqlserver22 \
+        --cap-add cap_net_bind_service \
+        -p 14330:14330 \
+        -e ACCEPT_EULA=Y \
+        -e MSSQL_SA_PASSWORD=Bench1pass! \
+        -e MSSQL_TCP_PORT=14330 \
+        -e MSSQL_MEMORY_LIMIT_MB=5632 \
+        -v sqlserver_data:/var/opt/mssql:Z \
+        -v /tmp/lima:/tmp/lima \
+        "$BASE_IMAGE"
+
+      # Auto-restart on VM start/stop cycles.
+      # Without --new: systemd does podman start/stop (preserves container state across reboots).
+      podman generate systemd --name sqlserver22 > /etc/systemd/system/container-sqlserver22.service
+      systemctl daemon-reload
+      systemctl enable container-sqlserver22
+
+      # Wait for SQL Server to accept connections (typically 30-60s on first boot)
+      if ! timeout 120s bash -c "until nc -z localhost 14330; do sleep 3; done"; then
+        echo >&2 "SQL Server did not come up on port 14330 within 120s"
+        exit 1
+      fi
 
 probes:
   - script: |
       #!/bin/bash
       set -euo pipefail
-      if ! timeout 30s bash -c "until nc -z localhost 14330; do sleep 3; done"; then
+      if ! timeout 120s bash -c "until nc -z localhost 14330; do sleep 3; done"; then
         echo >&2 "SQL Server is not up yet."
         exit 1
       fi
     hint: |
       SQL Server is still initialising.
-      Check: limactl shell sqlserver22 -- sudo tail -20 /var/opt/mssql/log/errorlog
-      Ready when you see: Recovery is complete.
+      Watch: limactl shell sqlserver22 -- podman logs -f sqlserver22
+      Ready when port 14330 responds.

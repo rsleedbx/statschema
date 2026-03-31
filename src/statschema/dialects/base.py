@@ -92,19 +92,31 @@ class DDLEmitter(Protocol):
 class DataLoader(Protocol):
     """Bulk-loads a pandas DataFrame into a target database table.
 
-    Implementations use the fastest available native path for the dialect
-    (``COPY FROM STDIN``, ``LOAD DATA LOCAL INFILE``, ``BULK INSERT``,
-    ``LOAD FROM … OF DEL FORMAT``, etc.) and fall back to multi-row INSERT.
+    Phase 1 loaders implement both ``can_use()`` and the new ``bulk_load()``
+    signature (ctx, conn, df, table, col_names).  Legacy loaders still expose
+    the old signature (conn, df, table, config) — they are called directly
+    from data_loader.py until fully migrated.
 
     Returns the number of rows loaded.
     """
 
+    def can_use(
+        self,
+        ctx: Any,                    # DeploymentContext
+        dialect: str,
+        col_types: list[str] | None,
+    ) -> bool:
+        """Return True if this loader can handle the dialect + topology."""
+        ...
+
     def bulk_load(
         self,
+        ctx: Any,                    # DeploymentContext
         conn: Any,
-        df: Any,            # pandas.DataFrame
+        df: Any,                     # pandas.DataFrame
         table: str,
-        config: BatchConfig | None = None,
+        col_names: list[str],
+        wait: bool = True,
     ) -> int:
         ...
 
