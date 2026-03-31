@@ -50,7 +50,6 @@ def bulk_load_mysql(  # pragma: no cover
 class MySQLLocalInfileLoader(TopologyAwareLoader):
     """Topology-aware wrapper around ``bulk_load_mysql``."""
 
-    loader_name = "local_infile"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return dialect in ("mysql", "mariadb")

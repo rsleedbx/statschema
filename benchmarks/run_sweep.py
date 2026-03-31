@@ -168,19 +168,17 @@ def _env_gate(spec: TestSpec) -> bool:
 
 
 def _ctx_for_spec(spec: TestSpec) -> "Any":
-    """Build a DeploymentContext for *spec* by reading the current environment.
+    """Build a DeploymentContext for *spec*.
 
-    If *spec* declares a ``topology``, it overrides the value resolved by
-    ``from_env()``; credential values (cloud_staging_uri, oracle_directory, etc.)
-    still come from the environment.  This lets the catalog control which loader
-    path is exercised for each spec without touching the credentials in ``.env``.
+    If *spec* declares a ``topology``, it is used directly; otherwise the
+    default remote topology is returned.  Staging-dir configuration must
+    be declared explicitly in the spec's topology or via a connection profile
+    — no os.environ reads are performed here.
     """
-    import dataclasses
     from src.statschema.loader_context import DeploymentContext
-    base = DeploymentContext.from_env()
     if spec.topology:
-        return dataclasses.replace(base, topology=spec.topology)  # type: ignore[arg-type]
-    return base
+        return DeploymentContext(topology=spec.topology)  # type: ignore[arg-type]
+    return DeploymentContext()
 
 
 def _filter_reachable(specs: list[TestSpec]) -> tuple[list[TestSpec], list[TestSpec]]:

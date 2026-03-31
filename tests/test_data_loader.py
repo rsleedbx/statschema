@@ -14,6 +14,7 @@ signatures and fallback behaviour are tested here via mocks.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from unittest.mock import MagicMock, patch
 
@@ -385,7 +386,7 @@ class TestLoadDataframe:
         # strategy=BULK_COPY → registry dispatch.
         # ctx=None → DeploymentContext.from_env() (topology='remote', spark_session=None)
         # All Databricks loaders require a live spark_session → RuntimeError from _select_loader.
-        with pytest.raises(RuntimeError, match="No topology-aware loader found"):
+        with pytest.raises(RuntimeError, match="No loader found"):
             load_dataframe(_rows(2), conn, "t", "databricks",
                            strategy=LoadStrategy.BULK_COPY, cols=COLS)
 
@@ -518,148 +519,230 @@ class TestBulkLoadSqlServerBulkInsert:
                 staging_dir=str(tmp_path), database="testdb",
             )
 
+    def test_uses_server_path_when_mount_points_differ(self, tmp_path):
+        """BULK INSERT SQL must use the server-side path, not the client-side path."""
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        from src.statschema.loader_context import DeploymentContext
 
-class TestSQLServerBCPLoader:
-    """SQLServerBCPLoader — selected when no staging dir or STATSCHEMA_SQLSERVER_LOADER=bcp."""
+        client_dir = str(tmp_path / "client")
+        server_dir = "/mnt/server/staging"
+        os.makedirs(client_dir, exist_ok=True)
 
-    def test_raises_for_non_mssql_python_driver(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        ctx = DeploymentContext(
+            topology="shared_fs",
+            client_staging_dir=client_dir,
+            server_staging_dir=server_dir,
+        )
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bulk_insert(
+            conn, _rows(2), "orders", COLS,
+            staging_dir=client_dir, database="testdb",
+            ctx=ctx,
+        )
+        sql = conn._fake_cur.execute.call_args[0][0]
+        assert server_dir in sql, f"expected server path in SQL; got: {sql}"
+        assert client_dir not in sql, f"client path leaked into SQL; got: {sql}"
+
+    def test_uses_client_path_when_mount_points_match(self, tmp_path):
+        """When both paths are the same, no translation should occur."""
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        from src.statschema.loader_context import DeploymentContext
+
+        staging = str(tmp_path)
+        ctx = DeploymentContext(
+            topology="shared_fs",
+            client_staging_dir=staging,
+            server_staging_dir=staging,
+        )
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bulk_insert(
+            conn, _rows(1), "orders", COLS,
+            staging_dir=staging, database="testdb",
+            ctx=ctx,
+        )
+        sql = conn._fake_cur.execute.call_args[0][0]
+        assert staging in sql
+
+
+class TestSQLServerLoader:
+    """SQLServerLoader — single class, slot selected by ctx.loader."""
+
+    def _ctx(self, loader: str, **extras):
+        ctx = MagicMock()
+        ctx.loader = loader
+        ctx.client_staging_dir = extras.get("client_staging_dir", None)
+        ctx.server_version = extras.get("server_version", None)
+        return ctx
+
+    # can_use()
+    def test_can_use_true_for_sqlserver(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        assert SQLServerLoader().can_use(MagicMock(), "sqlserver", None) is True
+
+    def test_can_use_false_for_postgres(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        assert SQLServerLoader().can_use(MagicMock(), "postgres", None) is False
+
+    # _supported_methods
+    def test_supported_methods(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        assert set(SQLServerLoader._supported_methods) == {"native_bulk", "server_file", "batch_insert"}
+
+    # native_bulk slot
+    def test_native_bulk_calls_bulkcopy(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        conn = _mssql_python_conn(db_name="mydb")
+        ctx = self._ctx("native_bulk")
+        SQLServerLoader().load(ctx, conn, _rows(2), "orders", COLS)
+        conn._fake_cur.bulkcopy.assert_called_once()
+        assert conn._fake_cur.bulkcopy.call_args[0][0] == "[mydb].[dbo].[orders]"
+
+    def test_native_bulk_raises_for_wrong_driver(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
         FakeConn = type("Connection", (), {"__module__": "pyodbc"})
         conn = FakeConn()
+        ctx = self._ctx("native_bulk")
         with pytest.raises(RuntimeError, match="mssql-python driver"):
-            SQLServerBCPLoader().bulk_load(MagicMock(spec=[]), conn, _rows(1), "orders", COLS)
+            SQLServerLoader().load(ctx, conn, _rows(1), "orders", COLS)
 
-    def test_raises_if_statschema_db_not_set(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+    def test_native_bulk_raises_if_statschema_db_not_set(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
         FakeConn = type("Connection", (), {"__module__": "mssql_python.connection"})
         conn = FakeConn()
         conn.cursor = MagicMock()
         conn.commit = MagicMock()
+        ctx = self._ctx("native_bulk")
         with pytest.raises(RuntimeError, match="_statschema_db"):
-            SQLServerBCPLoader().bulk_load(MagicMock(spec=[]), conn, _rows(1), "orders", COLS)
+            SQLServerLoader().load(ctx, conn, _rows(1), "orders", COLS)
 
-    def test_calls_bulkcopy_with_three_part_name(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+    # server_file slot
+    def test_server_file_raises_without_staging_dir(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        ctx = self._ctx("server_file")   # client_staging_dir=None → prerequisite fails
+        with pytest.raises(RuntimeError, match="client_staging_dir"):
+            SQLServerLoader().load(ctx, _mssql_python_conn(), _rows(1), "orders", COLS)
+
+    def test_server_file_calls_bulk_insert(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
         conn = _mssql_python_conn(db_name="mydb")
-        SQLServerBCPLoader().bulk_load(MagicMock(spec=[]), conn, _rows(2), "orders", COLS)
-        conn._fake_cur.bulkcopy.assert_called_once()
-        assert conn._fake_cur.bulkcopy.call_args[0][0] == "[mydb].[dbo].[orders]"
-
-    def test_can_use_is_true_for_sqlserver(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
-        assert SQLServerBCPLoader().can_use(MagicMock(), "sqlserver", None) is True
-
-    def test_can_use_is_false_for_other_dialects(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
-        assert SQLServerBCPLoader().can_use(MagicMock(), "postgres", None) is False
-
-    def test_loader_name(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
-        assert SQLServerBCPLoader.loader_name == "bcp"
-
-
-class TestSQLServerBulkInsertLoader:
-    """SQLServerBulkInsertLoader — selected when staging dir available or =bulk_insert."""
-
-    def test_can_use_false_without_staging_dir(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
-        ctx = MagicMock(spec=[])  # no staging_write_dir, no server_staging_dir
-        assert SQLServerBulkInsertLoader().can_use(ctx, "sqlserver", None) is False
-
-    def test_can_use_true_with_staging_dir(self, tmp_path):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
-        ctx = MagicMock()
-        ctx.staging_write_dir.return_value = str(tmp_path)
-        assert SQLServerBulkInsertLoader().can_use(ctx, "sqlserver", None) is True
-
-    def test_raises_for_non_mssql_python_driver(self, tmp_path):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
-        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
-        conn = FakeConn()
-        ctx = MagicMock()
-        ctx.staging_write_dir.return_value = str(tmp_path)
-        with pytest.raises(RuntimeError, match="mssql-python driver"):
-            SQLServerBulkInsertLoader().bulk_load(ctx, conn, _rows(1), "orders", COLS)
-
-    def test_calls_bulk_insert_with_three_part_name(self, tmp_path):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
-        conn = _mssql_python_conn(db_name="mydb")
-        ctx = MagicMock()
-        ctx.staging_write_dir.return_value = str(tmp_path)
-        SQLServerBulkInsertLoader().bulk_load(ctx, conn, _rows(2), "orders", COLS)
+        ctx = self._ctx("server_file", client_staging_dir=str(tmp_path))
+        SQLServerLoader().load(ctx, conn, _rows(2), "orders", COLS)
         conn._fake_cur.execute.assert_called_once()
-        conn._fake_cur.bulkcopy.assert_not_called()
         sql = conn._fake_cur.execute.call_args[0][0]
         assert "BULK INSERT" in sql
         assert "[mydb].[dbo].[orders]" in sql
 
-    def test_loader_name(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
-        assert SQLServerBulkInsertLoader.loader_name == "bulk_insert"
+    # batch_insert slot
+    def test_batch_insert_executes_multi_row(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        conn = _mssql_python_conn()
+        ctx = self._ctx("batch_insert")
+        # batch_insert uses executemany — set it up on the fake cursor
+        conn._fake_cur.executemany = MagicMock()
+        conn._fake_cur.execute     = MagicMock()
+        SQLServerLoader().load(ctx, conn, _rows(3), "orders", COLS)
+        conn.commit.assert_called()
 
-
-class TestSQLServerMultiRowLoader:
-    """SQLServerMultiRowLoader — STATSCHEMA_SQLSERVER_LOADER=multi_row."""
-
-    def test_can_use_true_for_sqlserver(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerMultiRowLoader
-        assert SQLServerMultiRowLoader().can_use(MagicMock(), "sqlserver", None) is True
-
-    def test_raises_for_non_mssql_python_driver(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerMultiRowLoader
-        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
-        conn = FakeConn()
-        with pytest.raises(RuntimeError, match="mssql-python driver"):
-            SQLServerMultiRowLoader().bulk_load(MagicMock(), conn, _rows(1), "orders", COLS)
-
-    def test_loader_name(self):
-        from src.statschema.dialects.sqlserver.loader import SQLServerMultiRowLoader
-        assert SQLServerMultiRowLoader.loader_name == "multi_row"
-
-
-class TestEnvVarLoaderSelection:
-    """STATSCHEMA_<DIALECT>_LOADER env var — explicit selection, no silent fallback."""
-
-    def test_env_var_selects_bcp(self, monkeypatch):
-        from src.statschema.data_loader import _select_loader, _LOADER_REGISTRY
-        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "bcp")
+    # dispatcher error cases
+    def test_load_raises_if_ctx_loader_unset(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
         ctx = MagicMock()
-        loader = _select_loader("sqlserver", ctx, None)
-        assert loader.loader_name == "bcp"
+        ctx.loader = None
+        with pytest.raises(RuntimeError, match="ctx.loader is not set"):
+            SQLServerLoader().load(ctx, MagicMock(), _rows(1), "orders", COLS)
 
-    def test_env_var_selects_bulk_insert_when_staging_present(self, monkeypatch, tmp_path):
-        from src.statschema.data_loader import _select_loader
-        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "bulk_insert")
+    def test_load_raises_for_unsupported_slot(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerLoader
+        ctx = self._ctx("cloud_staged")
+        with pytest.raises(RuntimeError, match="is not supported by SQLServerLoader"):
+            SQLServerLoader().load(ctx, MagicMock(), _rows(1), "orders", COLS)
+
+
+class TestDataLoaderABC:
+    """DataLoader.__init_subclass__ validation at class-definition time."""
+
+    def test_undeclared_slot_implementation_raises(self):
+        """Declaring a method in _supported_methods without implementing it raises."""
+        from src.statschema.dialects.base import DataLoader
+        with pytest.raises(NotImplementedError, match="does not override"):
+            class BadLoader(DataLoader):
+                _supported_methods = ("native_bulk",)
+                # native_bulk not overridden → should raise at class definition
+
+    def test_unknown_slot_name_raises(self):
+        from src.statschema.dialects.base import DataLoader
+        with pytest.raises(ValueError, match="unknown slot"):
+            class UnknownSlot(DataLoader):
+                _supported_methods = ("flying_unicorn",)
+                def flying_unicorn(self, ctx, conn, df, table, col_names): return 0
+
+    def test_prerequisite_for_undeclared_method_raises(self):
+        from src.statschema.dialects.base import DataLoader
+        with pytest.raises(ValueError, match="_method_prerequisites key"):
+            class BadPrereqs(DataLoader):
+                _supported_methods = ("native_bulk",)
+                _method_prerequisites = {"server_file": ["client_staging_dir"]}
+                def native_bulk(self, ctx, conn, df, table, col_names): return 0
+
+    def test_version_for_undeclared_method_raises(self):
+        from src.statschema.dialects.base import DataLoader
+        with pytest.raises(ValueError, match="_method_min_server_version key"):
+            class BadVersion(DataLoader):
+                _supported_methods = ("native_bulk",)
+                _method_min_server_version = {"server_file": "16"}
+                def native_bulk(self, ctx, conn, df, table, col_names): return 0
+
+    def test_valid_subclass_instantiates_without_error(self):
+        from src.statschema.dialects.base import DataLoader
+        class GoodLoader(DataLoader):
+            _supported_methods = ("native_bulk",)
+            _method_prerequisites = {"native_bulk": []}
+            def native_bulk(self, ctx, conn, df, table, col_names): return 42
+
         ctx = MagicMock()
-        ctx.staging_write_dir.return_value = str(tmp_path)
-        loader = _select_loader("sqlserver", ctx, None)
-        assert loader.loader_name == "bulk_insert"
+        ctx.loader = "native_bulk"
+        ctx.server_version = None
+        result = GoodLoader().load(ctx, MagicMock(), [], "t", [])
+        assert result == 42
 
-    def test_env_var_bulk_insert_fails_loudly_without_staging(self, monkeypatch):
-        from src.statschema.data_loader import _select_loader
-        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "bulk_insert")
-        ctx = MagicMock(spec=[])  # no staging_write_dir
-        with pytest.raises(RuntimeError, match="STATSCHEMA_SQLSERVER_LOADER="):
-            _select_loader("sqlserver", ctx, None)
+    def test_missing_prerequisite_attr_raises(self):
+        from src.statschema.dialects.base import DataLoader
+        class LoaderWithPrereq(DataLoader):
+            _supported_methods = ("server_file",)
+            _method_prerequisites = {"server_file": ["client_staging_dir"]}
+            def server_file(self, ctx, conn, df, table, col_names): return 0
 
-    def test_env_var_selects_multi_row(self, monkeypatch):
-        from src.statschema.data_loader import _select_loader
-        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "multi_row")
-        loader = _select_loader("sqlserver", MagicMock(), None)
-        assert loader.loader_name == "multi_row"
+        ctx = MagicMock()
+        ctx.loader = "server_file"
+        ctx.client_staging_dir = None   # missing → should raise
+        ctx.server_version = None
+        with pytest.raises(RuntimeError, match="client_staging_dir"):
+            LoaderWithPrereq().load(ctx, MagicMock(), [], "t", [])
 
-    def test_env_var_unknown_name_raises(self, monkeypatch):
-        from src.statschema.data_loader import _select_loader
-        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "nonexistent")
-        with pytest.raises(RuntimeError, match="does not match any registered loader"):
-            _select_loader("sqlserver", MagicMock(), None)
+    def test_server_version_check_fails_below_minimum(self):
+        from src.statschema.dialects.base import DataLoader
+        class VersionedLoader(DataLoader):
+            _supported_methods = ("native_bulk",)
+            _method_min_server_version = {"native_bulk": "2022"}
+            def native_bulk(self, ctx, conn, df, table, col_names): return 0
 
-    def test_no_env_var_uses_priority_order_bcp(self, monkeypatch):
-        from src.statschema.data_loader import _select_loader
-        monkeypatch.delenv("STATSCHEMA_SQLSERVER_LOADER", raising=False)
-        ctx = MagicMock(spec=[])  # no staging_write_dir → BCP selected first
-        loader = _select_loader("sqlserver", ctx, None)
-        assert loader.loader_name == "bcp"
+        ctx = MagicMock()
+        ctx.loader = "native_bulk"
+        ctx.server_version = "2019"   # below minimum
+        with pytest.raises(RuntimeError, match="requires server >="):
+            VersionedLoader().load(ctx, MagicMock(), [], "t", [])
+
+    def test_server_version_check_passes_at_minimum(self):
+        from src.statschema.dialects.base import DataLoader
+        class VersionedLoader(DataLoader):
+            _supported_methods = ("native_bulk",)
+            _method_min_server_version = {"native_bulk": "2022"}
+            def native_bulk(self, ctx, conn, df, table, col_names): return 7
+
+        ctx = MagicMock()
+        ctx.loader = "native_bulk"
+        ctx.server_version = "2022"   # exactly at minimum → ok
+        assert VersionedLoader().load(ctx, MagicMock(), [], "t", []) == 7
 
 
 class TestLoadDataframeInputTypes:

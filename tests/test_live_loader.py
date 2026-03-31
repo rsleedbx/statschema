@@ -13,16 +13,16 @@ ctx = DeploymentContext(topology="remote") is sufficient.
 DB2
 ---
 DB2AdminCmdLoader stages a DEL file into the shared filesystem
-(STATSCHEMA_SERVER_STAGING_DIR / STATSCHEMA_CLIENT_STAGING_DIR).
-ctx = DeploymentContext.from_env() picks up these env vars from .env.
+(STATSCHEMA__SERVER_STAGING_DIR / STATSCHEMA__CLIENT_STAGING_DIR).
+For the shared-fs path, construct DeploymentContext(topology="shared_fs", server_staging_dir=...).
 Fallback to DB2MultiRowLoader is tested explicitly with topology="remote".
 
 Prerequisites
 -------------
   Oracle XE:  limactl start --name=oracle config/lima/oracle.yaml
   DB2 CE:     limactl start --name=db2    config/lima/db2.yaml
-  .env:       STATSCHEMA_SERVER_STAGING_DIR=/tmp/lima/statschema
-              STATSCHEMA_CLIENT_STAGING_DIR=/tmp/lima/statschema
+  .env:       STATSCHEMA__SERVER_STAGING_DIR=/tmp/lima/statschema
+              STATSCHEMA__CLIENT_STAGING_DIR=/tmp/lima/statschema
 
 Skip behaviour
 --------------
@@ -208,22 +208,12 @@ class TestOracleDirectPathLoader:
         cur.execute(f'SELECT COUNT(*) FROM "{self._TABLE.upper()}"')
         assert cur.fetchone()[0] == 100
 
-    def test_direct_path_load_from_env(self, ora_conn):
-        """DeploymentContext.from_env() with no staging dirs → remote → direct_path_load."""
+    def test_direct_path_load_remote_topology(self, ora_conn):
+        """topology='remote' → direct_path_load (no staging file required)."""
         self._setup_table(ora_conn)
         df = _sample_df(50)
 
-        # Temporarily clear staging dirs so from_env() resolves to "remote"
-        saved_server = os.environ.pop("STATSCHEMA_SERVER_STAGING_DIR", None)
-        saved_client = os.environ.pop("STATSCHEMA_CLIENT_STAGING_DIR", None)
-        try:
-            ctx = DeploymentContext.from_env()
-        finally:
-            if saved_server:
-                os.environ["STATSCHEMA_SERVER_STAGING_DIR"] = saved_server
-            if saved_client:
-                os.environ["STATSCHEMA_CLIENT_STAGING_DIR"] = saved_client
-
+        ctx = DeploymentContext(topology="remote")
         assert ctx.topology == "remote"
         inserted = load_dataframe(
             df, ora_conn, self._TABLE, dialect="oracle", ctx=ctx,
@@ -286,20 +276,20 @@ class TestDB2AdminCmdLoader:
         """
         DB2AdminCmdLoader via shared filesystem (zero-copy path).
 
-        Requires STATSCHEMA_SERVER_STAGING_DIR to be set.  The staging file
+        Requires STATSCHEMA__SERVER_STAGING_DIR to be set.  The staging file
         lands in the shared directory which the DB2 server process can read at
         the same (or translated) path.
         """
-        staging = os.environ.get("STATSCHEMA_SERVER_STAGING_DIR", "")
+        staging = os.environ.get("STATSCHEMA__SERVER_STAGING_DIR", "")
         if not staging:
-            pytest.skip("STATSCHEMA_SERVER_STAGING_DIR not set — skipping shared-fs test")
+            pytest.skip("STATSCHEMA__SERVER_STAGING_DIR not set — skipping shared-fs test")
 
         self._setup_table(db2_conn)
         df = _sample_df(200)
         ctx = DeploymentContext(
             topology="shared_fs",
             server_staging_dir=staging,
-            client_staging_dir=os.environ.get("STATSCHEMA_CLIENT_STAGING_DIR") or staging,
+            client_staging_dir=os.environ.get("STATSCHEMA__CLIENT_STAGING_DIR") or staging,
         )
 
         inserted = load_dataframe(
@@ -314,17 +304,21 @@ class TestDB2AdminCmdLoader:
         )
         assert cur.fetchone()[0] == 200
 
-    def test_admin_cmd_loader_from_env(self, db2_conn):
+    def test_admin_cmd_loader_shared_fs(self, db2_conn):
         """
-        DeploymentContext.from_env() with STATSCHEMA_SERVER_STAGING_DIR set
-        → shared_fs → DB2AdminCmdLoader selected.
+        topology='shared_fs' with server_staging_dir → DB2AdminCmdLoader selected.
         """
-        if not os.environ.get("STATSCHEMA_SERVER_STAGING_DIR", ""):
-            pytest.skip("STATSCHEMA_SERVER_STAGING_DIR not set — skipping from_env shared-fs test")
+        staging_dir = os.environ.get("STATSCHEMA__SERVER_STAGING_DIR", "")
+        if not staging_dir:
+            pytest.skip("STATSCHEMA__SERVER_STAGING_DIR not set — skipping shared-fs test")
 
         self._setup_table(db2_conn)
         df = _sample_df(100)
-        ctx = DeploymentContext.from_env()
+        ctx = DeploymentContext(
+            topology="shared_fs",
+            server_staging_dir=staging_dir,
+            client_staging_dir=os.environ.get("STATSCHEMA__CLIENT_STAGING_DIR") or staging_dir,
+        )
 
         assert ctx.topology == "shared_fs"
 
@@ -366,13 +360,13 @@ class TestDB2AdminCmdLoader:
             "ID":   [1, 2],
             "BODY": ["hello world", "foo bar"],
         })
-        staging = os.environ.get("STATSCHEMA_SERVER_STAGING_DIR", "")
+        staging = os.environ.get("STATSCHEMA__SERVER_STAGING_DIR", "")
         if not staging:
-            pytest.skip("STATSCHEMA_SERVER_STAGING_DIR not set — skipping CLOB test")
+            pytest.skip("STATSCHEMA__SERVER_STAGING_DIR not set — skipping CLOB test")
         ctx = DeploymentContext(
             topology="shared_fs",
             server_staging_dir=staging,
-            client_staging_dir=os.environ.get("STATSCHEMA_CLIENT_STAGING_DIR") or staging,
+            client_staging_dir=os.environ.get("STATSCHEMA__CLIENT_STAGING_DIR") or staging,
         )
 
         inserted = load_dataframe(

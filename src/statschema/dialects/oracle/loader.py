@@ -87,7 +87,6 @@ class OracleDirectPathLoader(TopologyAwareLoader):
     is a client-side bulk API, not a server-side LOAD command.
     """
 
-    loader_name = "direct_path"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         # ctx.conn is not stored — check is deferred to bulk_load() where we
@@ -147,7 +146,6 @@ class OracleMultiRowLoader(TopologyAwareLoader):
     is not oracledb.
     """
 
-    loader_name = "multi_row"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return dialect == "oracle"
@@ -189,7 +187,7 @@ def _oracle_staging_root(staging_dir: str | None = None) -> str:
     """Return the directory where statschema writes Oracle staging files.
 
     ``staging_dir`` must come from ``ctx.staging_write_dir()``
-    (i.e. ``STATSCHEMA_CLIENT_STAGING_DIR``).  Oracle External Tables and
+    (i.e. ``STATSCHEMA__CLIENT_STAGING_DIR``).  Oracle External Tables and
     SQL*Loader both require a shared filesystem, so there is no local-temp
     fallback — a missing value is a configuration error.
     """
@@ -197,11 +195,11 @@ def _oracle_staging_root(staging_dir: str | None = None) -> str:
         os.makedirs(staging_dir, exist_ok=True)
         return staging_dir
     raise RuntimeError(
-        "STATSCHEMA_CLIENT_STAGING_DIR is not set. "
+        "STATSCHEMA__CLIENT_STAGING_DIR is not set. "
         "Oracle External Tables and SQL*Loader require a filesystem path "
         "accessible to both statschema and the Oracle server process. "
-        "Set STATSCHEMA_CLIENT_STAGING_DIR (write path) and "
-        "STATSCHEMA_SERVER_STAGING_DIR (Oracle server read path). "
+        "Set STATSCHEMA__CLIENT_STAGING_DIR (write path) and "
+        "STATSCHEMA__SERVER_STAGING_DIR (Oracle server read path). "
         "See .env.example for Lima and NFS examples."
     )
 
@@ -229,13 +227,13 @@ def _oracle_current_schema(conn: Any) -> str:
     return schema
 
 
-def _oracle_sqlldr_userid() -> str:
-    """Build a sqlldr userid string from standard ORACLE_* env vars."""
-    user = os.environ.get("ORACLE_USER", "system")
-    pwd = os.environ.get("ORACLE_PASS", "oracle")
-    host = os.environ.get("ORACLE_HOST", "localhost")
-    port = os.environ.get("ORACLE_PORT", "1521")
-    svc = os.environ.get("ORACLE_SERVICE", "XE")
+def _oracle_sqlldr_userid(ctx: Any) -> str:
+    """Build a sqlldr userid string from credentials stored in ``ctx``."""
+    user = ctx.username or "system"
+    pwd  = ctx.password or ""
+    host = ctx.host or "localhost"
+    port = ctx.port or 1521
+    svc  = ctx.database or "XE"
     return f"{user}/{pwd}@//{host}:{port}/{svc}"
 
 
@@ -329,7 +327,6 @@ class OracleExternalTableLoader(TopologyAwareLoader):
     to fall through to OracleDirectPathLoader in that environment.
     """
 
-    loader_name = "external_table"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         if dialect != "oracle":
@@ -337,7 +334,7 @@ class OracleExternalTableLoader(TopologyAwareLoader):
         if not ctx.has_shared_fs():
             logger.info(
                 "OracleExternalTableLoader: skipped — no shared filesystem configured. "
-                "Set STATSCHEMA_SERVER_STAGING_DIR and ORACLE_SERVER_DIRECTORY to enable "
+                "Set STATSCHEMA__SERVER_STAGING_DIR and STATSCHEMA__ORACLE__DIRECTORY to enable "
                 "External Tables."
             )
             return False
@@ -352,7 +349,7 @@ class OracleExternalTableLoader(TopologyAwareLoader):
             logger.info(
                 "OracleExternalTableLoader: skipped — server_is_emulated=True; "
                 "KUP process-fork overhead under QEMU makes External Tables ~7× slower "
-                "than direct_path_load. Using OracleDirectPathLoader instead."
+                "than direct_path_load. Set server_is_emulated: false or use OracleDirectPathLoader."
             )
             return False
         return True
@@ -439,9 +436,9 @@ class OracleSqlldrLoader(TopologyAwareLoader):
     as a local subprocess on the statschema host.  sqlldr connects to Oracle
     over TCP — no shared filesystem required.
 
-    Requires ``ORACLE_SQLLDR_BINARY`` to be set to the path of the sqlldr
-    executable on the statschema host.  Credentials are read from
-    ORACLE_USER / ORACLE_PASS / ORACLE_HOST / ORACLE_PORT / ORACLE_SERVICE.
+    Requires ``oracle_sqlldr_binary`` to be set in the connection profile.
+    Credentials (host, port, database, username, password) are read from the
+    DeploymentContext, which is populated from the connection profile.
 
     On native x86_64 at ≥100K rows, sqlldr DIRECT=TRUE is typically faster
     than direct_path_load because it formats Oracle blocks in parallel with
@@ -449,23 +446,22 @@ class OracleSqlldrLoader(TopologyAwareLoader):
     measured) and JIT translation overhead make it slower at all tested scales.
     """
 
-    loader_name = "sqlldr"
 
-    def _sqlldr_binary(self) -> str:
-        """Resolve the local sqlldr path from ORACLE_SQLLDR_BINARY env var.
+    def _sqlldr_binary(self, ctx: Any) -> str:
+        """Resolve the local sqlldr path from ``ctx.oracle_sqlldr_binary``.
 
-        Set ``ORACLE_SQLLDR_BINARY`` to the full path of the sqlldr executable
-        on the statschema host (not inside a container).  Install examples:
+        Set ``oracle_sqlldr_binary`` in the connection profile (or
+        ``STATSCHEMA__ORACLE__SQLLDR_BINARY`` env var).  Install examples:
 
           Linux x86_64 (RPM):   /usr/lib/oracle/21/client64/bin/sqlldr
           macOS Instant Client: /opt/oracle/instantclient_21_12/sqlldr
         """
-        binary = os.environ.get("ORACLE_SQLLDR_BINARY", "").strip()
+        binary = (ctx.oracle_sqlldr_binary or "").strip()
         if not binary:
             raise RuntimeError(
-                "ORACLE_SQLLDR_BINARY is not set. "
+                "oracle_sqlldr_binary is not set in the connection profile. "
                 "Install Oracle Instant Client Tools on the statschema host and set "
-                "ORACLE_SQLLDR_BINARY to the local sqlldr path."
+                "oracle_sqlldr_binary to the local sqlldr path."
             )
         return binary
 
@@ -473,18 +469,18 @@ class OracleSqlldrLoader(TopologyAwareLoader):
         import shutil
         if dialect != "oracle":
             return False
-        binary = os.environ.get("ORACLE_SQLLDR_BINARY", "").strip()
+        binary = (ctx.oracle_sqlldr_binary or "").strip()
         if not binary:
             logger.info(
-                "OracleSqlldrLoader: skipped — ORACLE_SQLLDR_BINARY is not set. "
-                "Install Oracle Instant Client Tools on the statschema host and set "
-                "ORACLE_SQLLDR_BINARY to the local sqlldr path."
+                "OracleSqlldrLoader: skipped — oracle_sqlldr_binary is not set in the "
+                "connection profile.  Install Oracle Instant Client Tools and set "
+                "oracle_sqlldr_binary."
             )
             return False
         if not (os.path.isfile(binary) or shutil.which(binary)):
             raise RuntimeError(
-                f"ORACLE_SQLLDR_BINARY={binary!r} is set but the file does not exist. "
-                "Verify the path or unset ORACLE_SQLLDR_BINARY to skip this loader."
+                f"oracle_sqlldr_binary={binary!r} is set but the file does not exist. "
+                "Verify the path or remove the field to skip this loader."
             )
         return True
 
@@ -534,9 +530,9 @@ class OracleSqlldrLoader(TopologyAwareLoader):
             f.write(ctl_content)
         os.chmod(ctl_path, 0o644)
 
-        userid = _oracle_sqlldr_userid()
+        userid = _oracle_sqlldr_userid(ctx)
         cmd = [
-            self._sqlldr_binary(),
+            self._sqlldr_binary(ctx),
             f"userid={userid}",
             f"control={ctl_path}",
             f"log={log_path}",

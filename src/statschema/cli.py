@@ -142,74 +142,60 @@ def _open_connection(
     raise ValueError(f"_open_connection: unexpected dialect {dialect!r}")
 
 
-def _connect(dialect: str, dsn: str | None) -> Any:
-    """Open and return a DBAPI-2 connection from a DSN string."""
-    env = os.environ
+def _connect(dialect: str, dsn: str) -> Any:
+    """Open and return a DBAPI-2 connection from a DSN string.
 
+    ``dsn`` must be non-empty; callers are responsible for validating that
+    ``--dsn`` was provided before calling this function.  Use
+    ``_connect_from_profile()`` when a profile is available instead.
+    """
     if dialect == "sqlite":
         import sqlite3
-        path = dsn or env.get("STATSCHEMA_SQLITE_PATH", ":memory:")
-        return sqlite3.connect(path)
+        return sqlite3.connect(dsn or ":memory:")
 
     if dialect == "lakebase":
         parts = dict(kv.split("=", 1) for kv in (dsn or "").split() if "=" in kv)
-        endpoint = (parts.get("endpoint")
-                    or env.get("STATSCHEMA_LAKEBASE_ENDPOINT")
-                    or env.get("ENDPOINT_NAME", ""))
-        host     = (parts.get("host")
-                    or env.get("STATSCHEMA_LAKEBASE_HOST")
-                    or env.get("PGHOST", ""))
-        dbname   = (parts.get("dbname")
-                    or env.get("STATSCHEMA_LAKEBASE_DB")
-                    or env.get("PGDATABASE", "databricks_postgres"))
-        user     = (parts.get("user")
-                    or env.get("STATSCHEMA_LAKEBASE_USER")
-                    or env.get("PGUSER")
-                    or env.get("DATABRICKS_CLIENT_ID", ""))
-        port     = int(parts.get("port") or env.get("PGPORT", "5432"))
+        endpoint = parts.get("endpoint", "")
+        host     = parts.get("host", "")
+        dbname   = parts.get("dbname", "databricks_postgres")
+        user     = parts.get("user", "")
+        port     = int(parts.get("port", "5432"))
         if not endpoint:
-            _die("Lakebase: provide endpoint= in --dsn or set STATSCHEMA_LAKEBASE_ENDPOINT.")
+            _die("Lakebase: provide endpoint= in --dsn or use --profile.")
         if not host:
-            _die("Lakebase: provide host= in --dsn or set STATSCHEMA_LAKEBASE_HOST.")
+            _die("Lakebase: provide host= in --dsn or use --profile.")
         if not user:
-            _die("Lakebase: provide user= in --dsn or set STATSCHEMA_LAKEBASE_USER.")
+            _die("Lakebase: provide user= in --dsn or use --profile.")
         return _lakebase_connect(endpoint, host, dbname, user, port)
 
     if dialect in ("postgres", "cockroachdb", "neon"):
         import psycopg2
-        conn_str = dsn or env.get("STATSCHEMA_PG_DSN", "")
-        if not conn_str:
-            _die("Provide --dsn or set STATSCHEMA_PG_DSN.")
-        return psycopg2.connect(conn_str)
+        if not dsn:
+            _die("Provide --dsn or use --profile.")
+        return psycopg2.connect(dsn)
 
     if dialect in ("mysql", "mariadb"):
-        if dsn:
-            parts = dict(kv.split("=", 1) for kv in dsn.split() if "=" in kv)
-            host = parts.get("host", "localhost")
-            port = int(parts.get("port", 3306))
-            user = parts.get("user", "root")
-            password = parts.get("password", "")
-            database = parts.get("database", "")
-        else:
-            host     = env.get("STATSCHEMA_MYSQL_HOST", "localhost")
-            port     = int(env.get("STATSCHEMA_MYSQL_PORT", "3306"))
-            user     = env.get("STATSCHEMA_MYSQL_USER", "root")
-            password = env.get("STATSCHEMA_MYSQL_PASS", "")
-            database = env.get("STATSCHEMA_MYSQL_DB", "")
+        if not dsn:
+            _die("Provide --dsn or use --profile.")
+        parts = dict(kv.split("=", 1) for kv in dsn.split() if "=" in kv)
+        host     = parts.get("host", "localhost")
+        port     = int(parts.get("port", 3306))
+        user     = parts.get("user", "root")
+        password = parts.get("password", "")
+        database = parts.get("database", "")
         if not database:
-            _die("Provide database= in --dsn or set STATSCHEMA_MYSQL_DB.")
+            _die("Provide database= in --dsn or use --profile.")
         return _open_connection(dialect, host, port, user, password, database)
 
     if dialect == "sqlserver":
-        conn_str = dsn or env.get("STATSCHEMA_SQLSERVER_DSN", "")
-        if not conn_str:
-            _die("Provide --dsn or set STATSCHEMA_SQLSERVER_DSN.")
+        if not dsn:
+            _die("Provide --dsn or use --profile.")
         try:
             import mssql_python
-            return mssql_python.connect(conn_str)
+            return mssql_python.connect(dsn)
         except ImportError:
             import pymssql
-            parts = dict(p.split("=", 1) for p in conn_str.split(";") if "=" in p)
+            parts = dict(p.split("=", 1) for p in dsn.split(";") if "=" in p)
             server_str = parts.get("SERVER", "localhost")
             if "," in server_str:
                 host, port_s = server_str.rsplit(",", 1)
@@ -225,22 +211,74 @@ def _connect(dialect: str, dsn: str | None) -> Any:
 
     if dialect == "oracle":
         import oracledb
-        oracle_dsn  = dsn or env.get("STATSCHEMA_ORACLE_DSN", "localhost:1521/XEPDB1")
-        oracle_user = env.get("STATSCHEMA_ORACLE_USER", "")
-        oracle_pass = env.get("STATSCHEMA_ORACLE_PASS", "")
-        if dsn and "@" in dsn:
+        if not dsn:
+            _die("Provide --dsn or use --profile.")
+        oracle_dsn  = dsn
+        oracle_user = ""
+        oracle_pass = ""
+        if "@" in dsn:
             cred, oracle_dsn = dsn.rsplit("@", 1)
             oracle_user, oracle_pass = cred.split("/", 1)
         if not oracle_user:
-            _die("Set STATSCHEMA_ORACLE_USER and STATSCHEMA_ORACLE_PASS.")
+            _die("Oracle DSN must include credentials: user/pass@host:port/service")
         return oracledb.connect(user=oracle_user, password=oracle_pass, dsn=oracle_dsn)
 
     if dialect == "db2":
-        conn_str = dsn or env.get("STATSCHEMA_DB2_DSN", "")
-        if not conn_str:
-            _die("Provide --dsn or set STATSCHEMA_DB2_DSN.")
+        if not dsn:
+            _die("Provide --dsn or use --profile.")
         import ibm_db_dbi
-        return ibm_db_dbi.connect(conn_str, "", "")
+        return ibm_db_dbi.connect(dsn, "", "")
+
+    _die(f"Unsupported dialect {dialect!r}. Choices: {', '.join(_ALL_DIALECTS)}")
+
+
+def _connect_from_profile(profile: Any) -> Any:
+    """Open a DBAPI-2 connection from a resolved ConnectionProfile.
+
+    This is the primary connection path when ``--profile`` is used.  No
+    os.environ reads — all credentials come from the profile object.
+    """
+    dialect  = profile.dialect
+    host     = profile.host or ""
+    port     = profile.port
+    username = profile.username or ""
+    password = profile.password or ""
+    database = profile.database or ""
+    endpoint = getattr(profile, "endpoint", None) or ""
+
+    if dialect == "sqlite":
+        import sqlite3
+        return sqlite3.connect(database or ":memory:")
+
+    if dialect == "lakebase":
+        if not endpoint:
+            _die("Profile is missing 'endpoint' (required for Lakebase OAuth).")
+        if not host:
+            _die("Profile is missing 'host'.")
+        return _lakebase_connect(endpoint, host, database or "databricks_postgres", username, port or 5432)
+
+    if dialect in ("postgres", "cockroachdb", "neon"):
+        import psycopg2
+        return psycopg2.connect(
+            host=host, port=port or 5432, dbname=database,
+            user=username, password=password,
+        )
+
+    if dialect in ("mysql", "mariadb"):
+        return _open_connection(dialect, host, port or 3306, username, password, database)
+
+    if dialect == "sqlserver":
+        return _open_connection(dialect, host, port or 1433, username, password, database)
+
+    if dialect == "oracle":
+        import oracledb
+        return oracledb.connect(
+            user=username, password=password,
+            dsn=f"{host}:{port or 1521}/{database}",
+        )
+
+    if dialect == "db2":
+        return _open_connection(dialect, host, port or 50000, username, password, database)
 
     _die(f"Unsupported dialect {dialect!r}. Choices: {', '.join(_ALL_DIALECTS)}")
 
@@ -380,9 +418,13 @@ def _write_rows(fh, rows, cols: list[str], fmt: str) -> None:
 
 @cli.command("load")
 @click.argument("schema")
-@click.option("--dialect", required=True, type=click.Choice(_ALL_DIALECTS),
-              help="Target database dialect.")
-@click.option("--dsn",      default=None,   help="Connection string.")
+@click.option("--dialect", default=None, type=click.Choice(_ALL_DIALECTS),
+              help="Target database dialect (required when --profile is not used).")
+@click.option("--dsn",      default=None,   help="Connection string (alternative to --profile).")
+@click.option("--profile",  default=None,   metavar="NAME",
+              help="Profile name from statschema.yaml.")
+@click.option("--config",   default="statschema.yaml", show_default=True, metavar="FILE",
+              help="Path to statschema.yaml (used with --profile).")
 @click.option("--sf",       type=float, default=1.0, show_default=True, help="Scale factor.")
 @click.option("--seed",     type=int,   default=42,  show_default=True, help="Random seed.")
 @click.option("--strategy",
@@ -393,7 +435,9 @@ def _write_rows(fh, rows, cols: list[str], fmt: str) -> None:
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable debug logging.")
 @_rename_options
-def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
+def cmd_load(schema: str, dialect: str | None, dsn: str | None,
+             profile: str | None, config: str,
+             sf: float, seed: int,
              strategy: str | None, append: bool, verbose: bool,
              table_preset: str | None, table_map: str | None) -> None:
     """Create tables and load synthetic data into a live database."""
@@ -403,6 +447,18 @@ def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
+
+    if profile:
+        from .connection_profile import load_profile
+        _profile = load_profile(config, profile)
+        dialect  = _profile.dialect
+        ctx      = DeploymentContext.from_profile(_profile)
+        conn     = _connect_from_profile(_profile)
+    else:
+        if not dialect:
+            _die("Provide --dialect or --profile.")
+        ctx  = DeploymentContext()
+        conn = _connect(dialect, dsn or "")
 
     tables  = load_canonical(Path(schema))
     mapping = _build_table_map(table_preset, table_map)
@@ -416,8 +472,6 @@ def cmd_load(schema: str, dialect: str, dsn: str | None, sf: float, seed: int,
         if strategy
         else _FASTEST.get(dialect, LoadStrategy.MULTI_ROW)
     )
-    ctx = DeploymentContext.from_env()
-    conn = _connect(dialect, dsn)
 
     if append:
         existing     = _query_row_offsets(conn, ordered, dialect)
@@ -611,23 +665,11 @@ def _connect_interactive(dialect: str, host: str | None, port: int | None,
         return sqlite3.connect(path), "localhost", 0, "", path
 
     if dialect == "lakebase":
-        env = os.environ
-        ep   = _prompt_if_missing(
-            endpoint or env.get("STATSCHEMA_LAKEBASE_ENDPOINT") or env.get("ENDPOINT_NAME"),
-            "Lakebase endpoint (projects/.../branches/.../endpoints/...)",
-        )
-        h    = _prompt_if_missing(
-            host or env.get("STATSCHEMA_LAKEBASE_HOST") or env.get("PGHOST"),
-            "Lakebase host",
-        )
-        p    = int(port or os.environ.get("PGPORT", "5432"))
-        db   = (catalog
-                or env.get("STATSCHEMA_LAKEBASE_DB")
-                or env.get("PGDATABASE", "databricks_postgres"))
-        u    = _prompt_if_missing(
-            user or env.get("STATSCHEMA_LAKEBASE_USER") or env.get("PGUSER") or env.get("DATABRICKS_CLIENT_ID"),
-            "Service-principal client ID (PGUSER)",
-        )
+        ep = _prompt_if_missing(endpoint, "Lakebase endpoint (projects/.../branches/.../endpoints/...)")
+        h  = _prompt_if_missing(host, "Lakebase host")
+        p  = int(port or 5432)
+        db = catalog or "databricks_postgres"
+        u  = _prompt_if_missing(user, "Service-principal client ID (PGUSER)")
         conn = _lakebase_connect(ep, h, db, u, p)
         return conn, h, p, u, db
 
@@ -889,7 +931,7 @@ def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
 
 
 @cli.command("collect")
-@click.option("--dialect",   required=True, type=click.Choice(_ALL_DIALECTS), help="Source database dialect.")
+@click.option("--dialect",   default=None, type=click.Choice(_ALL_DIALECTS), help="Source database dialect.")
 @click.option("--host",      default=None,  metavar="HOST",    help="Database host.")
 @click.option("--port",      type=int, default=None, metavar="PORT", help="Database port.")
 @click.option("--user",      default=None,  metavar="USER",    help="Database username.")
@@ -898,6 +940,10 @@ def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
 @click.option("--schema",    "schema_name", default=None, metavar="SCHEMA", help="Schema / namespace.")
 @click.option("--tables",    default="%",   metavar="PATTERN", help="SQL LIKE pattern (default: %%).")
 @click.option("--endpoint",  default=None,  metavar="ENDPOINT_NAME", help="Lakebase endpoint resource path.")
+@click.option("--profile",   default=None,  metavar="NAME",
+              help="Profile name from statschema.yaml (replaces --dialect/--host/--user/…).")
+@click.option("--config",    default="statschema.yaml", show_default=True, metavar="FILE",
+              help="Path to statschema.yaml (used with --profile).")
 @click.option("--show-sql",  "show_sql",    is_flag=True, default=False, help="Print SQL statements sent.")
 @click.option("--analyze",   is_flag=True,  default=False, help="Run ANALYZE before collecting.")
 @click.option("--out-schema", "out_schema", default="schema.yaml", show_default=True,
@@ -912,8 +958,8 @@ def _collect_schema_live(cur: _LoggingCursor, dialect: str, schema: str | None,
 @click.option("--out-queries", "out_queries", default="queries.yaml", show_default=True,
               metavar="FILE", help="Output queries YAML path.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable debug logging.")
-def cmd_collect(dialect: str, host, port, user, password, catalog, schema_name,
-                tables, endpoint, show_sql, analyze, out_schema, out_stats,
+def cmd_collect(dialect, host, port, user, password, catalog, schema_name,
+                tables, endpoint, profile, config, show_sql, analyze, out_schema, out_stats,
                 top_queries, rank_by, out_queries, verbose) -> None:
     """Connect to a live database and collect DDL + statistics into YAML."""
     import time
@@ -922,9 +968,20 @@ def cmd_collect(dialect: str, host, port, user, password, catalog, schema_name,
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    conn, h, p, u, db = _connect_interactive(
-        dialect, host, port, user, password, catalog, endpoint
-    )
+    if profile:
+        from .connection_profile import load_profile
+        _profile = load_profile(config, profile)
+        dialect  = _profile.dialect
+        conn     = _connect_from_profile(_profile)
+        h, p     = _profile.host or "", _profile.port or 0
+        u        = _profile.username or ""
+        db       = _profile.database or ""
+    else:
+        if not dialect:
+            _die("Provide --dialect or --profile.")
+        conn, h, p, u, db = _connect_interactive(
+            dialect, host, port, user, password, catalog, endpoint
+        )
     schema_note = f"/{schema_name}" if schema_name else ""
     click.echo(f"\n  Connected to {dialect} @ {h}:{p}/{db}{schema_note} as {u}", err=True)
 

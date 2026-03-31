@@ -1,0 +1,135 @@
+# statschema.yaml — named connection profiles
+#
+# Copy to statschema.yaml and fill in your values.
+#
+# Interpolation syntax:
+#   ${oc.env:VAR_NAME}                  — read environment variable at access time
+#   ${secrets:scope,key}                — fetch Databricks secret string
+#   ${secrets:scope,key,field1,field2}  — fetch JSON path within a Databricks secret
+#
+# Required fields per profile: dialect, host, loader
+# All other fields are optional.
+
+profiles:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  prod_postgres:
+    dialect: postgres
+    host: ${oc.env:PG_HOST}
+    port: 5432
+    database: ${oc.env:PG_DATABASE}
+    username: ${oc.env:PG_USER}
+    password: ${oc.env:PG_PASSWORD}
+    loader: client_stream            # COPY … FROM STDIN via psycopg2
+
+  # ── SQL Server ─────────────────────────────────────────────────────────────
+  prod_sqlserver:
+    dialect: sqlserver
+    host: ${oc.env:SQLSERVER_HOST}
+    port: 1433
+    database: ${oc.env:SQLSERVER_DATABASE}
+    username: sa
+    password: ${secrets:my_scope,sqlserver_creds,password}
+    loader: native_bulk              # cursor.bulkcopy() via mssql-python
+    version: "2022"
+
+  # SQL Server with BULK INSERT (requires shared filesystem staging dir)
+  dev_sqlserver_bulk_insert:
+    dialect: sqlserver
+    host: 127.0.0.1
+    port: 1433
+    database: testdb
+    username: sa
+    password: ${oc.env:SQLSERVER_SA_PASSWORD}
+    loader: server_file              # T-SQL BULK INSERT — needs staging dir
+    client_staging_dir: /tmp/statschema_staging
+    server_staging_dir: /tmp/statschema_staging
+
+  # ── Oracle ─────────────────────────────────────────────────────────────────
+  prod_oracle:
+    dialect: oracle
+    host: ${oc.env:ORACLE_HOST}
+    port: 1521
+    database: XEPDB1
+    username: ${oc.env:ORACLE_USER}
+    password: ${secrets:my_scope,oracle_creds,password}
+    loader: server_file              # Oracle External Table or SQL*Loader
+    oracle_directory: STATSCHEMA_DIR # Oracle DIRECTORY object (server-side path)
+    oracle_sqlldr_binary: /u01/app/oracle/product/21c/dbhome_1/bin/sqlldr
+    client_staging_dir: /mnt/shared/statschema
+    server_staging_dir: /mnt/shared/statschema
+
+  # ── IBM Db2 ────────────────────────────────────────────────────────────────
+  prod_db2:
+    dialect: db2
+    host: ${oc.env:DB2_HOST}
+    port: 50000
+    database: TESTDB
+    username: ${oc.env:DB2_USER}
+    password: ${oc.env:DB2_PASSWORD}
+    loader: server_file              # LOAD FROM … OF DEL (server-side file)
+    client_staging_dir: /tmp/statschema_staging
+    server_staging_dir: /tmp/statschema_staging
+
+  # ── MySQL ──────────────────────────────────────────────────────────────────
+  prod_mysql:
+    dialect: mysql
+    host: ${oc.env:MYSQL_HOST}
+    port: 3306
+    database: ${oc.env:MYSQL_DATABASE}
+    username: ${oc.env:MYSQL_USER}
+    password: ${oc.env:MYSQL_PASSWORD}
+    loader: server_file              # LOAD DATA INFILE
+
+  # ── Databricks Lakehouse (Unity Catalog / Spark runtime) ───────────────────
+  prod_lakehouse:
+    dialect: lakehouse
+    host: ${oc.env:DATABRICKS_HOST}
+    database: ${oc.env:DATABRICKS_CATALOG}
+    loader: cloud_staged             # COPY INTO from cloud storage
+    cloud_staging_uri: ${oc.env:DATABRICKS_STAGING_URI}
+    cloud_format: parquet
+    password: ${secrets:my_scope,databricks_token}
+
+  # ── Databricks Lakebase (Postgres-wire endpoint) ───────────────────────────
+  prod_lakebase:
+    dialect: lakebase
+    host: ${oc.env:LAKEBASE_HOST}
+    port: 5432
+    database: ${oc.env:LAKEBASE_DATABASE}
+    username: ${oc.env:LAKEBASE_USER}
+    password: ${secrets:my_scope,databricks_token}
+    endpoint: ${oc.env:LAKEBASE_ENDPOINT}   # projects/<p>/branches/<b>/endpoints/<e>
+    loader: client_stream            # same as postgres — COPY FROM STDIN
+
+  # ── CockroachDB ────────────────────────────────────────────────────────────
+  prod_cockroachdb:
+    dialect: cockroachdb
+    host: ${oc.env:CRDB_HOST}
+    port: 26257
+    database: defaultdb
+    username: root
+    tls: true
+    loader: client_stream
+
+  # ── Neon (serverless Postgres) ─────────────────────────────────────────────
+  prod_neon:
+    dialect: neon
+    host: ${oc.env:NEON_HOST}
+    port: 5432
+    database: neondb
+    username: ${oc.env:NEON_USER}
+    password: ${secrets:my_scope,neon_creds,password}
+    tls: true
+    loader: client_stream
+
+  # ── QEMU-emulated SQL Server (local dev / Lima VM) — emulated flag set ─────
+  lima_sqlserver:
+    dialect: sqlserver
+    host: 127.0.0.1
+    port: 11433
+    database: testdb
+    username: sa
+    password: ${oc.env:SQLSERVER_SA_PASSWORD}
+    loader: native_bulk
+    server_is_emulated: true         # suppresses process-forking loaders under QEMU

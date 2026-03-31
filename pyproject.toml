@@ -46,6 +46,7 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.20.0",
     "click>=8.0.0",
+    "omegaconf>=2.3.0",
 ]
 
 [project.optional-dependencies]

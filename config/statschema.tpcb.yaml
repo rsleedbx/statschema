@@ -1,0 +1,90 @@
+
+# statschema.tpcb.yaml — TPC-B connection profiles for all local dev databases.
+#
+# Each profile picks the fastest bulk-load method available for that engine
+# in a local dev / Lima VM setup.  Credentials come from .env via ${oc.env:…}.
+#
+# Fastest load method per engine:
+#   postgres    client_stream  — COPY … FROM STDIN (psycopg2, zero staging files)
+#   cockroachdb client_stream  — same COPY protocol as Postgres
+#   mysql       client_stream  — LOAD DATA LOCAL INFILE (streams from client)
+#   sqlserver   native_bulk    — cursor.bulkcopy() via mssql-python (no staging file)
+#   oracle      native_bulk    — oracledb direct_path_load (fastest under QEMU emulation;
+#                                avoids process-fork overhead of sqlldr / external tables)
+#   db2         server_file    — ADMIN_CMD LOAD from shared-FS CSV (fastest on Lima virtfs)
+#
+# Lima VMs (SQL Server, Oracle, Db2) run under QEMU x86_64 emulation on Apple Silicon.
+# server_is_emulated: true suppresses any loader that requires process-forking under QEMU.
+
+profiles:
+
+  # ── PostgreSQL 16 (Podman) ─────────────────────────────────────────────────
+  tpcb_postgres:
+    dialect: postgres
+    host: 127.0.0.1
+    port: ${oc.env:PG16_PORT,5416}
+    database: ${oc.env:PG_DB,testdb}
+    username: postgres
+    password: ${oc.env:PG_PASSWORD,testpass}
+    loader: client_stream
+
+  # ── MySQL 8 (Podman) ───────────────────────────────────────────────────────
+  tpcb_mysql:
+    dialect: mysql
+    host: 127.0.0.1
+    port: ${oc.env:MYSQL8_PORT,3384}
+    database: testdb
+    username: root
+    password: ${oc.env:MYSQL_ROOT_PASS,testpass}
+    loader: client_stream
+
+  # ── SQL Server 2022 (Lima QEMU VM) ────────────────────────────────────────
+  tpcb_sqlserver:
+    dialect: sqlserver
+    host: 127.0.0.1
+    port: ${oc.env:SQLSERVER_PORT,14330}
+    database: testdb
+    username: sa
+    password: ${oc.env:SQLSERVER_PASS}
+    loader: native_bulk
+    version: "2022"
+    server_is_emulated: true
+
+  # ── Oracle XE 21c (Lima QEMU VM) ──────────────────────────────────────────
+  # native_bulk → oracledb direct_path_load.
+  # Under QEMU, direct_path_load is ~7× faster than sqlldr/external tables
+  # because it avoids a JIT recompile on each process fork.
+  tpcb_oracle:
+    dialect: oracle
+    host: ${oc.env:ORACLE_HOST,127.0.0.1}
+    port: ${oc.env:ORACLE_PORT,1521}
+    database: ${oc.env:ORACLE_SERVICE,XE}
+    username: ${oc.env:ORACLE_USER,system}
+    password: ${oc.env:ORACLE_PASS,oracle}
+    loader: native_bulk
+    version: "21c"
+    server_is_emulated: true
+
+  # ── IBM Db2 CE 11.5 (Lima QEMU VM) ────────────────────────────────────────
+  # server_file → ADMIN_CMD LOAD FROM … OF DEL (fastest bulk path for Db2).
+  # Requires the Lima virtfs bind-mount so the Db2 server can read the staging CSV.
+  tpcb_db2:
+    dialect: db2
+    host: ${oc.env:DB2_HOST,127.0.0.1}
+    port: ${oc.env:DB2_PORT,50000}
+    database: ${oc.env:DB2_DATABASE,testdb}
+    username: ${oc.env:DB2_USER,db2inst1}
+    password: ${oc.env:DB2_PASS,testpass}
+    loader: server_file
+    client_staging_dir: ${oc.env:STATSCHEMA__CLIENT_STAGING_DIR,/tmp/lima/statschema}
+    server_staging_dir: ${oc.env:STATSCHEMA__SERVER_STAGING_DIR,/tmp/lima/statschema}
+    server_is_emulated: true
+
+  # ── CockroachDB single-node (Podman) ──────────────────────────────────────
+  tpcb_cockroachdb:
+    dialect: cockroachdb
+    host: ${oc.env:CRDB_HOST,127.0.0.1}
+    port: ${oc.env:CRDB_SINGLE_PORT,26257}
+    database: defaultdb
+    username: ${oc.env:CRDB_USER,root}
+    loader: client_stream

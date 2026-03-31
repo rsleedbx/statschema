@@ -240,7 +240,8 @@ class IdentityTestResult:
 # ---------------------------------------------------------------------------
 
 def _connect(dialect: str, dsn: str):
-    return _get_dialect(dialect).connect(dsn)
+    from benchmarks.dialects import ConnWrapper
+    return ConnWrapper(_get_dialect(dialect).connect(dsn))
 
 
 def _create_schema(conn, schema_name: str, dialect: str) -> None:
@@ -909,6 +910,7 @@ def build_target(
     fk_range_overrides: dict[str, dict[str, tuple[int, int]]] | None = None,
     pred_col_map: dict | None = None,
     full_stats: bool = False,
+    ctx: "Any | None" = None,
 ) -> tuple[dict[str, int], str]:
     """
     Phase D — create target_schema, load synthetic rows driven by collected
@@ -1036,6 +1038,7 @@ def build_target(
             strategy=_strat,
             cols=_cols,
             commit=False,
+            ctx=ctx,
         )
         try:
             conn.commit()
@@ -1181,7 +1184,9 @@ def run_identity_test(
     schema: str,
     sf: float,
     dialect: str,
-    dsn: str,
+    conn: "Any | None" = None,
+    ctx: "Any | None" = None,
+    connect_fn: "Any | None" = None,
     queries_yaml: Path | None = None,
     source_schema: str | None = None,
     target_schema: str | None = None,
@@ -1257,7 +1262,8 @@ def run_identity_test(
         stats_source_dialect=stats_source_dialect or "",
     )
 
-    conn = _connect(dialect, dsn)
+    if conn is None:
+        raise ValueError("run_identity_test: a connection must be provided via conn=")
     if dialect != "sqlserver":
         # mssql-python (SQL Server) requires autocommit=True for DDL (CREATE DATABASE,
         # DROP DATABASE, UPDATE STATISTICS) and sets it in _connect_sqlserver.
@@ -1296,7 +1302,7 @@ def run_identity_test(
     else:
         t0 = time.perf_counter()
         result.source_row_counts = load_source(
-            conn, schema, sf, source_schema, dialect, seed=seed
+            conn, schema, sf, source_schema, dialect, seed=seed, ctx=ctx
         )
         result.phase_times["A_load_source"] = time.perf_counter() - t0
 
@@ -1448,7 +1454,8 @@ def run_identity_test(
             conn.cursor().execute("SELECT 1")
         except Exception:
             conn.close()
-            conn = _connect(dialect, dsn)
+            if connect_fn:
+                conn = connect_fn()
             conn.autocommit = False
     else:
         collected_stats = collect_stats(
@@ -1467,6 +1474,7 @@ def run_identity_test(
         fk_range_overrides=fk_range_overrides or None,
         pred_col_map=_pred_map,
         full_stats=full_stats,
+        ctx=ctx,
     )
     result.phase_times["D_build_target"] = time.perf_counter() - t0
 
@@ -1511,7 +1519,8 @@ def run_identity_test(
     # local session's syscache may not process the invalidation within the same
     # connection, causing EXPLAIN to read stale (zero) statistics.
     conn.close()
-    conn = _connect(dialect, dsn)
+    if connect_fn:
+        conn = connect_fn()
     try:
         conn.autocommit = False
     except (AttributeError, TypeError):
@@ -1611,13 +1620,14 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="TPC schema to test (default: tpch)")
     p.add_argument("--sf",      type=float, default=1.0,
                    help="Scale factor for both source load and synthetic generation (default: 1)")
-    p.add_argument("--dialect", default="postgres",
+    p.add_argument("--dialect", default=None,
                    choices=["postgres", "lakebase", "neon", "cockroachdb",
                             "mysql", "mariadb", "sqlserver", "oracle", "db2"],
-                   help="Database dialect (default: postgres)")
-    p.add_argument("--dsn",     required=True,
-                   help='DB-API2 connection string, e.g. "host=127.0.0.1 port=5416 '
-                        'dbname=testdb user=postgres password=testpass"')
+                   help="Database dialect (default: derived from --conn-profile)")
+    p.add_argument("--profile-yaml", required=True, metavar="FILE",
+                   help="Path to statschema.yaml containing named connection profiles.")
+    p.add_argument("--conn-profile", required=True, metavar="NAME",
+                   help='Connection profile name from --profile-yaml, e.g. "tpcb_postgres".')
     p.add_argument("--queries", metavar="FILE",
                    help="Path to queries YAML (default: benchmarks/queries/<schema>.yaml)")
     p.add_argument("--source-schema", default=None,
@@ -1805,11 +1815,24 @@ def main() -> None:
             )
             print(f"  [C] Auto-selected profile '{matched}' for source dialect '{src_dialect}'")
 
+    from src.statschema.connection_profile import load_profile as _load_profile
+    from src.statschema.loader_context import DeploymentContext as _DC
+    from src.statschema.cli import _connect_from_profile as _cfp
+
+    _profile = _load_profile(args.profile_yaml, args.conn_profile)
+    _dialect = args.dialect or _profile.dialect
+    _ctx     = _DC.from_profile(_profile)
+    from benchmarks.dialects import ConnWrapper
+    _connect_fn = lambda: ConnWrapper(_cfp(_profile))
+    _conn    = _connect_fn()
+
     result = run_identity_test(
         schema=args.schema,
         sf=args.sf,
-        dialect=args.dialect,
-        dsn=args.dsn,
+        dialect=_dialect,
+        conn=_conn,
+        ctx=_ctx,
+        connect_fn=_connect_fn,
         queries_yaml=Path(args.queries) if args.queries else None,
         source_schema=args.source_schema,
         target_schema=args.target_schema,

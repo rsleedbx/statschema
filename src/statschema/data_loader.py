@@ -21,7 +21,6 @@ MULTI_ROW strategies still use the direct INSERT path for non-bulk workloads.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
@@ -52,11 +51,7 @@ from .dialects._loader_shared import (
 # Per-dialect bulk loaders (legacy functions kept for direct callers)
 from .dialects.postgres.loader   import bulk_load_postgres, PostgresCopyStdinLoader
 from .dialects.mysql.loader      import bulk_load_mysql, MySQLLocalInfileLoader
-from .dialects.sqlserver.loader  import (
-    SQLServerBCPLoader,
-    SQLServerBulkInsertLoader,
-    SQLServerMultiRowLoader,
-)
+from .dialects.sqlserver.loader  import SQLServerLoader
 from .dialects.db2.loader        import (
     bulk_load_db2,
     DB2AdminCmdLoader, DB2ImportLoader, DB2MultiRowLoader,
@@ -84,12 +79,8 @@ _LOADER_REGISTRY: dict[str, list] = {
     # --- MySQL family ---
     "mysql":        [MySQLLocalInfileLoader()],
     "mariadb":      [MySQLLocalInfileLoader()],
-    # --- SQL Server (priority: BCP → BULK INSERT → MULTI ROW) ---
-    "sqlserver": [
-        SQLServerBCPLoader(),
-        SQLServerBulkInsertLoader(),
-        SQLServerMultiRowLoader(),
-    ],
+    # --- SQL Server — single loader, slot selected by ctx.loader ---
+    "sqlserver": [SQLServerLoader()],
     # --- IBM Db2 ---
     "db2": [
         DB2AdminCmdLoader(),
@@ -124,43 +115,20 @@ _LOADER_REGISTRY: dict[str, list] = {
 
 
 def _select_loader(dialect: str, ctx: Any, col_types: list[str] | None):
-    """Return the loader to use for *dialect* in the current context.
+    """Return the first registered loader for *dialect* whose ``can_use()`` returns True.
 
-    When ``STATSCHEMA_<DIALECT>_LOADER`` is set (e.g.
-    ``STATSCHEMA_SQLSERVER_LOADER=bcp``), only that loader is considered.  If
-    its ``can_use()`` returns False the call raises ``RuntimeError`` — no silent
-    fallback.
-
-    When the env var is unset, the registry is scanned in priority order and
-    the first loader whose ``can_use()`` returns True is returned.
+    Loader selection is driven by ``ctx.loader`` (read inside the loader's
+    ``load()`` dispatcher for new-style DataLoader subclasses).  The registry
+    scan here is a topology filter only — it picks *which* loader class handles
+    this dialect; the chosen method within that class is resolved by the loader
+    itself from ``ctx.loader``.
     """
     loaders = _LOADER_REGISTRY.get(dialect, [])
-
-    env_key = f"STATSCHEMA_{dialect.upper()}_LOADER"
-    chosen  = os.environ.get(env_key, "").strip().lower()
-
-    if chosen:
-        named = [l for l in loaders if getattr(l, "loader_name", "") == chosen]
-        if not named:
-            available = [getattr(l, "loader_name", "<unnamed>") for l in loaders]
-            raise RuntimeError(
-                f"{env_key}={chosen!r} does not match any registered loader for "
-                f"dialect={dialect!r}.  Available: {available}"
-            )
-        loader = named[0]
-        if not loader.can_use(ctx, dialect, col_types):
-            raise RuntimeError(
-                f"{env_key}={chosen!r} is configured but "
-                f"{type(loader).__name__}.can_use() returned False.  "
-                "Check prerequisites (staging directory, driver, env vars)."
-            )
-        return loader
-
     for loader in loaders:
         if loader.can_use(ctx, dialect, col_types):
             return loader
     raise RuntimeError(
-        f"No topology-aware loader found for dialect={dialect!r}. "
+        f"No loader found for dialect={dialect!r}. "
         f"ctx.topology={getattr(ctx, 'topology', '?')!r}, "
         f"col_types_sample={col_types[:3] if col_types else None}"
     )
@@ -225,7 +193,7 @@ def load_dataframe(
     if strategy == LoadStrategy.BULK_COPY and dialect in _LOADER_REGISTRY:
         if ctx is None:
             from .loader_context import DeploymentContext
-            ctx = DeploymentContext.from_env()
+            ctx = DeploymentContext()
         loader = _select_loader(dialect, ctx, col_types)
         col_names = _col_names(df, cols)
         return loader.bulk_load(ctx, conn, df, table, col_names)
@@ -292,38 +260,6 @@ def load_dataframe(
         logger.info(
             "load_dataframe: oracledb direct_path_load %d rows into %s",
             inserted, table,
-        )
-        return inserted
-
-    if type(conn).__module__.split(".")[0] == "mssql_python":
-        import mssql_python as _mssql  # type: ignore
-        _qcur = conn.cursor()
-        _qcur.execute("SELECT DB_NAME()")
-        current_db = _qcur.fetchone()[0]
-        tmpl = getattr(conn, "_mssql_conn_template", None)
-        if tmpl:
-            bc_conn_str = tmpl.format(db=current_db)
-        else:
-            import re as _re
-            raw = conn.connection_str
-            raw = _re.sub(r"(?i)Driver=[^;]+;?", "", raw)
-            raw = _re.sub(r"(?i)APP=[^;]+;?", "", raw)
-            bc_conn_str = _re.sub(r"(?i)Database=[^;]+", f"Database={current_db}", raw)
-        bc_conn = _mssql.connect(bc_conn_str)
-        bc_conn.setautocommit(True)
-        bc_cur  = bc_conn.cursor()
-        bc_result = bc_cur.bulkcopy(
-            f"dbo.[{table}]",
-            _iter_rows(df),
-            column_mappings=col_names,
-            table_lock=True,
-            timeout=3600,
-        )
-        bc_conn.close()
-        inserted = bc_result.get("rows_copied", 0)
-        logger.info(
-            "load_dataframe: mssql-python bulkcopy %d rows into %s in %.2fs",
-            inserted, table, bc_result.get("elapsed_time", 0),
         )
         return inserted
 

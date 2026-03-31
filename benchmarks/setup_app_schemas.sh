@@ -168,18 +168,18 @@ setup_sqlserver() {
             "AdventureWorks2022.bak")
 
         # Stage via the shared filesystem so the SQL Server container can read it.
-        # STATSCHEMA_CLIENT_STAGING_DIR defaults to /tmp/lima for Lima dev setups
+        # STATSCHEMA__CLIENT_STAGING_DIR defaults to /tmp/lima for Lima dev setups
         # where /tmp/lima is bind-mounted into the SQL Server container.
-        local _staging_root="${STATSCHEMA_CLIENT_STAGING_DIR:-/tmp/lima}"
+        local _staging_root="${STATSCHEMA__CLIENT_STAGING_DIR:-/tmp/lima}"
         info "Staging .bak files via ${_staging_root} (shared with container)…"
         mkdir -p "${_staging_root}"
         cp "$awlt_bak" "${_staging_root}/AdventureWorksLT2022.bak"
         cp "$aw_bak"   "${_staging_root}/AdventureWorks2022.bak"
         chmod 644 "${_staging_root}/AdventureWorksLT2022.bak" "${_staging_root}/AdventureWorks2022.bak"
 
-        # The SQL Server container sees STATSCHEMA_SERVER_STAGING_DIR (may differ
+        # The SQL Server container sees STATSCHEMA__SERVER_STAGING_DIR (may differ
         # from the client path when using NFS or non-Lima bind-mounts).
-        local _server_root="${STATSCHEMA_SERVER_STAGING_DIR:-${_staging_root}}"
+        local _server_root="${STATSCHEMA__SERVER_STAGING_DIR:-${_staging_root}}"
         info "Restoring AdventureWorksLT2022 and AdventureWorks2022…"
         run sqlcmd -S "127.0.0.1,${port}" -U sa -P "$pass" -C -Q "
 RESTORE DATABASE [AdventureWorksLT2022]

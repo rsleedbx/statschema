@@ -269,7 +269,7 @@ tests:
     file: tests/test_live_lakebase.py
     engine: lakebase
     topology: cloud_staged
-    requires_env: [STATSCHEMA_CLOUD_STAGING_URI, DATABRICKS_HOST]
+    requires_env: [STATSCHEMA__CLOUD_STAGING_URI, DATABRICKS_HOST]
     description: "Lakebase bulk load via COPY INTO (Delta source-of-truth path)"
 
   - id: loader.db2.admin_cmd
@@ -278,7 +278,7 @@ tests:
     file: tests/test_live_db2.py
     engine: db2
     topology: shared_fs
-    requires_env: [STATSCHEMA_SERVER_STAGING_DIR]
+    requires_env: [STATSCHEMA__SERVER_STAGING_DIR]
     description: "DB2 bulk load via ADMIN_CMD LOAD (fastest; requires shared filesystem — NFS/bind-mount/Lima virtfs)"
 
   - id: loader.db2.import
@@ -312,7 +312,7 @@ tests:
     file: tests/test_live_oracle.py
     engine: oracle
     topology: shared_fs
-    requires_env: [ORACLE_SERVER_DIRECTORY, STATSCHEMA_SERVER_STAGING_DIR]
+    requires_env: [STATSCHEMA__ORACLE__DIRECTORY, STATSCHEMA__SERVER_STAGING_DIR]
     description: "Oracle bulk load via External Table + INSERT SELECT (native x86_64; shared filesystem required — Oracle DIRECTORY object on NFS/bind-mount)"
 
   - id: loader.sqlserver.bcp

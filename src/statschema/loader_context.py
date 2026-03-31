@@ -1,92 +1,21 @@
 """
-loader_context — DeploymentContext and CredentialProvider chain.
+loader_context — DeploymentContext.
 
 DeploymentContext captures *where* statschema is running relative to the
 database: the topology (remote, shared_fs, spark_embedded, …) plus any
 staging-area coordinates (Oracle directory object, cloud URI, live Spark
 session).
 
-CredentialProvider is a Protocol that lets multiple sources supply
-credentials; the chain merges them lowest-precedence first so local .env
-values always win over remote secrets.
+The primary constructor is ``from_profile()``.  Connection credentials
+(host, port, username, password, database, endpoint) are carried on the
+context so loaders that spawn subprocesses (OracleSqlldrLoader) can build
+connection strings without reading os.environ.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
-
-
-# ---------------------------------------------------------------------------
-# CredentialProvider protocol + built-in implementations
-# ---------------------------------------------------------------------------
-
-class CredentialProvider:
-    """
-    All credential sources implement one method: load() → dict[str, str].
-
-    Keys mirror .env variable names (STATSCHEMA_*, PG_PASSWORD, …).
-    Absent keys are not set to empty string — only known keys are returned.
-    Callers merge multiple providers via dict.update() (last wins).
-    """
-
-    def load(self) -> dict[str, str]:  # pragma: no cover
-        raise NotImplementedError
-
-    @staticmethod
-    def for_backend(backend: str, **kwargs: Any) -> "CredentialProvider":
-        """
-        Factory: resolve a backend name to a concrete provider.
-
-        Phase 1 supports: "databricks"
-        Phase 2 will add: "aws" | "vault" | "azure" | "gcp"
-        """
-        _registry: dict[str, type] = {
-            "databricks": DatabricksSecretProvider,
-            # Phase 2 — add class body, then uncomment:
-            # "aws":    AwsSecretsManagerProvider,
-            # "vault":  HashiCorpVaultProvider,
-            # "azure":  AzureKeyVaultProvider,
-            # "gcp":    GcpSecretManagerProvider,
-        }
-        if backend not in _registry:
-            raise ValueError(
-                f"Unknown STATSCHEMA_SECRETS_BACKEND={backend!r}. "
-                f"Phase 1 valid values: {list(_registry)}"
-            )
-        return _registry[backend](**kwargs)
-
-
-class EnvCredentialProvider(CredentialProvider):
-    """Loads credentials from os.environ (populated by python-dotenv from .env)."""
-
-    def load(self) -> dict[str, str]:
-        return dict(os.environ)
-
-
-class DatabricksSecretProvider(CredentialProvider):
-    """
-    Fetches a Databricks secret (JSON blob) from a named scope + key.
-
-    Delegates to databricks_secrets.load_credentials(), which handles:
-    - Serverless notebooks   (databricks.sdk.runtime.dbutils, DBR 14.1+)
-    - Classic shared cluster (IPython user namespace)
-    - Databricks Connect     (WorkspaceClient SDK + base64 decode)
-
-    JSON format: either the flat statschema env-var format
-    {"PG_PASSWORD": "...", ...} or LfcCredential v2 format
-    {"version": "v2", "db_type": "postgresql", "host_fqdn": ..., ...}.
-    Both are normalised to statschema .env var names automatically.
-    """
-
-    def __init__(self, scope: str, key: str):
-        self.scope = scope
-        self.key = key
-
-    def load(self) -> dict[str, str]:
-        from statschema.databricks_secrets import load_credentials  # type: ignore[import]
-        return load_credentials(self.scope, self.key)
 
 
 # ---------------------------------------------------------------------------
@@ -142,11 +71,10 @@ class DeploymentContext:
     # server_staging_dir (or neither) is sufficient.
     #
     # Env vars:
-    #   STATSCHEMA_CLIENT_STAGING_DIR  — where statschema writes staging files
-    #   STATSCHEMA_SERVER_STAGING_DIR  — where the DB server reads them
+    #   STATSCHEMA__CLIENT_STAGING_DIR  — where statschema writes staging files
+    #   STATSCHEMA__SERVER_STAGING_DIR  — where the DB server reads them
     #
-    # If client_staging_dir is unset, server_staging_dir is used for writes too
-    # (backward-compatible with the old single-path behaviour).
+    # If client_staging_dir is unset, server_staging_dir is used for writes too.
 
     client_staging_dir: str | None = None
     """Filesystem path where statschema writes staging files (statschema's mount point)."""
@@ -172,115 +100,73 @@ class DeploymentContext:
 
     # Phase 2: iam_role: str | None = None  (Redshift / Aurora S3-backed COPY)
 
+    # --- Loader method selection ---
+    # Set by from_profile() via ConnectionProfile.loader, or read from
+    # STATSCHEMA__LOADER env var in from_env().
+    # DataLoader.load() reads ctx.loader to choose the bulk-load slot.
+    # No fallback — raises immediately if unset or unsupported.
+    loader: str | None = None
+
+    # DB server version string (e.g. "2022", "23c", "16").
+    # Used by DataLoader._method_min_server_version checks.
+    server_version: str | None = None
+
+    # Binary paths (dialect-specific, set by profile or env var)
+    oracle_sqlldr_binary: str | None = None
+
+    # --- Connection credentials (carried for subprocess loaders, e.g. sqlldr) ---
+    # These are populated by from_profile() so that loaders which spawn external
+    # binaries (OracleSqlldrLoader) can build connection strings without reading
+    # os.environ.
+    host:     str | None = None
+    port:     int | None = None
+    database: str | None = None
+    username: str | None = None
+    password: str | None = None
+    endpoint: str | None = None   # Lakebase OAuth endpoint resource path
+
     # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
 
     @classmethod
-    def _ctx_from_dict(cls, d: dict[str, str]) -> "DeploymentContext":
+    def from_profile(cls, profile: "Any") -> "DeploymentContext":
         """
-        Resolve topology and build a DeploymentContext from any key-value dict.
+        Build a DeploymentContext from a ConnectionProfile.
 
-        Priority order (first match wins):
-        1. STATSCHEMA_TOPOLOGY set explicitly → use it directly.
-        2. STATSCHEMA_CLOUD_STAGING_URI set   → topology="cloud_staged".
-        3. STATSCHEMA_SERVER_STAGING_DIR or STATSCHEMA_CLIENT_STAGING_DIR set
-                                              → topology="shared_fs".
-        4. Default                            → topology="remote".
+        This is the primary constructor for production use.  All configuration
+        comes from the typed profile object — no os.environ reads at call time.
         """
-        def g(k: str) -> str:
-            return d.get(k, "").strip()
-
-        is_emulated = g("STATSCHEMA_SERVER_IS_EMULATED").lower() in ("1", "true", "yes")
-
-        client_dir = g("STATSCHEMA_CLIENT_STAGING_DIR") or None
-        server_dir = g("STATSCHEMA_SERVER_STAGING_DIR") or None
-
-        explicit = g("STATSCHEMA_TOPOLOGY")
-        if explicit:
-            return cls(
-                topology=explicit,  # type: ignore[arg-type]
-                cloud_staging_uri=g("STATSCHEMA_CLOUD_STAGING_URI") or None,
-                oracle_directory=g("ORACLE_SERVER_DIRECTORY") or None,
-                client_staging_dir=client_dir,
-                server_staging_dir=server_dir,
-                server_is_emulated=is_emulated,
-                is_databricks=bool(g("DATABRICKS_HOST")),
-            )
-
-        cloud_uri = g("STATSCHEMA_CLOUD_STAGING_URI")
-        if cloud_uri:
-            return cls(
-                topology="cloud_staged",
-                cloud_staging_uri=cloud_uri,
-                server_is_emulated=is_emulated,
-                is_databricks=bool(g("DATABRICKS_HOST")),
-            )
-
-        if server_dir or client_dir:
-            return cls(
-                topology="shared_fs",
-                oracle_directory=g("ORACLE_SERVER_DIRECTORY") or None,
-                client_staging_dir=client_dir,
-                server_staging_dir=server_dir,
-                server_is_emulated=is_emulated,
-            )
-
+        topology = profile.topology or cls._infer_topology_from_profile(profile)
+        dialect = getattr(profile, "dialect", "")
         return cls(
-            topology="remote",
-            oracle_directory=g("ORACLE_SERVER_DIRECTORY") or None,
-            client_staging_dir=client_dir,
-            server_staging_dir=server_dir,
-            server_is_emulated=is_emulated,
+            topology=topology,  # type: ignore[arg-type]
+            client_staging_dir=profile.client_staging_dir,
+            server_staging_dir=profile.server_staging_dir,
+            oracle_directory=profile.oracle_directory,
+            oracle_sqlldr_binary=profile.oracle_sqlldr_binary,
+            cloud_staging_uri=profile.cloud_staging_uri,
+            cloud_format=profile.cloud_format or "parquet",
+            server_is_emulated=profile.server_is_emulated or False,
+            is_databricks=dialect in ("databricks", "lakehouse"),
+            loader=profile.loader,
+            server_version=profile.version,
+            host=profile.host,
+            port=profile.port,
+            database=profile.database,
+            username=profile.username,
+            password=profile.password,
+            endpoint=getattr(profile, "endpoint", None),
         )
 
-    @classmethod
-    def from_providers(
-        cls,
-        providers: "list[CredentialProvider]",
-    ) -> "DeploymentContext":
-        """
-        Build a DeploymentContext by merging credentials from an ordered list
-        of CredentialProvider instances (left-to-right; later providers win).
-
-        Standard ordering — lowest to highest precedence:
-            [DatabricksSecretProvider(...), EnvCredentialProvider()]
-        → secret provides the base; env vars override individual keys for
-          local dev / overrides.
-        """
-        merged: dict[str, str] = {}
-        for p in providers:
-            merged.update(p.load())
-        return cls._ctx_from_dict(merged)
-
-    @classmethod
-    def from_env(cls) -> "DeploymentContext":
-        """
-        Build a DeploymentContext using auto-detected credential providers.
-
-        Provider chain (lowest → highest precedence, later entries win):
-        1. Secret backend — if STATSCHEMA_SECRETS_BACKEND is set, instantiate
-           that provider with STATSCHEMA_SECRETS_SCOPE / STATSCHEMA_SECRETS_KEY.
-           Defaults to 'databricks' when scope+key are present and no backend
-           is named explicitly.
-        2. EnvCredentialProvider — os.environ always layers on top, so a local
-           .env can override individual keys from any secret backend.
-
-        If no secrets are configured, only EnvCredentialProvider is used —
-        identical behaviour to the original implementation.
-        """
-        providers: list[CredentialProvider] = []
-
-        scope = os.environ.get("STATSCHEMA_SECRETS_SCOPE", "").strip()
-        key = os.environ.get("STATSCHEMA_SECRETS_KEY", "").strip()
-        backend = os.environ.get("STATSCHEMA_SECRETS_BACKEND", "").strip()
-
-        if scope and key:
-            backend = backend or "databricks"
-            providers.append(CredentialProvider.for_backend(backend, scope=scope, key=key))
-
-        providers.append(EnvCredentialProvider())   # always last — highest precedence
-        return cls.from_providers(providers)
+    @staticmethod
+    def _infer_topology_from_profile(profile: "Any") -> str:
+        """Infer topology from profile fields when profile.topology is None."""
+        if profile.cloud_staging_uri:
+            return "cloud_staged"
+        if profile.client_staging_dir or profile.server_staging_dir:
+            return "shared_fs"
+        return "remote"
 
     @classmethod
     def from_spark_session(cls, spark: Any) -> "DeploymentContext":

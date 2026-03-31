@@ -25,6 +25,10 @@
 #   ./benchmarks/run_identity.sh [OPTIONS]
 #
 # OPTIONS
+#   --profile-yaml FILE Path to statschema.yaml (required).
+#                       e.g. config/statschema.tpcb.yaml
+#                       Profiles must be named {yaml_prefix}_{engine}
+#                       (e.g. tpcb_postgres, tpcb_sqlserver).
 #   --skip-setup        Skip container/VM startup (databases already running).
 #   --skip-load         Reuse existing source schema data; skip Phase A.
 #   --engines LIST      Comma-separated engines (default: postgres,cockroachdb,mysql,sqlserver,oracle,db2).
@@ -50,6 +54,7 @@ load_dotenv
 find_python
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
+PROFILE_YAML=""
 SKIP_SETUP=0
 SKIP_LOAD=""
 ENGINES="postgres,cockroachdb,mysql,sqlserver,oracle,db2"
@@ -62,6 +67,7 @@ NO_WAVE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --profile-yaml)      PROFILE_YAML="$2"; shift ;;
         --skip-setup)        SKIP_SETUP=1 ;;
         --skip-load)         SKIP_LOAD="--skip-load" ;;
         --engines)           ENGINES="$2"; shift ;;
@@ -79,6 +85,10 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+if [[ -z "$PROFILE_YAML" ]]; then
+    die "--profile-yaml is required. Example: --profile-yaml config/statschema.tpcb.yaml"
+fi
 
 # ── Phase 0: start databases ─────────────────────────────────────────────────
 if [[ $SKIP_SETUP -eq 0 ]]; then
@@ -119,6 +129,7 @@ if [[ $USE_TWO_WAVE -eq 1 ]]; then
     info "--- Wave 1: Podman engines ($WAVE1_ENGINES) ---"
     # shellcheck disable=SC2086
     "$VENV" benchmarks/run_matrix.py identity \
+        --profile-yaml "$PROFILE_YAML" \
         --engines  "$WAVE1_ENGINES" \
         --schemas  "$SCHEMAS" \
         --phases   "$PHASES" \
@@ -131,10 +142,11 @@ if [[ $USE_TWO_WAVE -eq 1 ]]; then
     info "--- Wave 2: QEMU engines ($WAVE2_ENGINES) with schema-workers=3 ---"
     # shellcheck disable=SC2086
     "$VENV" benchmarks/run_matrix.py identity \
-        --engines       "$WAVE2_ENGINES" \
-        --schemas       "$SCHEMAS" \
-        --phases        "$PHASES" \
-        --log-dir       "$LOG_DIR" \
+        --profile-yaml   "$PROFILE_YAML" \
+        --engines        "$WAVE2_ENGINES" \
+        --schemas        "$SCHEMAS" \
+        --phases         "$PHASES" \
+        --log-dir        "$LOG_DIR" \
         --schema-workers 3 \
         $SKIP_LOAD \
         $NO_EXT_STATS
@@ -145,6 +157,7 @@ else
     info "=== Identity matrix: engines=$ENGINES  schemas=$SCHEMAS ==="
     # shellcheck disable=SC2086
     exec "$VENV" benchmarks/run_matrix.py identity \
+        --profile-yaml "$PROFILE_YAML" \
         --engines  "$ENGINES" \
         --schemas  "$SCHEMAS" \
         --phases   "$PHASES" \

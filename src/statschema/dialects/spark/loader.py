@@ -48,7 +48,6 @@ class SparkInClusterLoader(TopologyAwareLoader):
     ``conn`` is ignored.
     """
 
-    loader_name = "in_cluster"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return (
@@ -86,7 +85,6 @@ class SparkCloudStagedLoader(TopologyAwareLoader):
     Requires ``ctx.cloud_staging_uri`` (e.g. ``"s3://bucket/prefix/"``).
     """
 
-    loader_name = "cloud_staged"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return (

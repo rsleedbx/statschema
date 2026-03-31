@@ -179,7 +179,6 @@ class DB2AdminCmdLoader(TopologyAwareLoader):
     DB2ImportLoader (IMPORT) when CLOBs are present.
     """
 
-    loader_name = "admin_cmd"
     _CLOB_TYPES = frozenset({"string", "clob", "nclob"})
 
     def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
@@ -217,7 +216,6 @@ class DB2ImportLoader(TopologyAwareLoader):
     resolve the file path, but does NOT exclude CLOB columns.
     """
 
-    loader_name = "import"
 
     def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
         if dialect != "db2":
@@ -245,7 +243,6 @@ class DB2MultiRowLoader(TopologyAwareLoader):
     Used when no shared filesystem is configured (remote topology).
     """
 
-    loader_name = "multi_row"
 
     def can_use(self, ctx, dialect: str, col_types: list[str] | None) -> bool:
         return dialect == "db2"

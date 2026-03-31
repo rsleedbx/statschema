@@ -61,7 +61,6 @@ from benchmarks.bench_config import (
     DEFAULT_SCHEMAS,
     BENCH_TPCC_SF,
     BENCH_TPCH_SF,
-    build_dsn,
     sf_for,
 )
 
@@ -236,10 +235,20 @@ def _run_check_run(
 # Identity mode
 # ---------------------------------------------------------------------------
 
+def _profile_name(profile_yaml: str, engine: str) -> str:
+    """Derive profile name from YAML path + engine.
+
+    ``config/statschema.tpcb.yaml`` → prefix ``tpcb`` → ``tpcb_postgres``.
+    """
+    stem   = Path(profile_yaml).stem          # "statschema.tpcb" or "tpcb"
+    prefix = stem.removeprefix("statschema.")  # "tpcb"
+    return f"{prefix}_{engine}"
+
+
 def _run_one_identity(
     engine: str,
     schema: str,
-    dsn: str,
+    profile_yaml: str,
     log_dir: Path,
     phases: list[str],
     skip_load: bool,
@@ -255,10 +264,11 @@ def _run_one_identity(
     phases_str = ",".join(phases) if phases != ALL_PHASES else None
     cmd = [
         _python(), "benchmarks/identity_test.py",
-        "--schema",  schema,
-        "--sf",      str(sf),
-        "--dialect", engine,
-        "--dsn",     dsn,
+        "--schema",       schema,
+        "--sf",           str(sf),
+        "--dialect",      engine,
+        "--profile-yaml",  profile_yaml,
+        "--conn-profile",  _profile_name(profile_yaml, engine),
     ]
     if skip_load:
         cmd.append("--skip-load")
@@ -270,9 +280,6 @@ def _run_one_identity(
         cmd += ["--phases", phases_str]
 
     env = {**os.environ, **(extra_env or {})}
-    for var in ("STATSCHEMA_SERVER_STAGING_DIR", "STATSCHEMA_CLIENT_STAGING_DIR"):
-        if os.environ.get(var):
-            env.setdefault(var, os.environ[var])
 
     t0 = time.monotonic()
     proc = subprocess.run(
@@ -288,7 +295,7 @@ def _run_one_identity(
     result.passed     = proc.returncode == 0
 
     if result.passed and "validate" in phases:
-        _run_check_run(result.json_path, log_file, engine, dsn)
+        _run_check_run(result.json_path, log_file, engine, profile_yaml)
 
     return result
 
@@ -296,7 +303,7 @@ def _run_one_identity(
 def _run_engine_identity(
     engine: str,
     schemas: list[str],
-    dsn: str,
+    profile_yaml: str,
     log_dir: Path,
     phases: list[str],
     skip_load: bool,
@@ -316,7 +323,7 @@ def _run_engine_identity(
     if schema_workers == 1:
         results = []
         for schema in schemas:
-            r = _run_one_identity(engine, schema, dsn, log_dir, phases, skip_load,
+            r = _run_one_identity(engine, schema, profile_yaml, log_dir, phases, skip_load,
                                   no_extended_stats, full_stats=full_stats)
             status = "PASS" if r.passed else "FAIL"
             logger.info("%s  %s", status, r.label())
@@ -336,7 +343,7 @@ def _run_engine_identity(
         futures = {
             pool.submit(
                 _run_one_identity,
-                engine, schema, dsn, log_dir, phases, skip_load, no_extended_stats,
+                engine, schema, profile_yaml, log_dir, phases, skip_load, no_extended_stats,
                 full_stats=full_stats,
             ): schema
             for schema in lpt_schemas
@@ -352,7 +359,7 @@ def _run_engine_identity(
 def run_identity_matrix(
     engines: list[str] | None = None,
     schemas: list[str] | None = None,
-    dsns: dict[str, str] | None = None,
+    profile_yaml: str | None = None,
     log_dir: Path | str | None = None,
     skip_load: bool = False,
     no_extended_stats: bool = False,
@@ -368,31 +375,38 @@ def run_identity_matrix(
 
     Parameters
     ----------
-    engines        : list of engine names, default DEFAULT_ENGINES
-    schemas        : list of TPC schema names, default DEFAULT_SCHEMAS
-    dsns           : dict mapping engine → DSN string; built from env if not provided
-    log_dir        : directory for per-run log files
-    phases         : subset of ALL_PHASES to run; default = all phases
-    sweep_random   : if set, randomly sample this many (engine, schema) pairs from
-                     the full matrix — useful for a quick smoke test that finds bugs
-                     without running all N×M combinations
+    engines      : list of engine names, default DEFAULT_ENGINES
+    schemas      : list of TPC schema names, default DEFAULT_SCHEMAS
+    profile_yaml : path to statschema.yaml; profiles named ``{prefix}_{engine}``
+                   are looked up automatically (e.g. ``tpcb_postgres``).
+                   Engines whose profile is absent from the file are skipped.
+    log_dir      : directory for per-run log files
+    phases       : subset of ALL_PHASES to run; default = all phases
+    sweep_random : if set, randomly sample this many (engine, schema) pairs
     """
+    if not profile_yaml:
+        raise ValueError(
+            "run_identity_matrix: profile_yaml is required.  "
+            "Pass the path to statschema.yaml, e.g. 'config/statschema.tpcb.yaml'."
+        )
+
     _load_dotenv()
     engines = engines or DEFAULT_ENGINES
     schemas = schemas or DEFAULT_SCHEMAS
     phases  = phases  or ALL_PHASES
-    dsns    = dsns    or {}
 
     ts      = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log_dir = Path(log_dir) if log_dir else LOGS_DIR / f"identity-{ts}"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_dsns: dict[str, str] = {}
+    # Verify which engines have a named profile in the YAML; skip those that don't.
+    from src.statschema.connection_profile import _load_profile_dict  # noqa: PLC0415
     skipped: list[str] = []
     for engine in engines:
+        pname = _profile_name(profile_yaml, engine)
         try:
-            resolved_dsns[engine] = dsns.get(engine) or build_dsn(engine)
-        except ValueError as exc:
+            _load_profile_dict(profile_yaml, pname)
+        except (KeyError, FileNotFoundError) as exc:
             logger.warning("Skipping %s: %s", engine, exc)
             skipped.append(engine)
     active_engines = [e for e in engines if e not in skipped]
@@ -422,6 +436,7 @@ def run_identity_matrix(
                 "engines":                 active_engines,
                 "schemas":                 schemas,
                 "phases":                  phases,
+                "profile_yaml":            profile_yaml,
                 "schema_workers_override": schema_workers_override,
                 "schema_workers_resolved": {
                     e: schema_workers_override or _SCHEMA_WORKERS.get(e, _DEFAULT_SCHEMA_WORKERS)
@@ -431,7 +446,6 @@ def run_identity_matrix(
                 "sweep_random":            sweep_random,
                 "full_stats":              full_stats,
             },
-            dsns=resolved_dsns,
             log_dir=log_dir,
         )
         env_path = run_env.write(env, log_dir)
@@ -450,7 +464,7 @@ def run_identity_matrix(
         futures = {
             pool.submit(
                 _run_engine_identity,
-                engine, schemas_for_engine[engine], resolved_dsns[engine],
+                engine, schemas_for_engine[engine], profile_yaml,
                 log_dir, phases, skip_load, no_extended_stats,
                 schema_workers_override, full_stats,
             ): engine
@@ -654,6 +668,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── identity ──────────────────────────────────────────────────────────────
     ident = sub.add_parser("identity", help="Same-engine identity test matrix")
+    ident.add_argument("--profile-yaml", required=True, metavar="FILE",
+                       help="Path to statschema.yaml (e.g. config/statschema.tpcb.yaml). "
+                            "Profiles are looked up as {yaml_prefix}_{engine}.")
     ident.add_argument("--engines",  default=",".join(DEFAULT_ENGINES))
     ident.add_argument("--schemas",  default=",".join(DEFAULT_SCHEMAS))
     ident.add_argument("--log-dir",  default=None)
@@ -727,6 +744,7 @@ def main(argv: list[str] | None = None) -> int:
         results = run_identity_matrix(
             engines=args.engines.split(","),
             schemas=args.schemas.split(","),
+            profile_yaml=args.profile_yaml,
             log_dir=args.log_dir,
             skip_load=args.skip_load,
             no_extended_stats=args.no_extended_stats,

@@ -1,0 +1,76 @@
+run_id: identity-20260331-165855
+timestamp: '2026-03-31T21:58:56.344567+00:00'
+git_commit: 954923860809b22750bf88cf88d4f0be0c78128e
+invocation:
+  argv:
+  - benchmarks/run_matrix.py
+  - identity
+  - --profile-yaml
+  - config/statschema.tpcb.yaml
+  - --engines
+  - postgres,cockroachdb,mysql
+  - --schemas
+  - tpcb,tpcc,tpch,tpcdi,tpcds,tpce
+  - --phases
+  - load_source,explain_source,collect_stats,load_target,explain_target,score,validate
+  - --log-dir
+  - benchmarks/logs/identity-20260331-165855
+  cwd: /Users/robert.lee/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: 3.11.13
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines:
+  - postgres
+  - cockroachdb
+  - mysql
+  schemas:
+  - tpcb
+  - tpcc
+  - tpch
+  - tpcdi
+  - tpcds
+  - tpce
+  phases:
+  - load_source
+  - explain_source
+  - collect_stats
+  - load_target
+  - explain_target
+  - score
+  - validate
+  profile_yaml: config/statschema.tpcb.yaml
+  schema_workers_override: null
+  schema_workers_resolved:
+    postgres: 6
+    cockroachdb: 4
+    mysql: 4
+  lpt_ordering: true
+  sweep_random: null
+  full_stats: false
+engines:
+  postgres:
+    version: null
+    driver: psycopg2
+    driver_version: null
+    error: 'connection to server at "127.0.0.1", port 5418 failed: FATAL:  database
+      "testdb" does not exist
+
+      '
+  cockroachdb:
+    version: CockroachDB CCL v26.1.1 (aarch64-unknown-linux-gnu, built 2026/03/04
+      12:08:27, go1.25.5)
+    driver: psycopg2
+    driver_version: null
+    error: null
+  mysql:
+    version: null
+    driver: pymysql
+    driver_version: 1.1.2
+    error: (1049, "Unknown database 'testdb'")

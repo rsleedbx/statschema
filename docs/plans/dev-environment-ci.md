@@ -137,8 +137,8 @@ Actions calls it directly.
 Staging directory for file-based bulk loaders (DB2, Oracle):
 
 ```
-STATSCHEMA_CLIENT_STAGING_DIR=/tmp/statschema
-STATSCHEMA_SERVER_STAGING_DIR=/tmp/statschema
+STATSCHEMA__CLIENT_STAGING_DIR=/tmp/statschema
+STATSCHEMA__SERVER_STAGING_DIR=/tmp/statschema
 ```
 
 Both sides use the same path because the DB server process runs on the same host

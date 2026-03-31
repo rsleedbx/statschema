@@ -250,7 +250,7 @@ admin_cmd_path = host_path    # no copy step needed
 ```
 
 The `_db2_container_copy()` function and container-copy path have been removed.
-`topology="shared_fs"` is selected when `STATSCHEMA_SERVER_STAGING_DIR` is set.
+`topology="shared_fs"` is selected when `STATSCHEMA__SERVER_STAGING_DIR` is set.
 For the Lima dev setup both sides see `/tmp/lima/statschema` via virtfs, so no
 path translation is needed (`client_staging_dir == server_staging_dir`).
 

@@ -29,20 +29,20 @@ Secret JSON formats — two variants are accepted transparently:
       This allows a single Databricks secret to be shared between statschema
       and lfcdemolib without duplication.
 
-Typical usage in a notebook or loader:
+Typical usage — inline OmegaConf resolver in statschema.yaml:
+
+    profiles:
+      prod_postgres:
+        host:     ${secrets:my_scope,mydb_creds,host}
+        password: ${secrets:my_scope,mydb_creds,password}
+
+Or directly in Python:
 
     from statschema.databricks_secrets import read_secret_string, parse_secret_json
 
     raw   = read_secret_string(scope="my_scope", key="mydb.example.com_json")
     creds = parse_secret_json(raw)
     # {"PG_HOST": "...", "PG_PASSWORD": "...", ...}
-
-Or via DatabricksSecretProvider in loader_context (reads STATSCHEMA_SECRETS_*
-env vars and calls load_credentials() automatically):
-
-    STATSCHEMA_SECRETS_SCOPE = my_scope
-    STATSCHEMA_SECRETS_KEY   = mydb.example.com_json
-    ctx = DeploymentContext.from_env()
 """
 
 from __future__ import annotations
