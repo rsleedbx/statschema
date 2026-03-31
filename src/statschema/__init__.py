@@ -160,8 +160,12 @@ from .data_loader import (
     load_dataframe,
     bulk_load_postgres,
     bulk_load_mysql,
-    bulk_load_sqlserver,
     bulk_load_db2,
+)
+from .dialects.sqlserver.loader import (
+    bulk_load_sqlserver_bcp,
+    bulk_load_sqlserver_bulk_insert,
+    bulk_load_sqlserver_multi_row,
 )
 from .query_model import QueryEntry, QueryWorkload, ReplayResult, dump_queries, load_queries
 from .query_collector import collect_top_queries
@@ -263,7 +267,9 @@ __all__ = [
     "load_dataframe",
     "bulk_load_postgres",
     "bulk_load_mysql",
-    "bulk_load_sqlserver",
+    "bulk_load_sqlserver_bcp",
+    "bulk_load_sqlserver_bulk_insert",
+    "bulk_load_sqlserver_multi_row",
     "bulk_load_db2",
     "apply_overrides_all",
     # Query workload (collect → transpile → replay)

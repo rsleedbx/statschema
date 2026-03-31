@@ -51,7 +51,8 @@ class SQLServerDialect:
         # DDL (CREATE DATABASE, DROP DATABASE, UPDATE STATISTICS) must run outside
         # an explicit transaction.
         conn.setautocommit(True)
-        # Store a clean template for data_loader's bulkcopy() connections.
+        # Template used by set_namespace() to reconnect to a different database
+        # without USE [db] (not supported on Azure SQL Database).
         conn._mssql_conn_template = (
             f"SERVER={host},{port};"
             f"DATABASE={{db}};"
@@ -59,6 +60,9 @@ class SQLServerDialect:
             f"PWD={password};"
             "ENCRYPT=no;TrustServerCertificate=yes"
         )
+        # Track the current catalog on the connection so callers never need to
+        # round-trip SELECT DB_NAME().
+        conn._statschema_db = database
         return conn
 
     # ------------------------------------------------------------------ #
@@ -84,9 +88,31 @@ class SQLServerDialect:
             # New databases inherit FULL from the model database; override for test namespaces.
             cur.execute(f"ALTER DATABASE [{schema_name}] SET RECOVERY SIMPLE")
 
-    def set_namespace(self, conn, schema_name: str) -> None:
-        with conn.cursor() as cur:
-            cur.execute(f"USE [{schema_name}]")
+    def set_namespace(self, conn, schema_name: str):
+        """Reconnect to target database; returns the new connection.
+
+        Does NOT use USE [db] — that statement is unsupported on Azure SQL
+        Database and on any SQL Server connection with a pooled session.
+        Instead we close the current connection and open a fresh one to the
+        target database using the template stored at connect() time.
+        """
+        import mssql_python  # type: ignore
+        tmpl = getattr(conn, "_mssql_conn_template", None)
+        if tmpl is None:
+            raise RuntimeError(
+                "SQLServerDialect.set_namespace: conn._mssql_conn_template is not set. "
+                "Create the connection via SQLServerDialect.connect() so the "
+                "database-switch template is available."
+            )
+        try:
+            conn.close()
+        except Exception:
+            pass
+        new_conn = mssql_python.connect(tmpl.format(db=schema_name))
+        new_conn.setautocommit(True)
+        new_conn._mssql_conn_template = tmpl
+        new_conn._statschema_db = schema_name
+        return new_conn
 
     # ------------------------------------------------------------------ #
     # Statistics                                                           #
@@ -124,7 +150,7 @@ class SQLServerDialect:
     # ------------------------------------------------------------------ #
 
     def explain(self, conn, sql: str, schema: str) -> dict:
-        self.set_namespace(conn, schema)
+        conn = self.set_namespace(conn, schema)
         with conn.cursor() as cur:
             cur.execute("SET SHOWPLAN_ALL ON")
             try:

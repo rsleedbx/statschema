@@ -390,70 +390,280 @@ class TestLoadDataframe:
                            strategy=LoadStrategy.BULK_COPY, cols=COLS)
 
 
+def _mssql_python_conn(db_name: str = "testdb"):
+    """Fake mssql-python connection with _statschema_db set (as connect() does)."""
+    fake_cur = MagicMock()
+    fake_cur.bulkcopy.return_value = {"rows_copied": None}
+    FakeConn = type("Connection", (), {"__module__": "mssql_python.connection"})
+    conn = FakeConn()
+    conn.cursor = MagicMock(return_value=fake_cur)
+    conn.commit = MagicMock()
+    conn._statschema_db = db_name
+    conn._fake_cur = fake_cur
+    return conn
+
+
 class TestBulkLoadSqlServerBCP:
-    """Verify that mssql-python's cursor.bulkcopy() is called when the driver is detected."""
+    """bulk_load_sqlserver_bcp — cursor.bulkcopy(), no staging file."""
 
-    def _mssql_python_conn(self, db_name: str = "testdb"):
-        """Return a fake connection whose type().__module__ == 'mssql_python.connection'.
-
-        The loader now calls conn.cursor() → cursor.execute("SELECT DB_NAME()") →
-        cursor.fetchone() → cursor.bulkcopy(table, rows, column_mappings=cols).
-        """
-        fake_cur = MagicMock()
-        fake_cur.fetchone.return_value = (db_name,)
-        fake_cur.bulkcopy.return_value = {"rows_copied": None}  # rows_copied=None → falls back to count
-
-        FakeConn = type(
-            "Connection",
-            (),
-            {"__module__": "mssql_python.connection"},
-        )
-        conn = FakeConn()
-        conn.cursor = MagicMock(return_value=fake_cur)
-        conn.commit = MagicMock()
-        conn._fake_cur = fake_cur
-        return conn
-
-    def test_mssql_python_driver_calls_bulk_copy(self):
-        from src.statschema.data_loader import bulk_load_sqlserver
-
-        conn = self._mssql_python_conn()
-        bulk_load_sqlserver(conn, _rows(3), "orders", COLS)
+    def test_calls_bulkcopy(self):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bcp(conn, _rows(3), "orders", COLS, database="testdb")
         conn._fake_cur.bulkcopy.assert_called_once()
-        call_args = conn._fake_cur.bulkcopy.call_args
-        assert "orders" in call_args[0][0]         # table name in first positional arg
-        assert len(call_args[0][1]) == 3            # 3 rows passed
-
-    def test_mssql_python_driver_uses_three_part_name(self):
-        conn = self._mssql_python_conn(db_name="mydb")
-        from src.statschema.data_loader import bulk_load_sqlserver
-        bulk_load_sqlserver(conn, _rows(1), "orders", COLS)
-        table_arg = conn._fake_cur.bulkcopy.call_args[0][0]
-        assert "mydb" in table_arg
-        assert "dbo" in table_arg
+        table_arg, rows_arg = conn._fake_cur.bulkcopy.call_args[0][:2]
         assert "orders" in table_arg
+        assert len(rows_arg) == 3
 
-    def test_mssql_python_driver_does_not_write_csv(self, tmp_path):
-        from src.statschema.data_loader import bulk_load_sqlserver
+    def test_uses_three_part_name(self):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, database="mydb")
+        assert conn._fake_cur.bulkcopy.call_args[0][0] == "[mydb].[dbo].[orders]"
 
-        conn = self._mssql_python_conn()
-        bulk_load_sqlserver(conn, _rows(2), "orders", COLS, staging_dir=str(tmp_path))
-        # No CSV file should have been created
-        assert list(tmp_path.iterdir()) == []
-
-    def test_mssql_python_driver_commits(self):
-        from src.statschema.data_loader import bulk_load_sqlserver
-
-        conn = self._mssql_python_conn()
-        bulk_load_sqlserver(conn, _rows(2), "orders", COLS)
+    def test_commits(self):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bcp(conn, _rows(2), "orders", COLS, database="testdb")
         conn.commit.assert_called_once()
 
-    def test_mssql_python_driver_returns_row_count(self):
-        from src.statschema.data_loader import bulk_load_sqlserver
+    def test_returns_row_count(self):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
+        conn = _mssql_python_conn()
+        assert bulk_load_sqlserver_bcp(conn, _rows(5), "orders", COLS, database="testdb") == 5
 
-        conn = self._mssql_python_conn()
-        n = bulk_load_sqlserver(conn, _rows(5), "orders", COLS)
-        assert n == 5
+    def test_database_is_keyword_only(self):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
+        conn = _mssql_python_conn()
+        with pytest.raises(TypeError):
+            bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, "testdb")  # positional
+
+    def test_raises_for_non_mssql_python_driver(self):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
+        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
+        conn = FakeConn()
+        conn.cursor = MagicMock()
+        conn.commit = MagicMock()
+        with pytest.raises(RuntimeError, match="mssql-python driver"):
+            bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, database="testdb")
+
+
+class TestBulkLoadSqlServerBulkInsert:
+    """bulk_load_sqlserver_bulk_insert — T-SQL BULK INSERT from a staging CSV."""
+
+    def test_executes_bulk_insert(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bulk_insert(
+            conn, _rows(3), "orders", COLS,
+            staging_dir=str(tmp_path), database="testdb",
+        )
+        conn._fake_cur.execute.assert_called_once()
+        sql = conn._fake_cur.execute.call_args[0][0]
+        assert "BULK INSERT" in sql
+        assert "[testdb].[dbo].[orders]" in sql
+
+    def test_uses_three_part_name(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bulk_insert(
+            conn, _rows(1), "branch", COLS,
+            staging_dir=str(tmp_path), database="tpcb",
+        )
+        sql = conn._fake_cur.execute.call_args[0][0]
+        assert "[tpcb].[dbo].[branch]" in sql
+
+    def test_commits(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bulk_insert(
+            conn, _rows(2), "orders", COLS,
+            staging_dir=str(tmp_path), database="testdb",
+        )
+        conn.commit.assert_called_once()
+
+    def test_returns_row_count(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        conn = _mssql_python_conn()
+        n = bulk_load_sqlserver_bulk_insert(
+            conn, _rows(4), "orders", COLS,
+            staging_dir=str(tmp_path), database="testdb",
+        )
+        assert n == 4
+
+    def test_cleans_up_staging_file(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        conn = _mssql_python_conn()
+        bulk_load_sqlserver_bulk_insert(
+            conn, _rows(2), "orders", COLS,
+            staging_dir=str(tmp_path), database="testdb",
+        )
+        assert list(tmp_path.iterdir()) == []
+
+    def test_staging_dir_and_database_are_keyword_only(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        conn = _mssql_python_conn()
+        with pytest.raises(TypeError):
+            bulk_load_sqlserver_bulk_insert(conn, _rows(1), "orders", COLS, str(tmp_path))
+
+    def test_raises_for_non_mssql_python_driver(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
+        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
+        conn = FakeConn()
+        conn.cursor = MagicMock()
+        conn.commit = MagicMock()
+        with pytest.raises(RuntimeError, match="mssql-python driver"):
+            bulk_load_sqlserver_bulk_insert(
+                conn, _rows(1), "orders", COLS,
+                staging_dir=str(tmp_path), database="testdb",
+            )
+
+
+class TestSQLServerBCPLoader:
+    """SQLServerBCPLoader — selected when no staging dir or STATSCHEMA_SQLSERVER_LOADER=bcp."""
+
+    def test_raises_for_non_mssql_python_driver(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
+        conn = FakeConn()
+        with pytest.raises(RuntimeError, match="mssql-python driver"):
+            SQLServerBCPLoader().bulk_load(MagicMock(spec=[]), conn, _rows(1), "orders", COLS)
+
+    def test_raises_if_statschema_db_not_set(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        FakeConn = type("Connection", (), {"__module__": "mssql_python.connection"})
+        conn = FakeConn()
+        conn.cursor = MagicMock()
+        conn.commit = MagicMock()
+        with pytest.raises(RuntimeError, match="_statschema_db"):
+            SQLServerBCPLoader().bulk_load(MagicMock(spec=[]), conn, _rows(1), "orders", COLS)
+
+    def test_calls_bulkcopy_with_three_part_name(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        conn = _mssql_python_conn(db_name="mydb")
+        SQLServerBCPLoader().bulk_load(MagicMock(spec=[]), conn, _rows(2), "orders", COLS)
+        conn._fake_cur.bulkcopy.assert_called_once()
+        assert conn._fake_cur.bulkcopy.call_args[0][0] == "[mydb].[dbo].[orders]"
+
+    def test_can_use_is_true_for_sqlserver(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        assert SQLServerBCPLoader().can_use(MagicMock(), "sqlserver", None) is True
+
+    def test_can_use_is_false_for_other_dialects(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        assert SQLServerBCPLoader().can_use(MagicMock(), "postgres", None) is False
+
+    def test_loader_name(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBCPLoader
+        assert SQLServerBCPLoader.loader_name == "bcp"
+
+
+class TestSQLServerBulkInsertLoader:
+    """SQLServerBulkInsertLoader — selected when staging dir available or =bulk_insert."""
+
+    def test_can_use_false_without_staging_dir(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
+        ctx = MagicMock(spec=[])  # no staging_write_dir, no server_staging_dir
+        assert SQLServerBulkInsertLoader().can_use(ctx, "sqlserver", None) is False
+
+    def test_can_use_true_with_staging_dir(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
+        ctx = MagicMock()
+        ctx.staging_write_dir.return_value = str(tmp_path)
+        assert SQLServerBulkInsertLoader().can_use(ctx, "sqlserver", None) is True
+
+    def test_raises_for_non_mssql_python_driver(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
+        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
+        conn = FakeConn()
+        ctx = MagicMock()
+        ctx.staging_write_dir.return_value = str(tmp_path)
+        with pytest.raises(RuntimeError, match="mssql-python driver"):
+            SQLServerBulkInsertLoader().bulk_load(ctx, conn, _rows(1), "orders", COLS)
+
+    def test_calls_bulk_insert_with_three_part_name(self, tmp_path):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
+        conn = _mssql_python_conn(db_name="mydb")
+        ctx = MagicMock()
+        ctx.staging_write_dir.return_value = str(tmp_path)
+        SQLServerBulkInsertLoader().bulk_load(ctx, conn, _rows(2), "orders", COLS)
+        conn._fake_cur.execute.assert_called_once()
+        conn._fake_cur.bulkcopy.assert_not_called()
+        sql = conn._fake_cur.execute.call_args[0][0]
+        assert "BULK INSERT" in sql
+        assert "[mydb].[dbo].[orders]" in sql
+
+    def test_loader_name(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerBulkInsertLoader
+        assert SQLServerBulkInsertLoader.loader_name == "bulk_insert"
+
+
+class TestSQLServerMultiRowLoader:
+    """SQLServerMultiRowLoader — STATSCHEMA_SQLSERVER_LOADER=multi_row."""
+
+    def test_can_use_true_for_sqlserver(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerMultiRowLoader
+        assert SQLServerMultiRowLoader().can_use(MagicMock(), "sqlserver", None) is True
+
+    def test_raises_for_non_mssql_python_driver(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerMultiRowLoader
+        FakeConn = type("Connection", (), {"__module__": "pyodbc"})
+        conn = FakeConn()
+        with pytest.raises(RuntimeError, match="mssql-python driver"):
+            SQLServerMultiRowLoader().bulk_load(MagicMock(), conn, _rows(1), "orders", COLS)
+
+    def test_loader_name(self):
+        from src.statschema.dialects.sqlserver.loader import SQLServerMultiRowLoader
+        assert SQLServerMultiRowLoader.loader_name == "multi_row"
+
+
+class TestEnvVarLoaderSelection:
+    """STATSCHEMA_<DIALECT>_LOADER env var — explicit selection, no silent fallback."""
+
+    def test_env_var_selects_bcp(self, monkeypatch):
+        from src.statschema.data_loader import _select_loader, _LOADER_REGISTRY
+        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "bcp")
+        ctx = MagicMock()
+        loader = _select_loader("sqlserver", ctx, None)
+        assert loader.loader_name == "bcp"
+
+    def test_env_var_selects_bulk_insert_when_staging_present(self, monkeypatch, tmp_path):
+        from src.statschema.data_loader import _select_loader
+        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "bulk_insert")
+        ctx = MagicMock()
+        ctx.staging_write_dir.return_value = str(tmp_path)
+        loader = _select_loader("sqlserver", ctx, None)
+        assert loader.loader_name == "bulk_insert"
+
+    def test_env_var_bulk_insert_fails_loudly_without_staging(self, monkeypatch):
+        from src.statschema.data_loader import _select_loader
+        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "bulk_insert")
+        ctx = MagicMock(spec=[])  # no staging_write_dir
+        with pytest.raises(RuntimeError, match="STATSCHEMA_SQLSERVER_LOADER="):
+            _select_loader("sqlserver", ctx, None)
+
+    def test_env_var_selects_multi_row(self, monkeypatch):
+        from src.statschema.data_loader import _select_loader
+        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "multi_row")
+        loader = _select_loader("sqlserver", MagicMock(), None)
+        assert loader.loader_name == "multi_row"
+
+    def test_env_var_unknown_name_raises(self, monkeypatch):
+        from src.statschema.data_loader import _select_loader
+        monkeypatch.setenv("STATSCHEMA_SQLSERVER_LOADER", "nonexistent")
+        with pytest.raises(RuntimeError, match="does not match any registered loader"):
+            _select_loader("sqlserver", MagicMock(), None)
+
+    def test_no_env_var_uses_priority_order_bcp(self, monkeypatch):
+        from src.statschema.data_loader import _select_loader
+        monkeypatch.delenv("STATSCHEMA_SQLSERVER_LOADER", raising=False)
+        ctx = MagicMock(spec=[])  # no staging_write_dir → BCP selected first
+        loader = _select_loader("sqlserver", ctx, None)
+        assert loader.loader_name == "bcp"
+
+
+class TestLoadDataframeInputTypes:
+    """load_dataframe accepts pandas DataFrame, generator, etc."""
 
     def test_pandas_dataframe_input(self):
         pd = pytest.importorskip("pandas")

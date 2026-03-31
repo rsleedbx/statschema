@@ -27,6 +27,8 @@ class DatabricksSparkLoader(SparkInClusterLoader):
     default catalog unless the table name overrides it.
     """
 
+    loader_name = "spark"
+
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return (
             dialect in ("databricks", "lakehouse")
@@ -64,6 +66,8 @@ class DatabricksCopyIntoLoader(SparkCloudStagedLoader):
 
     Requires ``ctx.cloud_staging_uri`` and ``ctx.is_databricks``.
     """
+
+    loader_name = "copy_into"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         cloud_topologies = _DATABRICKS_TOPOLOGIES | {"cloud_staged"}

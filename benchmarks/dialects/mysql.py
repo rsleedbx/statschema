@@ -21,16 +21,19 @@ class MySQLDialect:
     def connect(self, dsn: str):
         import pymysql  # type: ignore
         p = _parse_dsn(dsn)
-        return pymysql.connect(
+        database = p.get("database", p.get("db", "mysql"))
+        conn = pymysql.connect(
             host=p.get("host", "127.0.0.1"),
             port=int(p.get("port", "3306")),
             user=p.get("user", "root"),
             password=p.get("password", p.get("passwd", "")),
-            database=p.get("database", p.get("db", "mysql")),
+            database=database,
             local_infile=True,
             autocommit=False,
             charset="utf8mb4",
         )
+        conn._statschema_db = database
+        return conn
 
     # ------------------------------------------------------------------ #
     # Schema lifecycle                                                     #
@@ -42,9 +45,11 @@ class MySQLDialect:
             cur.execute(f"CREATE DATABASE `{schema_name}` CHARACTER SET utf8mb4")
         conn.commit()
 
-    def set_namespace(self, conn, schema_name: str) -> None:
+    def set_namespace(self, conn, schema_name: str):
         with conn.cursor() as cur:
             cur.execute(f"USE `{schema_name}`")
+        conn._statschema_db = schema_name
+        return conn
 
     # ------------------------------------------------------------------ #
     # Statistics                                                           #

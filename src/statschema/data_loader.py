@@ -21,6 +21,7 @@ MULTI_ROW strategies still use the direct INSERT path for non-bulk workloads.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
@@ -51,7 +52,11 @@ from .dialects._loader_shared import (
 # Per-dialect bulk loaders (legacy functions kept for direct callers)
 from .dialects.postgres.loader   import bulk_load_postgres, PostgresCopyStdinLoader
 from .dialects.mysql.loader      import bulk_load_mysql, MySQLLocalInfileLoader
-from .dialects.sqlserver.loader  import bulk_load_sqlserver, SQLServerBCPLoader
+from .dialects.sqlserver.loader  import (
+    SQLServerBCPLoader,
+    SQLServerBulkInsertLoader,
+    SQLServerMultiRowLoader,
+)
 from .dialects.db2.loader        import (
     bulk_load_db2,
     DB2AdminCmdLoader, DB2ImportLoader, DB2MultiRowLoader,
@@ -79,8 +84,12 @@ _LOADER_REGISTRY: dict[str, list] = {
     # --- MySQL family ---
     "mysql":        [MySQLLocalInfileLoader()],
     "mariadb":      [MySQLLocalInfileLoader()],
-    # --- SQL Server ---
-    "sqlserver":    [SQLServerBCPLoader()],
+    # --- SQL Server (priority: BCP → BULK INSERT → MULTI ROW) ---
+    "sqlserver": [
+        SQLServerBCPLoader(),
+        SQLServerBulkInsertLoader(),
+        SQLServerMultiRowLoader(),
+    ],
     # --- IBM Db2 ---
     "db2": [
         DB2AdminCmdLoader(),
@@ -115,11 +124,38 @@ _LOADER_REGISTRY: dict[str, list] = {
 
 
 def _select_loader(dialect: str, ctx: Any, col_types: list[str] | None):
-    """
-    Return the first loader in the registry that accepts the given dialect
-    and DeploymentContext.  Raises RuntimeError if none matches.
+    """Return the loader to use for *dialect* in the current context.
+
+    When ``STATSCHEMA_<DIALECT>_LOADER`` is set (e.g.
+    ``STATSCHEMA_SQLSERVER_LOADER=bcp``), only that loader is considered.  If
+    its ``can_use()`` returns False the call raises ``RuntimeError`` — no silent
+    fallback.
+
+    When the env var is unset, the registry is scanned in priority order and
+    the first loader whose ``can_use()`` returns True is returned.
     """
     loaders = _LOADER_REGISTRY.get(dialect, [])
+
+    env_key = f"STATSCHEMA_{dialect.upper()}_LOADER"
+    chosen  = os.environ.get(env_key, "").strip().lower()
+
+    if chosen:
+        named = [l for l in loaders if getattr(l, "loader_name", "") == chosen]
+        if not named:
+            available = [getattr(l, "loader_name", "<unnamed>") for l in loaders]
+            raise RuntimeError(
+                f"{env_key}={chosen!r} does not match any registered loader for "
+                f"dialect={dialect!r}.  Available: {available}"
+            )
+        loader = named[0]
+        if not loader.can_use(ctx, dialect, col_types):
+            raise RuntimeError(
+                f"{env_key}={chosen!r} is configured but "
+                f"{type(loader).__name__}.can_use() returned False.  "
+                "Check prerequisites (staging directory, driver, env vars)."
+            )
+        return loader
+
     for loader in loaders:
         if loader.can_use(ctx, dialect, col_types):
             return loader
@@ -306,10 +342,6 @@ def load_dataframe(
             inserted = bulk_load_postgres(conn, df, table, col_names)
         elif dialect in ("mysql", "mariadb"):
             inserted = bulk_load_mysql(conn, df, table, col_names, staging_dir=staging_dir)
-        elif dialect == "sqlserver":
-            inserted = bulk_load_sqlserver(
-                conn, df, table, col_names, staging_dir=staging_dir
-            )
         elif dialect == "db2":
             inserted = bulk_load_db2(
                 conn, df, table, col_names, staging_dir=staging_dir, col_types=col_types

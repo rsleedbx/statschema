@@ -34,11 +34,15 @@ class OracleDialect:
         host    = p.get("host", "127.0.0.1")
         port    = p.get("port", "1521")
         service = p.get("service", "XE")
-        return oracledb.connect(
-            user=p.get("user", "system"),
+        user = p.get("user", "system")
+        conn = oracledb.connect(
+            user=user,
             password=p.get("password", "oracle"),
             dsn=f"{host}:{port}/{service}",
         )
+        # Oracle schema == username; track it so loaders never need to query.
+        conn._statschema_db = user.upper()
+        return conn
 
     # ------------------------------------------------------------------ #
     # Schema lifecycle                                                     #
@@ -66,9 +70,11 @@ class OracleDialect:
                 pass
         conn.commit()
 
-    def set_namespace(self, conn, schema_name: str) -> None:
+    def set_namespace(self, conn, schema_name: str):
         with conn.cursor() as cur:
             cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
+        conn._statschema_db = schema_name.upper()
+        return conn
 
     # ------------------------------------------------------------------ #
     # Statistics                                                           #

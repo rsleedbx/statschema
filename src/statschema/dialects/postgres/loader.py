@@ -77,6 +77,8 @@ _POSTGRES_WIRE_DIALECTS = frozenset({
 class PostgresCopyStdinLoader(TopologyAwareLoader):
     """Topology-aware wrapper around ``bulk_load_postgres``."""
 
+    loader_name = "copy_stdin"
+
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return dialect in _POSTGRES_WIRE_DIALECTS
 

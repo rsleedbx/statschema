@@ -32,8 +32,18 @@ class IdentityDialect(Protocol):
         """Drop-and-recreate the test schema/database."""
         ...
 
-    def set_namespace(self, conn, schema_name: str) -> None:
-        """Set the active schema/database so unqualified names resolve."""
+    def set_namespace(self, conn, schema_name: str):
+        """Set the active schema/database so unqualified names resolve.
+
+        Returns the (possibly new) connection.  Always capture the return:
+
+            conn = dialect.set_namespace(conn, schema_name)
+
+        For SQL Server this creates a new connection to the target database
+        (USE [db] is not supported on Azure SQL Database).  For all other
+        dialects the session setting is applied to the existing connection and
+        the same object is returned.
+        """
         ...
 
     # ------------------------------------------------------------------ #

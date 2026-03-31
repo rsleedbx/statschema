@@ -247,8 +247,14 @@ def _create_schema(conn, schema_name: str, dialect: str) -> None:
     _get_dialect(dialect).create_schema(conn, schema_name)
 
 
-def _set_namespace(conn, schema_name: str, dialect: str) -> None:
-    _get_dialect(dialect).set_namespace(conn, schema_name)
+def _set_namespace(conn, schema_name: str, dialect: str):
+    """Set namespace and return the (possibly new) connection.
+
+    Always assign the return value:  conn = _set_namespace(conn, ...)
+    For SQL Server this opens a fresh connection to the target database
+    instead of issuing USE [db] (unsupported on Azure SQL Database).
+    """
+    return _get_dialect(dialect).set_namespace(conn, schema_name)
 
 
 def _analyze_tables(
@@ -374,7 +380,7 @@ def load_source(
     row_counts    = resolve_row_counts(tables, scale_factor=sf)
 
     _create_schema(conn, source_schema, dialect)
-    _set_namespace(conn, source_schema, dialect)
+    conn = _set_namespace(conn, source_schema, dialect)
 
     print(f"  [A] Creating tables in schema {source_schema!r}…", end=" ", flush=True)
     _if_not_exists = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
@@ -929,7 +935,7 @@ def build_target(
     from src.statschema.pandas_builder import build_rows_from_canonical
 
     _create_schema(conn, target_schema, dialect)
-    _set_namespace(conn, target_schema, dialect)
+    conn = _set_namespace(conn, target_schema, dialect)
 
     _is_pg_wire = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
 
@@ -1408,7 +1414,7 @@ def run_identity_test(
         # name.  (load_source calls _create_schema / _set_namespace internally.)
         if _ss_dialect in ("sqlserver", "mysql", "mariadb"):
             try:
-                _set_namespace(_ss_conn, _ss_schema, _ss_dialect)
+                _ss_conn = _set_namespace(_ss_conn, _ss_schema, _ss_dialect)
             except Exception:
                 pass  # schema may not exist yet; will be created below
 

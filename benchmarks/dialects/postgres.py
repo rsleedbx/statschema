@@ -50,9 +50,11 @@ class PostgresDialect:
             cur.execute(f'CREATE SCHEMA "{schema_name}"')
         conn.commit()
 
-    def set_namespace(self, conn, schema_name: str) -> None:
+    def set_namespace(self, conn, schema_name: str):
         with conn.cursor() as cur:
             cur.execute(f'SET search_path = "{schema_name}", public')
+        conn._statschema_db = schema_name
+        return conn
 
     # ------------------------------------------------------------------ #
     # Statistics                                                           #

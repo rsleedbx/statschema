@@ -87,6 +87,8 @@ class OracleDirectPathLoader(TopologyAwareLoader):
     is a client-side bulk API, not a server-side LOAD command.
     """
 
+    loader_name = "direct_path"
+
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         # ctx.conn is not stored — check is deferred to bulk_load() where we
         # have the connection object.  We optimistically return True here and
@@ -144,6 +146,8 @@ class OracleMultiRowLoader(TopologyAwareLoader):
     Used when direct_path_load is unavailable or when the connection module
     is not oracledb.
     """
+
+    loader_name = "multi_row"
 
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         return dialect == "oracle"
@@ -325,6 +329,8 @@ class OracleExternalTableLoader(TopologyAwareLoader):
     to fall through to OracleDirectPathLoader in that environment.
     """
 
+    loader_name = "external_table"
+
     def can_use(self, ctx: Any, dialect: str, col_types: list[str] | None) -> bool:
         if dialect != "oracle":
             return False
@@ -442,6 +448,8 @@ class OracleSqlldrLoader(TopologyAwareLoader):
     minimal redo generation.  Under QEMU the fixed process-spawn overhead (~1.9s
     measured) and JIT translation overhead make it slower at all tested scales.
     """
+
+    loader_name = "sqlldr"
 
     def _sqlldr_binary(self) -> str:
         """Resolve the local sqlldr path from ORACLE_SQLLDR_BINARY env var.

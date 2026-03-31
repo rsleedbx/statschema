@@ -81,9 +81,11 @@ class DB2Dialect:
             cur.execute(f"CREATE SCHEMA {schema_name}")
         conn.commit()
 
-    def set_namespace(self, conn, schema_name: str) -> None:
+    def set_namespace(self, conn, schema_name: str):
         with conn.cursor() as cur:
             cur.execute(f"SET SCHEMA {schema_name}")
+        conn._statschema_db = schema_name.upper()
+        return conn
 
     # ------------------------------------------------------------------ #
     # Statistics                                                           #

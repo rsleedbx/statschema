@@ -134,7 +134,14 @@ class TopologyAwareLoader:
 
     Subclass and implement ``can_use()`` and ``bulk_load()``.  Register
     instances in ``data_loader._LOADER_REGISTRY``.
+
+    Class attribute ``loader_name`` identifies this loader for the
+    ``STATSCHEMA_<DIALECT>_LOADER`` env var.  Use lower-case with underscores,
+    e.g. ``"bcp"``, ``"bulk_insert"``, ``"copy_stdin"``.  An empty string means
+    the loader has no stable name and cannot be selected by env var.
     """
+
+    loader_name: str = ""
 
     def can_use(
         self,
