@@ -12,37 +12,70 @@ x86\_64 Linux setup locally.
 
 ## Architecture
 
+### Database tiers
+
+The two tiers drive the entire script structure.
+
+**Tier 1 — ARM64-native (Podman on every platform)**
+
+These images have native ARM64 builds. They run in Podman identically on arm64
+macOS, x86\_64 Linux, Intel macOS, and GitHub Actions. No platform branching needed.
+
+```
+postgres:18   ·   mysql:8   ·   cockroachdb/cockroach
+```
+
+**Tier 2 — x86\_64-only (no ARM64 image exists)**
+
+These images have no ARM64 build. On an x86\_64 host they run directly in Podman.
+On arm64 macOS the host cannot run them natively, so Lima provides a QEMU x86\_64
+VM that can.
+
+```
+mcr.microsoft.com/mssql/server:2022-latest   (SQL Server 2022)
+gvenzl/oracle-xe:21-slim                     (Oracle XE 21c)
+icr.io/db2_community/db2                     (IBM DB2 CE 11.5)
+```
+
+### Scripts
+
+`_db-common.sh` handles Tier 1. The platform scripts handle Tier 2 — differently
+depending on whether the host can run x86\_64 containers natively.
+
 ```
 scripts/
-├── db-up.sh               ← entry point: detects arch + OS, delegates
-├── db-up-x86_64.sh        ← x86_64 (Linux + Intel macOS): all DBs in Podman
-├── db-up-arm64-macos.sh   ← arm64 macOS: Lima for x86_64 DBs + Podman for rest
-├── _db-common.sh          ← shared Podman databases (PG, MySQL, CockroachDB)
-├── db-down.sh             ← stop all containers and VMs (platform-aware)
-└── test-on-linux.sh       ← arm64 macOS: runs Linux setup inside Lima devbox
+├── _db-common.sh          ← Tier 1 only: Podman start for PG, MySQL, CockroachDB
+│                             sourced by both platform scripts below
+│
+├── db-up-x86_64.sh        ← Tier 1 (via _db-common.sh)
+│                           + Tier 2 directly in Podman (x86_64 host can run them)
+│
+├── db-up-arm64-macos.sh   ← Tier 1 (via _db-common.sh)
+│                           + Tier 2 via Lima QEMU VMs (arm64 host cannot run them)
+│
+├── db-up.sh               ← entry point: detects arch + OS, delegates to above
+├── db-down.sh             ← teardown (platform-aware)
+└── test-on-linux.sh       ← arm64 macOS only: validate Tier 2 Linux path
+                              via Lima devbox running db-up-x86_64.sh
 
 .github/workflows/
 ├── ci.yml                 ← existing: offline tests, every push (unchanged)
 └── ci-live.yml            ← new: live DB tests, calls db-up-x86_64.sh
 ```
 
-### Why the split is architecture, not OS
+### Platform routing
 
-Lima is only needed on arm64 macOS because SQL Server, Oracle XE, and IBM DB2 CE
-have no ARM64 container images. On x86\_64 (Linux or Intel macOS), all three run
-directly in Podman.
-
-| Platform | arch | Lima needed | Script used |
+| Platform | arch | Tier 2 runs via | Script |
 |---|---|---|---|
-| Apple Silicon macOS | arm64 | Yes | `db-up-arm64-macos.sh` |
-| Intel macOS | x86\_64 | No | `db-up-x86_64.sh` |
-| Linux (any distro) | x86\_64 | No | `db-up-x86_64.sh` |
-| GitHub Actions (`ubuntu-latest`) | x86\_64 | No | `db-up-x86_64.sh` |
+| Apple Silicon macOS | arm64 | Lima QEMU VMs | `db-up-arm64-macos.sh` |
+| Intel macOS | x86\_64 | Podman directly | `db-up-x86_64.sh` |
+| Linux (any distro) | x86\_64 | Podman directly | `db-up-x86_64.sh` |
+| GitHub Actions (`ubuntu-latest`) | x86\_64 | Podman directly | `db-up-x86_64.sh` |
 
 ### No-duplication map
 
 ```
-_db-common.sh           ← written once; sourced by both platform scripts
+_db-common.sh           ← Tier 1 written once; sourced by both platform scripts
 db-up-x86_64.sh         ← used by: Linux devs, Intel Mac devs, GitHub Actions,
                            and test-on-linux.sh (arm64 Mac → Linux validation)
 db-up-arm64-macos.sh    ← used by: Apple Silicon Mac devs only

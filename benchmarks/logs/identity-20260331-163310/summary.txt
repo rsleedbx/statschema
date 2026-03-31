@@ -1,0 +1,7 @@
+# 2026-03-31T16:33:15.967177+00:00
+
+FAIL  sqlserver×tpcb(sf=1)                        exit=1
+
+Passed : 0 / 1
+Failed : 1 / 1
+Logs   : /Users/robert.lee/github/statschema/benchmarks/logs/identity-20260331-163310

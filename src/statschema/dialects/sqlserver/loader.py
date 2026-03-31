@@ -33,13 +33,18 @@ def bulk_load_sqlserver(  # pragma: no cover
 
     if type(conn).__module__.startswith("mssql_python"):
         # mssql-python exposes bulkcopy on the cursor (not the connection).
+        # bulkcopy() does not inherit the current USE [db] context — it needs
+        # the fully-qualified 3-part name [database].[dbo].[table].
         cur = conn.cursor()
-        result = cur.bulkcopy(f"{schema}.{table}", rows, column_mappings=col_names)
+        cur.execute("SELECT DB_NAME()")
+        current_db = cur.fetchone()[0]
+        full_table = f"[{current_db}].[dbo].[{table}]"
+        result = cur.bulkcopy(full_table, rows, column_mappings=col_names)
         conn.commit()
         rows_copied = result.get("rows_copied", count) if isinstance(result, dict) else count
         logger.info(
-            "bulk_load_sqlserver[mssql-python BCP]: loaded %d rows into %s.%s",
-            rows_copied, schema, table,
+            "bulk_load_sqlserver[mssql-python BCP]: loaded %d rows into %s",
+            rows_copied, full_table,
         )
         return rows_copied
 
