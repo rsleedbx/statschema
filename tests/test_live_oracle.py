@@ -31,23 +31,25 @@ All tests are automatically skipped when:
 - the connection to Oracle fails (e.g. VM not running)
 """
 
-import os
 import textwrap
 
 import pytest
 
 from src.statschema import parse_ddl, emit_ddl
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection defaults
 # ---------------------------------------------------------------------------
 
-_HOST    = os.environ.get("ORACLE_HOST",    "127.0.0.1")
-_PORT    = int(os.environ.get("ORACLE_PORT",    "1521"))
-_USER    = os.environ.get("ORACLE_USER",    "system")
-_PASS    = os.environ.get("ORACLE_PASS",    "oracle")
-_SERVICE = os.environ.get("ORACLE_SERVICE", "XE")
-_SCHEMA  = os.environ.get("ORACLE_SCHEMA",  "STATSCHEMA_TEST").upper()
+_p = _tp("test_oracle")
+
+_HOST    = _p.host     or "127.0.0.1"
+_PORT    = _p.port     or 1521
+_USER    = _p.username or "system"
+_PASS    = _p.password or ""
+_SERVICE = _p.database or "XE"
+_SCHEMA  = "STATSCHEMA_TEST"
 _SCHEMA_PASS = "StatschemaTest1"   # password for the test schema user
 
 

@@ -51,7 +51,7 @@ Usage
     # Full identity test at SF=1 on PostgreSQL (pg16 container)
     python benchmarks/identity_test.py \\
         --schema tpch --sf 1 --dialect postgres \\
-        --dsn "host=127.0.0.1 port=5416 dbname=testdb user=postgres password=testpass"
+        --dsn "host=127.0.0.1 port=5416 dbname=statschema user=postgres password=testpass"
 
     # Quick smoke test at SF=0.1 (fast, good for CI)
     python benchmarks/identity_test.py \\
@@ -83,7 +83,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.statschema.schema_io import load_canonical, resolve_load_order, resolve_row_counts
-from src.statschema.ddl_emitter import emit_ddl, emit_ddl_all
+from src.statschema.ddl_emitter import emit_ddl
 from src.statschema.row_generator import generate_rows
 from src.statschema.data_loader import BatchConfig, LoadStrategy, load_dataframe
 from src.statschema.db_stats_collector import (
@@ -98,6 +98,7 @@ from src.statschema.stats_io import dump_stats, load_stats
 logger = logging.getLogger(__name__)
 
 from benchmarks.dialects import get as _get_dialect
+from benchmarks import cli_args as _cli_args
 
 
 def _strip_constraints(table):
@@ -285,63 +286,9 @@ def _analyze_tables(
     )
 
 
-def _strip_oracle_quotes(text: str) -> str:
-    """Remove double-quote delimiters from Oracle identifiers.
-
-    Used for both DDL (column names) and query SQL (identifier quoting),
-    since Oracle stores unquoted identifiers as uppercase.
-    """
-    import re
-    return re.sub(r'"([^"]+)"', r'\1', text)
-
-
 # ---------------------------------------------------------------------------
 # Phase A: load source data
 # ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# SQL query transpilation and schema qualification
-# ---------------------------------------------------------------------------
-
-def _transpile_and_qualify(
-    sql: str,
-    schema_name: str,
-    table_names: set[str],
-    source_dialect: str,
-    target_dialect: str,
-) -> str:
-    """Transpile SQL to target dialect and qualify unqualified table references."""
-    import sqlglot
-    import sqlglot.expressions as exp
-
-    # Map identity-test dialect names to sqlglot dialect names.
-    # "ansi" is not a valid sqlglot dialect; use None (default) so LIMIT/TIMESTAMP
-    # are parsed correctly and then transpiled to the target dialect.
-    _SQLGLOT_DIALECT: dict[str, str | None] = {
-        "postgres": "postgres", "neon": "postgres", "cockroachdb": "postgres",
-        "lakebase": "postgres", "mysql": "mysql", "mariadb": "mysql",
-        "sqlserver": "tsql", "oracle": "oracle", "db2": "db2", "ansi": None,
-    }
-    read_d  = _SQLGLOT_DIALECT.get(source_dialect, None)
-    write_d = _SQLGLOT_DIALECT.get(target_dialect, None)
-
-    try:
-        tree = sqlglot.parse_one(sql, read=read_d or None,
-                                  error_level=sqlglot.ErrorLevel.WARN)
-    except Exception:
-        return sql  # parse failure — return as-is
-
-    # Add schema qualifier to all unqualified table references
-    tnames_lower = {t.lower() for t in table_names}
-    for tbl in tree.find_all(exp.Table):
-        if tbl.name.lower() in tnames_lower and not tbl.db:
-            tbl.set("db", exp.Identifier(this=schema_name, quoted=True))
-
-    try:
-        return tree.sql(dialect=write_d or None)
-    except Exception:
-        return sql  # generation failure — return original
 
 
 def _get_explain(conn, sql: str, schema: str, dialect: str) -> dict:
@@ -384,29 +331,15 @@ def load_source(
     conn = _set_namespace(conn, source_schema, dialect)
 
     print(f"  [A] Creating tables in schema {source_schema!r}…", end=" ", flush=True)
-    _if_not_exists = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
-    ddl_text = emit_ddl_all([_strip_constraints(t) for t in ordered], dialect=dialect,
-                            if_not_exists=_if_not_exists)
-    if dialect == "oracle":
-        # Strip double-quote delimiters so column names resolve case-insensitively
-        # (Oracle's default uppercase convention) rather than as lowercase-quoted identifiers.
-        ddl_text = _strip_oracle_quotes(ddl_text)
-    with conn.cursor() as cur:
-        for stmt in ddl_text.split(";"):
-            stmt = stmt.strip()
-            if stmt:
-                try:
-                    cur.execute(stmt)
-                except Exception as e:
-                    logger.warning("DDL statement failed (%s): %s", dialect, e)
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-    try:
-        conn.commit()
-    except Exception:
-        pass  # autocommit connections don't need explicit commit
+    _d = _get_dialect(dialect)
+    ddl_stmts = [
+        _d.qualify_ddl(
+            emit_ddl(_strip_constraints(t), dialect=dialect, if_not_exists=_d.ddl_if_not_exists),
+            source_schema,
+        )
+        for t in ordered
+    ]
+    _d.execute_statements(conn, ddl_stmts)
     print("done")
 
     # Oracle uses oracledb direct_path_load, SQL Server uses mssql-python bulkcopy — both intercepted in data_loader before strategy dispatch.
@@ -415,13 +348,9 @@ def load_source(
 
     for table in ordered:
         n = row_counts[table.name]
-        # Oracle DDL strips quotes → columns and tables become uppercase unquoted identifiers.
-        _tname = table.name.upper() if dialect == "oracle" else table.name
-        _cols  = ([c.name.upper() for c in table.columns] if dialect == "oracle"
-                  else [c.name for c in table.columns])
-        # DB2: ibm_db_dbi cannot auto-coerce int/float → CLOB/VARCHAR; pass column
-        # types so bulk_load_db2 can str-ify non-string values for text columns.
-        _ctypes = [c.type for c in table.columns] if dialect == "db2" else None
+        _tname  = _d.normalize_identifier(table.name)
+        _cols   = [_d.normalize_identifier(c.name) for c in table.columns]
+        _ctypes = [c.type for c in table.columns] if _d.needs_column_types_for_bulk_load else None
         print(f"  [A]   loading {table.name:<25} {n:>10,} rows…", end=" ", flush=True)
         t0 = time.perf_counter()
         load_dataframe(
@@ -433,10 +362,7 @@ def load_source(
             commit=False,
             ctx=ctx,
         )
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        _d.commit(conn)
         elapsed = time.perf_counter() - t0
         print(f"{elapsed:.2f}s")
 
@@ -474,25 +400,9 @@ def collect_baseline_plans(
     for entry in workload.queries:
         print(f"  [B] EXPLAIN {entry.id}…", end=" ", flush=True)
         try:
-            # Transpile and qualify for non-PG dialects.
-            sql = entry.sql
-            if dialect in ("mysql", "mariadb", "sqlserver"):
-                tnames = table_names or set()
-                _q_schema = "dbo" if dialect == "sqlserver" else schema
-                sql = _transpile_and_qualify(sql, _q_schema, tnames, source_dialect, dialect)
-            elif dialect == "oracle":
-                # Oracle DDL strips double-quotes (via _strip_oracle_quotes) so all
-                # identifiers are stored uppercase. Apply the same stripping to query SQL
-                # so "DimBroker" → DimBroker → Oracle auto-uppercases → DIMBROKER.
-                import re as _re
-                sql = _strip_oracle_quotes(sql)
-                sql = _re.sub(r'\bLIMIT\s+(\d+)', r'FETCH FIRST \1 ROWS ONLY', sql,
-                              flags=_re.IGNORECASE)
-            elif dialect == "db2":
-                # DB2 uses FETCH FIRST N ROWS ONLY; avoid sqlglot identifier quoting issues.
-                import re as _re
-                sql = _re.sub(r'\bLIMIT\s+(\d+)', r'FETCH FIRST \1 ROWS ONLY', sql,
-                              flags=_re.IGNORECASE)
+            sql = _get_dialect(dialect).rewrite_query_sql(
+                entry.sql, schema, table_names or set(), source_dialect
+            )
             plan = _get_explain(conn, sql, schema, dialect)
             plans[entry.id] = plan
             print("ok")
@@ -501,12 +411,9 @@ def collect_baseline_plans(
                 for n in nodes:
                     print(f"       {n.get('Node Type','?'):<22} rows={n.get('Plan Rows','?')}")
         except Exception as exc:
-            print(f"ERROR: {exc}")
-            logger.warning("EXPLAIN failed for %s: %s", entry.id, exc)
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+            print(f"FAIL ({type(exc).__name__}: {exc})")
+            logger.error("EXPLAIN failed for %s: %s", entry.id, exc)
+            _get_dialect(dialect).rollback(conn)
     return plans
 
 
@@ -529,25 +436,20 @@ def collect_stats(
     config  Optional CollectionConfig enabling enrichment techniques.
             None = baseline collection only (existing behaviour).
     """
-    def _safe_rb() -> None:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+    _d_stats = _get_dialect(dialect)
 
-    # For SQL Server, tables sit in the 'dbo' schema within the named database.
-    # After _set_namespace_sqlserver (USE [db]), pass 'dbo' as the schema to the collector.
-    _stats_schema = "dbo" if dialect == "sqlserver" else source_schema
+    def _safe_rb() -> None:
+        _d_stats.rollback(conn)
+
+    _stats_schema = source_schema
 
     all_stats: dict[str, TableStats] = {}
     for table in tables:
         print(f"  [C] collecting stats {table.name}…", end=" ", flush=True)
         try:
             _safe_rb()  # ensure clean state before each table
-            # DB2 stores identifiers as uppercase in the system catalog (SYSCAT).
-            # Pass uppercase names so catalog lookups match the quoted-uppercase DDL.
-            _tbl_name  = table.name.upper()          if dialect == "db2" else table.name
-            _sch_name  = _stats_schema.upper()       if dialect == "db2" else _stats_schema
+            _tbl_name = _d_stats.normalize_identifier(table.name)
+            _sch_name = _d_stats.normalize_identifier(_stats_schema)
             ts = collect_table_stats(
                 conn, _tbl_name, dialect=dialect, schema=_sch_name, config=config,
             )
@@ -555,12 +457,9 @@ def collect_stats(
             all_stats[table.name] = ts
             print(f"ok  (row_count={ts.row_count:,})")
         except Exception as exc:
-            print(f"WARNING: {exc}")
-            logger.warning("collect_table_stats failed for %s: %s", table.name, exc)
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+            print(f"FAIL ({type(exc).__name__}: {exc})")
+            logger.error("collect_table_stats failed for %s: %s", table.name, exc)
+            _safe_rb()
     if save_dir:
         save_dir.mkdir(parents=True, exist_ok=True)
         for name, ts in all_stats.items():
@@ -759,9 +658,7 @@ def create_source_extended_stats(
         ``create_target_extended_stats`` in Phase D.5 so the same objects are
         created on the target without re-parsing the queries.
     """
-    # CockroachDB uses its own single-column statistics engine; pg_statistic_ext
-    # functional-dependency stats are a PostgreSQL-specific concept.
-    if dialect not in ("postgres", "lakebase", "neon"):
+    if not _get_dialect(dialect).supports_extended_stats:
         return {}
 
     from src.statschema.query_analyzer import extract_column_pairs, make_stat_name
@@ -777,34 +674,24 @@ def create_source_extended_stats(
     print(f"  [A.5] Found {total_pairs} column pairs across "
           f"{len(stat_defs)} tables; creating statistics…", end=" ", flush=True)
 
-    created = 0
-    with conn.cursor() as cur:
-        for table_name, pairs in stat_defs.items():
-            for col_a, col_b in pairs:
-                sname = make_stat_name(table_name, col_a, col_b)
-                try:
-                    cur.execute(
-                        f'CREATE STATISTICS IF NOT EXISTS "{source_schema}"."{sname}" '
-                        f'ON "{col_a}", "{col_b}" '
-                        f'FROM "{source_schema}"."{table_name}"'
-                    )
-                    created += 1
-                except Exception as exc:
-                    logger.warning("CREATE STATISTICS source %s(%s,%s): %s",
-                                   table_name, col_a, col_b, exc)
-                    conn.rollback()
-    conn.commit()
+    _d = _get_dialect(dialect)
+    stat_sqls = [
+        _d.create_column_statistics_sql(
+            source_schema, make_stat_name(table_name, col_a, col_b),
+            col_a, col_b, _d.normalize_identifier(table_name),
+        )
+        for table_name, pairs in stat_defs.items()
+        for col_a, col_b in pairs
+    ]
+    created = _d.execute_statements(conn, stat_sqls, allow_fail=True)
 
     print(f"done ({created} created)")
     print(f"  [A.5] Running ANALYZE for extended stats…", end=" ", flush=True)
-    with conn.cursor() as cur:
-        for table_name in stat_defs:
-            try:
-                cur.execute(f'ANALYZE "{source_schema}"."{table_name}"')
-            except Exception as exc:
-                logger.warning("ANALYZE source %s: %s", table_name, exc)
-                conn.rollback()
-    conn.commit()
+    analyze_stmts = [
+        f'ANALYZE "{source_schema}"."{_d.normalize_identifier(t)}"'
+        for t in stat_defs
+    ]
+    _d.execute_statements(conn, analyze_stmts)
     print("done")
 
     return stat_defs
@@ -817,6 +704,7 @@ def create_target_extended_stats(
     collected_stats: dict[str, TableStats],
     target_schema: str,
     dialect: str,
+    injection_mode: str = "injected",
 ) -> None:
     """
     Phase D.5 — mirror extended statistics onto the target schema.
@@ -831,7 +719,7 @@ def create_target_extended_stats(
                               stats; structurally correct for functional
                               dependencies when FK ranges are declared)
     """
-    if dialect not in ("postgres", "lakebase", "neon"):
+    if not _get_dialect(dialect).supports_extended_stats:
         return
     if not stat_defs:
         return
@@ -843,41 +731,35 @@ def create_target_extended_stats(
 
     print(f"  [D.5] Creating extended statistics in {target_schema!r}…",
           end=" ", flush=True)
-    created = 0
-    with conn.cursor() as cur:
-        for table_name, pairs in stat_defs.items():
-            for col_a, col_b in pairs:
-                sname = make_stat_name(table_name, col_a, col_b)
-                try:
-                    cur.execute(
-                        f'CREATE STATISTICS IF NOT EXISTS "{target_schema}"."{sname}" '
-                        f'ON "{col_a}", "{col_b}" '
-                        f'FROM "{target_schema}"."{table_name}"'
-                    )
-                    created += 1
-                except Exception as exc:
-                    logger.warning("CREATE STATISTICS target %s(%s,%s): %s",
-                                   table_name, col_a, col_b, exc)
-                    conn.rollback()
-    conn.commit()
+    _d = _get_dialect(dialect)
+    stat_sqls = [
+        _d.create_column_statistics_sql(
+            target_schema, make_stat_name(table_name, col_a, col_b),
+            col_a, col_b, _d.normalize_identifier(table_name),
+        )
+        for table_name, pairs in stat_defs.items()
+        for col_a, col_b in pairs
+    ]
+    created = _d.execute_statements(conn, stat_sqls, allow_fail=True)
     print(f"done ({created} created)")
 
     print(f"  [D.5] Analyzing target tables for extended stats…",
           end=" ", flush=True)
-    with conn.cursor() as cur:
-        for table_name in stat_defs:
-            try:
-                cur.execute(f'ANALYZE "{target_schema}"."{table_name}"')
-            except Exception as exc:
-                logger.warning("ANALYZE target %s: %s", table_name, exc)
-                conn.rollback()
-    conn.commit()
+    analyze_stmts = [
+        f'ANALYZE "{target_schema}"."{_d.normalize_identifier(t)}"'
+        for t in stat_defs
+    ]
+    _d.execute_statements(conn, analyze_stmts)
     print("done")
+
+    if injection_mode != "injected":
+        print(f"  [D.5] Skipping single-column stat re-injection (pg_restore_attribute_stats unavailable)")
+        return
 
     print(f"  [D.5] Re-injecting single-column stats after ANALYZE…",
           end=" ", flush=True)
     for table in ordered:
-        if table.name in stat_defs:
+        if table.name.lower() in stat_defs:
             ts = collected_stats.get(table.name)
             if ts:
                 try:
@@ -887,11 +769,8 @@ def create_target_extended_stats(
                             logger.warning("re-inject %s: %s", table.name, w)
                 except Exception as exc:
                     logger.warning("re-inject stats failed %s: %s", table.name, exc)
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-    conn.commit()
+                    _get_dialect(dialect).rollback(conn)
+    _get_dialect(dialect).commit(conn)
     print("done")
 
 
@@ -939,59 +818,30 @@ def build_target(
     _create_schema(conn, target_schema, dialect)
     conn = _set_namespace(conn, target_schema, dialect)
 
-    _is_pg_wire = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
+    _d = _get_dialect(dialect)
 
     print(f"  [D] Creating tables in schema {target_schema!r}…", end=" ", flush=True)
-    _if_not_exists = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
-    ddl_text = emit_ddl_all([_strip_constraints(t) for t in tables], dialect=dialect,
-                            if_not_exists=_if_not_exists)
-    # Note: SQL Server uses USE [db] to switch context; no schema prefix needed in DDL.
-    if dialect == "oracle":
-        ddl_text = _strip_oracle_quotes(ddl_text)
-    with conn.cursor() as cur:
-        for stmt in ddl_text.split(";"):
-            stmt = stmt.strip()
-            if stmt:
-                try:
-                    cur.execute(stmt)
-                except Exception as e:
-                    logger.warning("DDL failed (%s): %s", dialect, e)
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-        if _is_pg_wire:
-            # Suppress autovacuum so it cannot overwrite injected stats between D and E.
-            _autovac_sql = (
-                'SET (autovacuum_enabled = false)'
-                if dialect == "cockroachdb"
-                else 'SET (autovacuum_enabled = false, toast.autovacuum_enabled = false)'
-            )
-            for t in tables:
-                try:
-                    cur.execute(f'ALTER TABLE "{target_schema}"."{t.name}" {_autovac_sql}')
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-    conn.commit()
+    ddl_stmts = [
+        _d.qualify_ddl(
+            emit_ddl(_strip_constraints(t), dialect=dialect, if_not_exists=_d.ddl_if_not_exists),
+            target_schema,
+        )
+        for t in tables
+    ]
+    _d.execute_statements(conn, ddl_stmts)
+    _autovac_sql = _d.autovacuum_disable_sql()
+    if _autovac_sql:
+        autovac_stmts = [
+            f'ALTER TABLE "{target_schema}"."{_d.normalize_identifier(t.name)}" {_autovac_sql}'
+            for t in tables
+        ]
+        _d.execute_statements(conn, autovac_stmts, allow_fail=True)
     print("done")
 
-    # Disable CockroachDB background auto-stats for the duration of Phase D → Phase E.
-    # Without this, auto-stats jobs triggered by data inserts can overwrite the ANALYZE
-    # results (or our injected stats) before Phase E reads them, causing non-deterministic
-    # within_2x scores.  Re-enabled after Phase E in the caller (run_identity_test).
-    if dialect == "cockroachdb":
-        try:
-            conn.autocommit = True
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SET CLUSTER SETTING sql.stats.automatic_collection.enabled = false"
-                )
-            conn.autocommit = False
-        except Exception:
-            pass  # non-admin or older CRDB — proceed; may still have flaky stats
+    # Disable engine auto-stats for the duration of Phase D → Phase E so that
+    # background jobs cannot overwrite injected statistics before Phase E reads them.
+    # Re-enabled after Phase E in run_identity_test via configure_auto_stats(conn, True).
+    _d.configure_auto_stats(conn, enabled=False)
 
     ordered = resolve_load_order(tables)
     row_counts = resolve_row_counts(tables, scale_factor=sf)
@@ -1002,11 +852,10 @@ def build_target(
     for table in ordered:
         n = row_counts[table.name]
         stats = collected_stats.get(table.name)
-        _tname = table.name.upper() if dialect == "oracle" else table.name
+        _tname = _d.normalize_identifier(table.name)
         print(f"  [D]   synthetic {table.name:<25} {n:>10,} rows…", end=" ", flush=True)
         t0 = time.perf_counter()
-        _cols = ([c.name.upper() for c in table.columns] if dialect == "oracle"
-                 else [c.name for c in table.columns])
+        _cols = [_d.normalize_identifier(c.name) for c in table.columns]
         if table.builtin_generator:
             # Tables with a deterministic built-in generator (e.g. date_dim, time_dim)
             # must use generate_rows — their rows are fully specified by the schema and
@@ -1020,8 +869,7 @@ def build_target(
                     parent_row_counts=row_counts,
                     fk_range_overrides=tbl_fk_overrides,
                 )
-                _cols = ([c.upper() for c in df.columns] if dialect == "oracle"
-                         else None)
+                _cols = [_d.normalize_identifier(c) for c in df.columns] or None
             except Exception as _gen_exc:
                 logger.warning(
                     "build_rows_from_canonical failed for %s (%s); "
@@ -1040,17 +888,14 @@ def build_target(
             commit=False,
             ctx=ctx,
         )
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        _d.commit(conn)
         elapsed = time.perf_counter() - t0
         print(f"{elapsed:.2f}s")
 
     print(f"  [D] Updating statistics in {target_schema!r}…", end=" ", flush=True)
     injection_mode = "none"
 
-    if _is_pg_wire:
+    if _d.is_pg_wire:
         try:
             for table in ordered:
                 ts = collected_stats.get(table.name)
@@ -1061,24 +906,17 @@ def build_target(
                             logger.warning("inject_stats_postgres %s: %s", table.name, w)
                             print(f"\n    WARN {table.name}: {w.strip()}", end="", flush=True)
                     logger.info("injected %s: ok=%d skip=%d", table.name, inj.columns_injected, inj.columns_skipped)
-            conn.commit()
+            _d.commit(conn)
             print("done")
             injection_mode = "injected"
         except RuntimeError as exc:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+            _d.rollback(conn)
             print(f"\n  [D] pg_restore_attribute_stats unavailable ({exc}); running ANALYZE…",
                   end=" ", flush=True)
             with conn.cursor() as cur:
                 for t in ordered:
-                    try:
-                        cur.execute(f'ANALYZE "{target_schema}"."{t.name}"')
-                    except Exception as ae:
-                        logger.warning("ANALYZE failed for %s: %s", t.name, ae)
-                        conn.rollback()
-            conn.commit()
+                    cur.execute(f'ANALYZE "{target_schema}"."{_d.normalize_identifier(t.name)}"')
+            _d.commit(conn)
             print("done")
             injection_mode = "stats_analyze"
     else:
@@ -1264,16 +1102,12 @@ def run_identity_test(
 
     if conn is None:
         raise ValueError("run_identity_test: a connection must be provided via conn=")
-    if dialect != "sqlserver":
-        # mssql-python (SQL Server) requires autocommit=True for DDL (CREATE DATABASE,
-        # DROP DATABASE, UPDATE STATISTICS) and sets it in _connect_sqlserver.
-        # Do not override it here.
+    _dialect_obj = _get_dialect(dialect)
+    if not _dialect_obj.manages_own_autocommit:
         try:
             conn.autocommit = False
         except (AttributeError, TypeError):
             pass  # ibm_db_dbi doesn't support setting autocommit post-connect
-
-    _is_pg_wire = dialect in ("postgres", "neon", "cockroachdb", "lakebase")
 
     # Resolve active phases.  --skip-load is kept for backwards compat and
     # takes precedence over phases when both are given.
@@ -1293,11 +1127,10 @@ def run_identity_test(
                     tref = _schema_table_ref(t.name, source_schema, dialect)
                     cur.execute(f"SELECT count(*) FROM {tref}")
                     result.source_row_counts[t.name] = cur.fetchone()[0]
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
+                except Exception as exc:
+                    print(f"WARN could not count {t.name}: {exc}")
+                    logger.warning("source row count failed for %s: %s", t.name, exc)
+                    _dialect_obj.rollback(conn)
                     result.source_row_counts[t.name] = 0
     else:
         t0 = time.perf_counter()
@@ -1311,7 +1144,7 @@ def run_identity_test(
     # ── Phase A.5: Extended stats from query patterns (Layer 3) ──────────────
     # Extended stats via CREATE STATISTICS are PostgreSQL-only.
     stat_defs: dict[str, list[tuple[str, str]]] = {}
-    if use_extended_stats and _is_pg_wire:
+    if use_extended_stats and _dialect_obj.is_pg_wire:
         t0 = time.perf_counter()
         stat_defs = create_source_extended_stats(
             conn, queries_yaml, ordered, source_schema, dialect
@@ -1348,8 +1181,8 @@ def run_identity_test(
             else:
                 print("  [A.6] No literal predicates on dimension columns found — skipping FK range inference")
         except Exception as exc:
-            logger.warning("Phase A.6 FK range inference failed (non-fatal): %s", exc)
-            print(f"  [A.6] FK range inference skipped ({exc})")
+            print(f"  [A.6] FK range inference skipped ({type(exc).__name__}: {exc})")
+            logger.warning("Phase A.6 FK range inference failed: %s", exc)
         result.phase_times["A6_fk_range_inference"] = time.perf_counter() - t0
 
     # ── Phase B: Baseline EXPLAIN plans ──────────────────────────────────────
@@ -1373,6 +1206,7 @@ def run_identity_test(
                 print(f"  [C] pred_cols: {_n_pred} predicate columns from workload YAML"
                       f" across {len(pred_map)} tables")
             except Exception as exc:
+                print(f"  [C] predicate_col_map_from_yaml failed ({type(exc).__name__}: {exc})")
                 logger.warning("predicate_col_map_from_yaml failed: %s", exc)
         else:
             # No YAML: try the live source-DB query store (pg_stat_statements,
@@ -1380,12 +1214,11 @@ def run_identity_test(
             _pred_conn    = _ss_conn    if stats_source_dsn else conn
             _pred_dialect = _ss_dialect if stats_source_dsn else dialect
             _pred_src_schema = stats_source_schema if stats_source_dsn else source_schema
-            _pred_catalog = (_pred_src_schema if _pred_dialect in ("mysql", "mariadb") else None)
-            _pred_schema  = (_pred_src_schema if _pred_dialect == "oracle" else None)
+            _pred_kwargs = _get_dialect(_pred_dialect).predicate_query_store_kwargs(_pred_src_schema)
             try:
                 pred_map = predicate_col_map_from_db(
                     _pred_conn, _pred_dialect, _tbl_names,
-                    catalog=_pred_catalog, schema=_pred_schema,
+                    **_pred_kwargs,
                 )
                 if pred_map and any(pred_map.values()):
                     collection_config.predicate_col_map = pred_map
@@ -1396,6 +1229,7 @@ def run_identity_test(
                     print(f"  [C] pred_cols: query store empty or unavailable"
                           f" ({_pred_dialect}); collecting stats for all columns")
             except Exception as exc:
+                print(f"  [C] predicate_col_map_from_db failed ({type(exc).__name__}: {exc})")
                 logger.warning("predicate_col_map_from_db failed: %s", exc)
 
     # ── Phase C: Collect statistics ───────────────────────────────────────────
@@ -1408,21 +1242,11 @@ def run_identity_test(
         _ss_schema  = stats_source_schema or source_schema
         print(f"  [C] Cross-DB stats: collecting from {_ss_dialect} schema {_ss_schema!r}…")
         _ss_conn = _connect(_ss_dialect, stats_source_dsn)
-        # SQL Server requires autocommit=True for DDL (CREATE DATABASE etc.);
-        # _connect_sqlserver sets it — don't override it here.
-        if _ss_dialect != "sqlserver":
+        if not _get_dialect(_ss_dialect).manages_own_autocommit:
             try:
                 _ss_conn.autocommit = False
             except (AttributeError, TypeError):
                 pass
-        # For SQL Server and MySQL the "schema" is a DATABASE.  Switch context so
-        # that subsequent catalog queries and table refs work without the 3-part
-        # name.  (load_source calls _create_schema / _set_namespace internally.)
-        if _ss_dialect in ("sqlserver", "mysql", "mariadb"):
-            try:
-                _ss_conn = _set_namespace(_ss_conn, _ss_schema, _ss_dialect)
-            except Exception:
-                pass  # schema may not exist yet; will be created below
 
         # Ensure the stats-source schema exists; if empty, load data there first.
         _ss_empty = False
@@ -1432,15 +1256,14 @@ def run_identity_test(
                 _tref = _schema_table_ref(_first.name, _ss_schema, _ss_dialect)
                 _cur.execute(f"SELECT COUNT(*) FROM {_tref}")
                 _ss_empty = (_cur.fetchone()[0] == 0)
-        except Exception:
-            try:
-                _ss_conn.rollback()
-            except Exception:
-                pass
+        except Exception as exc:
+            logger.warning("stats-source empty-check failed (%s); assuming empty: %s",
+                           _ss_schema, exc)
+            _get_dialect(_ss_dialect).rollback(_ss_conn)
             _ss_empty = True
         if _ss_empty:
             print(f"  [C] Stats-source schema {_ss_schema!r} is empty — loading data…")
-            load_source(_ss_conn, schema, sf, _ss_schema, _ss_dialect, seed=seed)
+            _, _ss_conn = load_source(_ss_conn, schema, sf, _ss_schema, _ss_dialect, seed=seed)
         collected_stats = collect_stats(
             _ss_conn, ordered, _ss_schema, _ss_dialect, save_dir=save_yaml,
             config=collection_config,
@@ -1450,13 +1273,7 @@ def run_identity_test(
         # The target connection may have been closed by an application-level idle
         # timeout on the server side.  Reconnect before Phase D to avoid a stale
         # connection error on the first Lakebase DDL statement.
-        try:
-            conn.cursor().execute("SELECT 1")
-        except Exception:
-            conn.close()
-            if connect_fn:
-                conn = connect_fn()
-            conn.autocommit = False
+        conn.cursor().execute("SELECT 1")
     else:
         collected_stats = collect_stats(
             conn, ordered, source_schema, dialect, save_dir=save_yaml,
@@ -1482,7 +1299,8 @@ def run_identity_test(
     if use_extended_stats and stat_defs:
         t0 = time.perf_counter()
         create_target_extended_stats(
-            conn, stat_defs, ordered, collected_stats, target_schema, dialect
+            conn, stat_defs, ordered, collected_stats, target_schema, dialect,
+            injection_mode=result.stats_injection_mode,
         )
         result.phase_times["D5_target_extended_stats"] = time.perf_counter() - t0
 
@@ -1507,11 +1325,9 @@ def run_identity_test(
             else "  [C.5] stats fidelity: (insufficient data)"
         )
     except Exception as _c5_exc:
+        print(f"  [C.5] stats comparison failed ({type(_c5_exc).__name__}: {_c5_exc})")
         logger.warning("Phase C.5 stats comparison failed: %s", _c5_exc)
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+        _dialect_obj.rollback(conn)
     result.phase_times["C5_target_stats_fidelity"] = time.perf_counter() - t0
 
     # Reconnect before Phase E so the new session starts with a fresh catalog
@@ -1546,11 +1362,8 @@ def run_identity_test(
                 for r in rows:
                     print(f"    {r[0]}: null_frac={r[1]} stadistinct={r[2]}")
         except Exception as _e:
-            print(f"  [E-debug] pg_statistic check failed: {_e}")
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+            print(f"  [E-debug] pg_statistic check failed ({type(_e).__name__}: {_e})")
+            _dialect_obj.rollback(conn)
 
     t0 = time.perf_counter()
     target_plans = collect_baseline_plans(conn, queries_yaml, target_schema, dialect,
@@ -1558,17 +1371,8 @@ def run_identity_test(
                                           table_names=_table_names)
     result.phase_times["E_replay_explain"] = time.perf_counter() - t0
 
-    # Re-enable CockroachDB auto-stats after Phase E EXPLAIN is done.
-    if dialect == "cockroachdb":
-        try:
-            conn.autocommit = True
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SET CLUSTER SETTING sql.stats.automatic_collection.enabled = true"
-                )
-            conn.autocommit = False
-        except Exception:
-            pass
+    # Re-enable engine auto-stats after Phase E EXPLAIN is done.
+    _dialect_obj.configure_auto_stats(conn, enabled=True)
 
     # ── Phase F: Score ─────────────────────────────────────────────────────────
     for qid in source_plans:
@@ -1615,17 +1419,17 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--schema",  default="tpch",
-                   choices=["tpch", "tpcb", "tpcc", "tpcds", "tpcdi", "tpce"],
-                   help="TPC schema to test (default: tpch)")
-    p.add_argument("--sf",      type=float, default=1.0,
-                   help="Scale factor for both source load and synthetic generation (default: 1)")
-    p.add_argument("--dialect", default=None,
-                   choices=["postgres", "lakebase", "neon", "cockroachdb",
-                            "mysql", "mariadb", "sqlserver", "oracle", "db2"],
-                   help="Database dialect (default: derived from --conn-profile)")
-    p.add_argument("--profile-yaml", required=True, metavar="FILE",
-                   help="Path to statschema.yaml containing named connection profiles.")
+    _cli_args.add_schema_arg(p, default="tpch")
+    _cli_args.add_sf_arg(
+        p,
+        help="Scale factor for both source load and synthetic generation (default: 1)",
+    )
+    _cli_args.add_dialect_arg(
+        p,
+        default=None,
+        help="Database dialect (default: derived from --conn-profile)",
+    )
+    _cli_args.add_profile_yaml_arg(p)
     p.add_argument("--conn-profile", required=True, metavar="NAME",
                    help='Connection profile name from --profile-yaml, e.g. "tpcb_postgres".')
     p.add_argument("--queries", metavar="FILE",
@@ -1634,18 +1438,12 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Schema name for real TPC data (default: <schema>_src)")
     p.add_argument("--target-schema", default=None,
                    help="Schema name for statschema copy (default: <schema>_tgt)")
-    p.add_argument("--skip-load", action="store_true",
-                   help="Skip Phase A — reuse existing source_schema data")
-    p.add_argument(
-        "--phases", metavar="LIST",
+    _cli_args.add_skip_load_arg(p)
+    _cli_args.add_phases_arg(
+        p,
+        all_phases=["load_source", "explain_source", "collect_stats",
+                    "load_target", "explain_target", "score"],
         default="load_source,explain_source,collect_stats,load_target,explain_target,score",
-        help=(
-            "Comma-separated pipeline phases to run. "
-            "Values: load_source (A), explain_source (B), collect_stats (C), "
-            "load_target (D), explain_target (E), score (F). "
-            "Default: all. "
-            "Example: --phases explain_source,score (re-score from saved data)"
-        ),
     )
     p.add_argument("--save-yaml", metavar="DIR",
                    help="Save collected stats + schema YAML artifacts to DIR")
@@ -1653,19 +1451,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Minimum mean node_jaccard to pass (default: 0.70)")
     p.add_argument("--threshold-within-2x", type=float, default=0.50, metavar="FLOAT",
                    help="Minimum fraction of estimates within 2× to pass (default: 0.50)")
-    p.add_argument("--seed",    type=int, default=42)
-    p.add_argument("--verbose", action="store_true")
-    p.add_argument("--no-extended-stats", action="store_true",
-                   help="Disable Phase A.5/D.5 extended statistics (Layer 3 query feature)")
-    p.add_argument("--full-stats-db2-ora", action="store_true",
-                   help=(
-                       "DB2 and Oracle only.  Phase D: gather full per-column distribution "
-                       "stats on the target schema (DB2: WITH DISTRIBUTION AND DETAILED "
-                       "INDEXES ALL; Oracle: FOR ALL COLUMNS SIZE AUTO).  Default is "
-                       "predicate-column-only stats, which is 5–10× faster.  "
-                       "No effect on Postgres, MySQL, SQL Server, or CockroachDB.  "
-                       "Use for major-release or audit runs."
-                   ))
+    _cli_args.add_seed_arg(p)
+    _cli_args.add_verbose_arg(p)
+    _cli_args.add_no_extended_stats_arg(p)
+    _cli_args.add_full_stats_db2_ora_arg(p)
     p.add_argument(
         "--enrich", metavar="TECHNIQUES",
         help=(
@@ -1702,8 +1491,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     cross.add_argument(
         "--stats-source-dialect",
-        choices=["postgres", "mysql", "mariadb", "sqlserver", "oracle", "db2",
-                 "lakebase", "neon", "cockroachdb"],
+        choices=_cli_args.DIALECT_CHOICES,
         help="Dialect of the stats-source DB (required with --stats-source-dsn).",
     )
     cross.add_argument(
@@ -1817,13 +1605,13 @@ def main() -> None:
 
     from src.statschema.connection_profile import load_profile as _load_profile
     from src.statschema.loader_context import DeploymentContext as _DC
-    from src.statschema.cli import _connect_from_profile as _cfp
+    from benchmarks.dialects import get as _get_dialect, ConnWrapper
 
     _profile = _load_profile(args.profile_yaml, args.conn_profile)
     _dialect = args.dialect or _profile.dialect
     _ctx     = _DC.from_profile(_profile)
-    from benchmarks.dialects import ConnWrapper
-    _connect_fn = lambda: ConnWrapper(_cfp(_profile))
+    _dialect_obj = _get_dialect(str(_dialect))
+    _connect_fn = lambda: ConnWrapper(_dialect_obj.connect_from_profile(_profile))
     _conn    = _connect_fn()
 
     result = run_identity_test(

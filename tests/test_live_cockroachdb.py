@@ -47,25 +47,29 @@ CockroachDB / PostgreSQL type differences (information_schema)
 
 from __future__ import annotations
 
-import os
 import textwrap
 from typing import Any
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import emit_ddl, parse_ddl
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST        = os.environ.get("CRDB_HOST",        "127.0.0.1")
-_USER        = os.environ.get("CRDB_USER",        "root")
-_SINGLE_PORT = int(os.environ.get("CRDB_SINGLE_PORT", "26257"))
-_MULTI_PORT  = int(os.environ.get("CRDB_MULTI_PORT",  "26267"))
+_ps = _tp("test_cockroachdb")
+_pm = _tp("test_cockroachdb_multi")
+
+_HOST        = _ps.host     or "127.0.0.1"
+_USER        = _ps.username or "root"
+_SINGLE_PORT = _ps.port or 26257
+_MULTI_PORT  = _pm.port or 26267
 
 # Database created during setup (created by the Podman init commands in docs/local-databases.md)
-_DB = "testdb"
+_DB = _ps.database or DEFAULT_CATALOG
 
 _TOPOLOGIES = [
     pytest.param(("single", _SINGLE_PORT), id="single-node"),
@@ -381,7 +385,7 @@ class TestCRDBMultiRegion:
 
     def test_database_has_regions(self, multi_conn):
         """The multi-region database has at least two regions configured."""
-        rows = _fetchall(multi_conn, "SHOW REGIONS FROM DATABASE testdb")
+        rows = _fetchall(multi_conn, f"SHOW REGIONS FROM DATABASE {_DB}")
         region_names = [row[0] for row in rows]
         assert len(region_names) >= 2, (
             f"Expected ≥ 2 regions, got: {region_names}. "
@@ -404,7 +408,7 @@ class TestCRDBMultiRegion:
 
     def test_locality_regional_by_table(self, multi_conn):
         """LOCALITY REGIONAL BY TABLE pins a table to one region."""
-        rows = _fetchall(multi_conn, "SHOW REGIONS FROM DATABASE testdb")
+        rows = _fetchall(multi_conn, f"SHOW REGIONS FROM DATABASE {_DB}")
         # rows schema: (database, region, primary, secondary, zones); find the primary region
         primary_region = next(r[1] for r in rows if r[2])
 

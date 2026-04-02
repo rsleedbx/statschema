@@ -20,7 +20,7 @@ Environment variables (defaults match the Lima config):
     DB2_PORT     default: 50000
     DB2_USER     default: db2inst1
     DB2_PASS     default: testpass
-    DB2_DATABASE default: testdb
+    DB2_DATABASE default: statschema
 
 Skip behaviour
 --------------
@@ -47,22 +47,25 @@ Db2 differs from other SQL databases in several ways relevant to the canonical m
 - ibm_db: Python driver has ARM64 macOS wheels; no Lima requirement for the driver itself.
 """
 
-import os
 import textwrap
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import parse_ddl, emit_ddl, load_schema
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection config
 # ---------------------------------------------------------------------------
 
-_HOST     = os.environ.get("DB2_HOST",     "127.0.0.1")
-_PORT     = int(os.environ.get("DB2_PORT",     "50000"))
-_USER     = os.environ.get("DB2_USER",     "db2inst1")
-_PASS     = os.environ.get("DB2_PASS",     "testpass")
-_DATABASE = os.environ.get("DB2_DATABASE", "testdb")
+_p = _tp("test_db2")
+
+_HOST     = _p.host     or "127.0.0.1"
+_PORT     = _p.port     or 50000
+_USER     = _p.username or "db2inst1"
+_PASS     = _p.password or "testpass"
+_DATABASE = _p.database or DEFAULT_CATALOG
 _SCHEMA   = _USER.upper()   # Db2 default schema is the connected user (uppercase)
 
 

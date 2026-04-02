@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema.data_loader import (
     BatchConfig,
     LoadStrategy,
@@ -391,7 +392,7 @@ class TestLoadDataframe:
                            strategy=LoadStrategy.BULK_COPY, cols=COLS)
 
 
-def _mssql_python_conn(db_name: str = "testdb"):
+def _mssql_python_conn(db_name: str = DEFAULT_CATALOG):
     """Fake mssql-python connection with _statschema_db set (as connect() does)."""
     fake_cur = MagicMock()
     fake_cur.bulkcopy.return_value = {"rows_copied": None}
@@ -410,7 +411,7 @@ class TestBulkLoadSqlServerBCP:
     def test_calls_bulkcopy(self):
         from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
         conn = _mssql_python_conn()
-        bulk_load_sqlserver_bcp(conn, _rows(3), "orders", COLS, database="testdb")
+        bulk_load_sqlserver_bcp(conn, _rows(3), "orders", COLS, database=DEFAULT_CATALOG)
         conn._fake_cur.bulkcopy.assert_called_once()
         table_arg, rows_arg = conn._fake_cur.bulkcopy.call_args[0][:2]
         assert "orders" in table_arg
@@ -425,19 +426,19 @@ class TestBulkLoadSqlServerBCP:
     def test_commits(self):
         from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
         conn = _mssql_python_conn()
-        bulk_load_sqlserver_bcp(conn, _rows(2), "orders", COLS, database="testdb")
+        bulk_load_sqlserver_bcp(conn, _rows(2), "orders", COLS, database=DEFAULT_CATALOG)
         conn.commit.assert_called_once()
 
     def test_returns_row_count(self):
         from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
         conn = _mssql_python_conn()
-        assert bulk_load_sqlserver_bcp(conn, _rows(5), "orders", COLS, database="testdb") == 5
+        assert bulk_load_sqlserver_bcp(conn, _rows(5), "orders", COLS, database=DEFAULT_CATALOG) == 5
 
     def test_database_is_keyword_only(self):
         from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
         conn = _mssql_python_conn()
         with pytest.raises(TypeError):
-            bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, "testdb")  # positional
+            bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, DEFAULT_CATALOG)  # positional
 
     def test_raises_for_non_mssql_python_driver(self):
         from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bcp
@@ -446,7 +447,7 @@ class TestBulkLoadSqlServerBCP:
         conn.cursor = MagicMock()
         conn.commit = MagicMock()
         with pytest.raises(RuntimeError, match="mssql-python driver"):
-            bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, database="testdb")
+            bulk_load_sqlserver_bcp(conn, _rows(1), "orders", COLS, database=DEFAULT_CATALOG)
 
 
 class TestBulkLoadSqlServerBulkInsert:
@@ -457,12 +458,12 @@ class TestBulkLoadSqlServerBulkInsert:
         conn = _mssql_python_conn()
         bulk_load_sqlserver_bulk_insert(
             conn, _rows(3), "orders", COLS,
-            staging_dir=str(tmp_path), database="testdb",
+            staging_dir=str(tmp_path), database=DEFAULT_CATALOG,
         )
         conn._fake_cur.execute.assert_called_once()
         sql = conn._fake_cur.execute.call_args[0][0]
         assert "BULK INSERT" in sql
-        assert "[testdb].[dbo].[orders]" in sql
+        assert f"[{DEFAULT_CATALOG}].[dbo].[orders]" in sql
 
     def test_uses_three_part_name(self, tmp_path):
         from src.statschema.dialects.sqlserver.loader import bulk_load_sqlserver_bulk_insert
@@ -479,7 +480,7 @@ class TestBulkLoadSqlServerBulkInsert:
         conn = _mssql_python_conn()
         bulk_load_sqlserver_bulk_insert(
             conn, _rows(2), "orders", COLS,
-            staging_dir=str(tmp_path), database="testdb",
+            staging_dir=str(tmp_path), database=DEFAULT_CATALOG,
         )
         conn.commit.assert_called_once()
 
@@ -488,7 +489,7 @@ class TestBulkLoadSqlServerBulkInsert:
         conn = _mssql_python_conn()
         n = bulk_load_sqlserver_bulk_insert(
             conn, _rows(4), "orders", COLS,
-            staging_dir=str(tmp_path), database="testdb",
+            staging_dir=str(tmp_path), database=DEFAULT_CATALOG,
         )
         assert n == 4
 
@@ -497,7 +498,7 @@ class TestBulkLoadSqlServerBulkInsert:
         conn = _mssql_python_conn()
         bulk_load_sqlserver_bulk_insert(
             conn, _rows(2), "orders", COLS,
-            staging_dir=str(tmp_path), database="testdb",
+            staging_dir=str(tmp_path), database=DEFAULT_CATALOG,
         )
         assert list(tmp_path.iterdir()) == []
 
@@ -516,7 +517,7 @@ class TestBulkLoadSqlServerBulkInsert:
         with pytest.raises(RuntimeError, match="mssql-python driver"):
             bulk_load_sqlserver_bulk_insert(
                 conn, _rows(1), "orders", COLS,
-                staging_dir=str(tmp_path), database="testdb",
+                staging_dir=str(tmp_path), database=DEFAULT_CATALOG,
             )
 
     def test_uses_server_path_when_mount_points_differ(self, tmp_path):
@@ -536,7 +537,7 @@ class TestBulkLoadSqlServerBulkInsert:
         conn = _mssql_python_conn()
         bulk_load_sqlserver_bulk_insert(
             conn, _rows(2), "orders", COLS,
-            staging_dir=client_dir, database="testdb",
+            staging_dir=client_dir, database=DEFAULT_CATALOG,
             ctx=ctx,
         )
         sql = conn._fake_cur.execute.call_args[0][0]
@@ -557,7 +558,7 @@ class TestBulkLoadSqlServerBulkInsert:
         conn = _mssql_python_conn()
         bulk_load_sqlserver_bulk_insert(
             conn, _rows(1), "orders", COLS,
-            staging_dir=staging, database="testdb",
+            staging_dir=staging, database=DEFAULT_CATALOG,
             ctx=ctx,
         )
         sql = conn._fake_cur.execute.call_args[0][0]

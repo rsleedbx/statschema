@@ -15,12 +15,21 @@ from ..model import CanonicalColumn, CanonicalTableSchema
 # Identifier quoting conventions
 # ---------------------------------------------------------------------------
 
-_BACKTICK_DIALECTS = {"mysql", "databricks"}
-_BRACKET_DIALECTS  = {"sqlserver"}
-_DQUOTE_DIALECTS   = {"postgres", "oracle", "db2"}
+_BACKTICK_DIALECTS  = {"mysql", "databricks"}
+_BRACKET_DIALECTS   = {"sqlserver"}
+_DQUOTE_DIALECTS    = {"postgres", "oracle", "db2"}
+_UPPERCASE_FOLD     = frozenset({"oracle", "db2"})
 
 
 def quote(name: str, dialect: str) -> str:
+    """Quote *name* using the dialect's delimiter, applying canonical case.
+
+    Oracle and DB2 fold unquoted identifiers to uppercase (SQL-92 standard),
+    so we uppercase before quoting.  All other engines fold to lowercase or
+    are case-insensitive, so we lowercase — ensuring the Python layer always
+    holds the form the catalog stores.
+    """
+    name = name.upper() if dialect in _UPPERCASE_FOLD else name.lower()
     if dialect in _BACKTICK_DIALECTS:
         return f"`{name}`"
     if dialect in _BRACKET_DIALECTS:

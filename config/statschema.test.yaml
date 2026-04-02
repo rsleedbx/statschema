@@ -1,0 +1,161 @@
+
+# config/statschema.test.yaml — connection profiles for the statschema test suite.
+#
+# All credential fields use ${oc.env:VAR, default} so the defaults work
+# out-of-the-box with the standard dev container / Lima VM setup.  Any
+# value can be overridden by setting the corresponding env var (via .env).
+#
+# This is the single source of truth for test connection credentials.
+# Tests must NOT call os.environ.get() directly — use load_profile() instead.
+
+profiles:
+
+  # ── PostgreSQL 14 / 16 / 18 ───────────────────────────────────────────────
+
+  test_postgres14:
+    dialect: postgres
+    host: ${oc.env:PG_HOST, 127.0.0.1}
+    port: ${oc.env:PG14_PORT, 5414}
+    database: ${oc.env:PG_DB, statschema}
+    username: ${oc.env:PG_USER, postgres}
+    password: ${oc.env:PG_PASSWORD, testpass}
+
+  test_postgres16:
+    dialect: postgres
+    host: ${oc.env:PG_HOST, 127.0.0.1}
+    port: ${oc.env:PG16_PORT, 5416}
+    database: ${oc.env:PG_DB, statschema}
+    username: ${oc.env:PG_USER, postgres}
+    password: ${oc.env:PG_PASSWORD, testpass}
+
+  test_postgres18:
+    dialect: postgres
+    host: ${oc.env:PG_HOST, 127.0.0.1}
+    port: ${oc.env:PG18_PORT, 5418}
+    database: ${oc.env:PG_DB, statschema}
+    username: ${oc.env:PG_USER, postgres}
+    password: ${oc.env:PG18_PASS, postgres}
+
+  # ── CockroachDB ───────────────────────────────────────────────────────────
+
+  test_cockroachdb:
+    dialect: cockroachdb
+    host: ${oc.env:CRDB_HOST, 127.0.0.1}
+    port: ${oc.env:CRDB_SINGLE_PORT, 26257}
+    database: ${oc.env:CRDB_DB, defaultdb}
+    username: ${oc.env:CRDB_USER, root}
+
+  test_cockroachdb_multi:
+    dialect: cockroachdb
+    host: ${oc.env:CRDB_HOST, 127.0.0.1}
+    port: ${oc.env:CRDB_MULTI_PORT, 26267}
+    database: ${oc.env:CRDB_DB, defaultdb}
+    username: ${oc.env:CRDB_USER, root}
+
+  # ── MySQL 5.7 / 8 ─────────────────────────────────────────────────────────
+
+  test_mysql57:
+    dialect: mysql
+    host: ${oc.env:MYSQL_HOST, 127.0.0.1}
+    port: ${oc.env:MYSQL57_PORT, 3357}
+    database: ${oc.env:MYSQL_DB, statschema}
+    username: ${oc.env:MYSQL_USER, root}
+    password: ${oc.env:MYSQL_ROOT_PASS, testpass}
+
+  test_mysql8:
+    dialect: mysql
+    host: ${oc.env:MYSQL_HOST, 127.0.0.1}
+    port: ${oc.env:MYSQL8_PORT, 3384}
+    database: ${oc.env:MYSQL_DB, statschema}
+    username: ${oc.env:MYSQL_USER, root}
+    password: ${oc.env:MYSQL_ROOT_PASS, testpass}
+
+  # ── MariaDB LTS (10.11) / rolling (11.4) ──────────────────────────────────
+
+  test_mariadb_lts:
+    dialect: mariadb
+    host: ${oc.env:MARIADB_HOST, 127.0.0.1}
+    port: ${oc.env:MARIADB1011_PORT, 3311}
+    database: ${oc.env:MARIADB_DB, statschema}
+    username: ${oc.env:MARIADB_USER, root}
+    password: ${oc.env:MYSQL_ROOT_PASS, testpass}
+
+  test_mariadb_new:
+    dialect: mariadb
+    host: ${oc.env:MARIADB_HOST, 127.0.0.1}
+    port: ${oc.env:MARIADB114_PORT, 3340}
+    database: ${oc.env:MARIADB_DB, statschema}
+    username: ${oc.env:MARIADB_USER, root}
+    password: ${oc.env:MYSQL_ROOT_PASS, testpass}
+
+  # ── SQL Server 2022 (Lima QEMU VM) ────────────────────────────────────────
+
+  test_sqlserver:
+    dialect: sqlserver
+    host: ${oc.env:SQLSERVER_HOST, 127.0.0.1}
+    port: ${oc.env:SQLSERVER_PORT, 14330}
+    database: ${oc.env:SQLSERVER_DB, statschema}
+    username: ${oc.env:SQLSERVER_USER, sa}
+    password: ${oc.env:SQLSERVER_PASS, ""}
+
+  # ── Oracle XE 21c (Lima QEMU VM) ──────────────────────────────────────────
+
+  test_oracle:
+    dialect: oracle
+    host: ${oc.env:ORACLE_HOST, 127.0.0.1}
+    port: ${oc.env:ORACLE_PORT, 1521}
+    database: ${oc.env:ORACLE_SERVICE, XE}
+    username: ${oc.env:ORACLE_USER, system}
+    password: ${oc.env:ORACLE_PASS, ""}
+
+  # ── IBM Db2 CE 11.5 (Lima QEMU VM) ────────────────────────────────────────
+  # client_staging_dir / server_staging_dir are required for server_file loader
+  # tests (the Lima virtfs bind-mount must be set up first).
+
+  test_db2:
+    dialect: db2
+    host: ${oc.env:DB2_HOST, 127.0.0.1}
+    port: ${oc.env:DB2_PORT, 50000}
+    database: ${oc.env:DB2_DATABASE, statschema}
+    username: ${oc.env:DB2_USER, db2inst1}
+    password: ${oc.env:DB2_PASS, testpass}
+    client_staging_dir: ${oc.env:STATSCHEMA__CLIENT_STAGING_DIR, /tmp/lima/statschema}
+    server_staging_dir: ${oc.env:STATSCHEMA__SERVER_STAGING_DIR, /tmp/lima/statschema}
+
+  # ── Neon (local proxy) ────────────────────────────────────────────────────
+
+  test_neon:
+    dialect: neon
+    host: ${oc.env:NEON_HOST, 127.0.0.1}
+    port: ${oc.env:NEON_LOCAL_PORT, 55433}
+    database: ${oc.env:NEON_DATABASE, neondb}
+    username: ${oc.env:NEON_USER, neon}
+    password: ${oc.env:NEON_PASSWORD, npg}
+    url: "${oc.env:NEON_DATABASE_URL, \"\"}"
+
+  # ── Databricks Lakebase (Postgres-wire endpoint) ──────────────────────────
+
+  test_lakebase:
+    dialect: lakebase
+    host: ${oc.env:STATSCHEMA_LAKEBASE_HOST, ""}
+    database: ${oc.env:STATSCHEMA_LAKEBASE_DB, databricks_postgres}
+    username: ${oc.env:DATABRICKS_CLIENT_ID, ""}
+    endpoint: ${oc.env:STATSCHEMA_LAKEBASE_ENDPOINT, ""}
+
+  # ── Application schemas ───────────────────────────────────────────────────
+
+  test_gitea:
+    dialect: postgres
+    host: ${oc.env:GITEA_PG_HOST, 127.0.0.1}
+    port: ${oc.env:GITEA_PG_PORT, 5416}
+    database: ${oc.env:GITEA_PG_DB, gitea}
+    username: ${oc.env:GITEA_PG_USER, gitea}
+    password: ${oc.env:GITEA_PG_PASS, gitea123}
+
+  test_mautic:
+    dialect: mysql
+    host: ${oc.env:MAUTIC_MYSQL_HOST, 127.0.0.1}
+    port: ${oc.env:MAUTIC_MYSQL_PORT, 3384}
+    database: ${oc.env:MAUTIC_MYSQL_DB, mautic}
+    username: ${oc.env:MAUTIC_MYSQL_USER, mautic}
+    password: ${oc.env:MAUTIC_MYSQL_PASS, mauticpass}

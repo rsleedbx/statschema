@@ -10,19 +10,17 @@ Run from the repo root:
 
 from __future__ import annotations
 
-import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 _REPO_ROOT = Path(__file__).parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks.bench_config import BENCH_TPCC_SF as TPCC_SF, BENCH_TPCH_SF as TPCH_SF
-from benchmarks.run_bench import run_benchmark, connect, RESULTS_DIR
+from benchmarks.run_bench import run_benchmark, connect, RESULTS_DIR, _DEFAULT_BENCH_YAML
 from src.statschema.data_loader import LoadStrategy
 
 # ---------------------------------------------------------------------------
@@ -31,105 +29,26 @@ from src.statschema.data_loader import LoadStrategy
 
 @dataclass
 class DbTarget:
-    label: str           # display name (e.g. "PostgreSQL 16")
-    dialect: str         # statschema dialect
+    label:   str            # display name (e.g. "PostgreSQL 16")
+    dialect: str            # statschema dialect
     strategy: LoadStrategy
-    env: dict[str, str]  # env vars to set before connecting
+    profile: str            # profile name in config/statschema.tpcb.yaml
     db_name: str = "bench"  # logical name for display
     skip: bool = False
 
-def _crdb(label: str, port: int) -> DbTarget:
-    return DbTarget(
-        label=label, dialect="cockroachdb",
-        strategy=LoadStrategy.BULK_COPY,
-        env={
-            "BENCH_PG_DSN": (
-                f"host=127.0.0.1 port={port} dbname=defaultdb "
-                "user=root sslmode=disable"
-            ),
-        },
-    )
-
-def _pg(label: str, port: int) -> DbTarget:
-    return DbTarget(
-        label=label, dialect="postgres",
-        strategy=LoadStrategy.BULK_COPY,
-        env={
-            "BENCH_PG_DSN": (
-                f"host=127.0.0.1 port={port} dbname=testdb "
-                "user=postgres password=testpass"
-            ),
-        },
-    )
-
-def _mysql(label: str, port: int) -> DbTarget:
-    return DbTarget(
-        label=label, dialect="mysql",
-        strategy=LoadStrategy.BULK_COPY,
-        env={
-            "BENCH_MYSQL_HOST": "127.0.0.1",
-            "BENCH_MYSQL_PORT": str(port),
-            "BENCH_MYSQL_USER": "root",
-            "BENCH_MYSQL_PASS": "testpass",
-            "BENCH_MYSQL_DB":   "testdb",
-        },
-    )
-
-def _mariadb(label: str, port: int) -> DbTarget:
-    return DbTarget(
-        label=label, dialect="mariadb",
-        strategy=LoadStrategy.BULK_COPY,
-        env={
-            "BENCH_MYSQL_HOST": "127.0.0.1",
-            "BENCH_MYSQL_PORT": str(port),
-            "BENCH_MYSQL_USER": "root",
-            "BENCH_MYSQL_PASS": "testpass",
-            "BENCH_MYSQL_DB":   "testdb",
-        },
-    )
 
 TARGETS: list[DbTarget] = [
-    _pg("PostgreSQL 14",       5414),
-    _pg("PostgreSQL 16",       5416),
-    _pg("PostgreSQL 18",       5418),
-    _crdb("CockroachDB",       26257),
-    _mysql("MySQL 5.7",        3357),
-    _mysql("MySQL 8.0",        3384),
-    _mariadb("MariaDB 10.11",  3310),
-    _mariadb("MariaDB 11.4",   3311),
-    DbTarget(
-        label="SQL Server 2022", dialect="sqlserver",
-        strategy=LoadStrategy.MULTI_ROW,
-        env={
-            # Password resolved at runtime via BENCH_SQLSERVER_DSN env var
-            # (set by _common.sh export_bench_sqlserver_dsn, which reads from
-            # /var/opt/mssql/.sa_password inside the Lima VM).  Falls back to
-            # a placeholder so probe() fails gracefully if not set.
-            "BENCH_SQLSERVER_DSN": os.environ.get(
-                "BENCH_SQLSERVER_DSN",
-                "SERVER=127.0.0.1,14330;DATABASE=master;UID=sa;PWD=",
-            ),
-        },
-    ),
-    DbTarget(
-        label="Oracle XE 21c", dialect="oracle",
-        strategy=LoadStrategy.MULTI_ROW,
-        env={
-            "BENCH_ORACLE_DSN":  "127.0.0.1:1521/XE",
-            "BENCH_ORACLE_USER": "system",
-            "BENCH_ORACLE_PASS": "oracle",
-        },
-    ),
-    DbTarget(
-        label="IBM Db2 CE 11.5", dialect="db2",
-        strategy=LoadStrategy.MULTI_ROW,
-        env={
-            "BENCH_DB2_DSN": (
-                "DATABASE=testdb;HOSTNAME=127.0.0.1;PORT=50000;"
-                "PROTOCOL=TCPIP;UID=db2inst1;PWD=testpass;"
-            ),
-        },
-    ),
+    DbTarget("PostgreSQL 14",    "postgres",    LoadStrategy.BULK_COPY,  "tpcb_postgres14"),
+    DbTarget("PostgreSQL 16",    "postgres",    LoadStrategy.BULK_COPY,  "tpcb_postgres16"),
+    DbTarget("PostgreSQL 18",    "postgres",    LoadStrategy.BULK_COPY,  "tpcb_postgres18"),
+    DbTarget("CockroachDB",      "cockroachdb", LoadStrategy.BULK_COPY,  "tpcb_cockroachdb"),
+    DbTarget("MySQL 5.7",        "mysql",       LoadStrategy.BULK_COPY,  "tpcb_mysql57"),
+    DbTarget("MySQL 8.0",        "mysql",       LoadStrategy.BULK_COPY,  "tpcb_mysql8"),
+    DbTarget("MariaDB 10.11",    "mariadb",     LoadStrategy.BULK_COPY,  "tpcb_mariadb_lts"),
+    DbTarget("MariaDB 11.4",     "mariadb",     LoadStrategy.BULK_COPY,  "tpcb_mariadb_new"),
+    DbTarget("SQL Server 2022",  "sqlserver",   LoadStrategy.MULTI_ROW,  "tpcb_sqlserver"),
+    DbTarget("Oracle XE 21c",    "oracle",      LoadStrategy.MULTI_ROW,  "tpcb_oracle"),
+    DbTarget("IBM Db2 CE 11.5",  "db2",         LoadStrategy.MULTI_ROW,  "tpcb_db2"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -151,13 +70,11 @@ class BenchResult:
 
 
 def run_one(target: DbTarget, schema: str, sf: float) -> BenchResult:
-    # Apply env vars
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     try:
         result = run_benchmark(
             schema=schema, sf=sf, dialect=target.dialect,
             strategy=target.strategy, out_dir=RESULTS_DIR, seed=42,
+            profile_yaml=_DEFAULT_BENCH_YAML, profile_name=target.profile,
         )
         totals = result["totals"]
         return BenchResult(
@@ -168,31 +85,16 @@ def run_one(target: DbTarget, schema: str, sf: float) -> BenchResult:
         )
     except Exception as exc:
         return BenchResult(label=target.label, schema=schema, error=str(exc)[:120])
-    finally:
-        # Restore env
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
 
 def probe(target: DbTarget) -> bool:
     """Return True if the database is reachable."""
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     try:
-        conn = connect(target.dialect)
+        conn = connect(target.dialect, profile_yaml=_DEFAULT_BENCH_YAML, profile_name=target.profile)
         conn.close()
         return True
     except Exception:
         return False
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
 
 # ---------------------------------------------------------------------------

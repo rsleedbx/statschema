@@ -27,7 +27,6 @@ import argparse
 import csv
 import itertools
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -37,6 +36,7 @@ sys.path.insert(0, str(_REPO))
 
 from benchmarks.tpc_generators import tpcc_rows
 from benchmarks.tpc_schemas import TPCC_COLUMNS
+from statschema.connection_profile import load_profile
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
@@ -44,24 +44,25 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 # Config
 # ---------------------------------------------------------------------------
 
+_BENCH_YAML = str(_REPO / "config" / "statschema.tpcb.yaml")
+_p     = load_profile(_BENCH_YAML, "tpcb_oracle")
 _SCHEMA = "BENCH_ORA_LOAD"
-_USER   = os.environ.get("ORACLE_USER", "system")
-_PASS   = os.environ.get("ORACLE_PASS", "oracle")
-_HOST   = os.environ.get("ORACLE_HOST", "127.0.0.1")
-_PORT   = os.environ.get("ORACLE_PORT", "1521")
-_SVC    = os.environ.get("ORACLE_SERVICE", "XE")
+_USER   = _p.username           or "system"
+_PASS   = _p.password           or ""
+_HOST   = _p.host               or "127.0.0.1"
+_PORT   = str(_p.port or 1521)
+_SVC    = _p.database           or "XE"
 _DSN    = f"{_HOST}:{_PORT}/{_SVC}"
 
-_STAGING = os.environ.get("STATSCHEMA_CLIENT_STAGING_DIR", "").strip()
+_STAGING = (_p.client_staging_dir or "").strip()
 if not _STAGING:
     raise RuntimeError(
-        "STATSCHEMA_CLIENT_STAGING_DIR is not set. "
-        "Set it to the shared filesystem path writable by statschema and "
-        "readable by the Oracle server process. "
-        "Example: STATSCHEMA_CLIENT_STAGING_DIR=/tmp/lima/statschema"
+        "client_staging_dir is not set in tpcb_oracle profile. "
+        "Set STATSCHEMA__CLIENT_STAGING_DIR or add client_staging_dir to the profile. "
+        "Example: STATSCHEMA__CLIENT_STAGING_DIR=/tmp/lima/statschema"
     )
 _EXT_CSV      = "bench_ext_ol.csv"         # fixed name — external table DDL references it
-_EXT_CSV_PATH = os.path.join(_STAGING, _EXT_CSV)
+_EXT_CSV_PATH = str(Path(_STAGING) / _EXT_CSV)
 
 _COL_NAMES  = TPCC_COLUMNS["order_line"]
 _UPPER_COLS = [c.upper() for c in _COL_NAMES]

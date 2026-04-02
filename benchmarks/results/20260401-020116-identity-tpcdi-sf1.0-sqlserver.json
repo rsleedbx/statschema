@@ -1,0 +1,216 @@
+{
+  "schema": "tpcdi",
+  "dialect": "sqlserver",
+  "sf": 1.0,
+  "source_schema": "tpcdi_src",
+  "target_schema": "tpcdi_tgt",
+  "source_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 400,
+    "DimBroker": 100,
+    "DimCustomer": 950,
+    "DimMessage": 500,
+    "DimSecurity": 685,
+    "Financial": 3200,
+    "DimAccount": 1500,
+    "FactMarketHistory": 57000,
+    "FactWatches": 5000,
+    "DimTrade": 46000,
+    "FactCashBalances": 2500,
+    "FactHoldings": 3000
+  },
+  "target_row_counts": {
+    "StatusType": 5,
+    "TaxRate": 320,
+    "TradeType": 5,
+    "Industry": 102,
+    "DimDate": 3652,
+    "DimTime": 86400,
+    "DimCompany": 400,
+    "DimBroker": 100,
+    "DimCustomer": 950,
+    "DimMessage": 500,
+    "DimSecurity": 685,
+    "Financial": 3200,
+    "DimAccount": 1500,
+    "FactMarketHistory": 57000,
+    "FactWatches": 5000,
+    "DimTrade": 46000,
+    "FactCashBalances": 2500,
+    "FactHoldings": 3000
+  },
+  "query_metrics": {
+    "tpcdi-q01": {
+      "query_id": "tpcdi-q01",
+      "source_node_types": [
+        "Sort",
+        "Result",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Hash Join",
+        "Result",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Result",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Hash Join",
+        "Result",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 7,
+      "target_plan_depth": 7
+    },
+    "tpcdi-q02": {
+      "query_id": "tpcdi-q02",
+      "source_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpcdi-q03": {
+      "query_id": "tpcdi-q03",
+      "source_node_types": [
+        "Limit",
+        "Result",
+        "Sort",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Hash Join",
+        "Result",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Limit",
+        "Result",
+        "Sort",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Seq Scan",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        2.577854671280277,
+        1.094890510948905,
+        1.094890510948905,
+        1.0,
+        1.094890510948905,
+        1.094890510948905,
+        30.666666666666668,
+        1.0,
+        30.666666666666668
+      ],
+      "within_2x": 0.75,
+      "within_10x": 0.8333333333333334,
+      "source_plan_depth": 9,
+      "target_plan_depth": 9
+    },
+    "tpcdi-q04": {
+      "query_id": "tpcdi-q04",
+      "source_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 0.9375,
+  "mean_within_10x": 0.9583333333333334,
+  "phase_times": {
+    "A_load_source": 62.62761629099259,
+    "B_baseline_explain": 6.551756542001385,
+    "C_collect_stats": 1.664015082991682,
+    "D_build_target": 52.59866233402863,
+    "C5_target_stats_fidelity": 0.6815872500301339,
+    "E_replay_explain": 2.4771044999943115
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "",
+  "git_commit": "e17b93d2e21eea1fa331648901cbb763a84ff955",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {}
+  }
+}

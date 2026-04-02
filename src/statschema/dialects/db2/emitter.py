@@ -30,7 +30,7 @@ DIALECT = "db2"
 
 
 def emit_table(table: CanonicalTableSchema, if_not_exists: bool = True) -> str:
-    tname = quote(table.name.upper(), DIALECT)
+    tname = quote(table.name, DIALECT)
     lines = [col_ddl(c, DIALECT, DEFAULTS) for c in table.columns]
     pk    = primary_key_constraint(table, DIALECT)
     if pk:

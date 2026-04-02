@@ -14,35 +14,20 @@ Usage
 # SQLite (no setup required — good for CI sanity checks):
     python benchmarks/run_bench.py --schema tpcc --sf 1 --dialect sqlite
 
-# PostgreSQL:
-    BENCH_PG_DSN="host=localhost dbname=bench user=postgres password=secret" \\
-    python benchmarks/run_bench.py --schema tpch --sf 1 --dialect postgres
-
-# MySQL:
-    BENCH_MYSQL_HOST=localhost BENCH_MYSQL_USER=root BENCH_MYSQL_PASS=secret \\
-    BENCH_MYSQL_DB=bench \\
-    python benchmarks/run_bench.py --schema tpcc --sf 1 --dialect mysql
-
-# SQL Server (mssql-python preferred, pymssql fallback):
-    BENCH_SQLSERVER_DSN="SERVER=localhost;DATABASE=bench;UID=sa;PWD=secret" \\
+# Any live dialect — credentials come from config/statschema.tpcb.yaml:
+    python benchmarks/run_bench.py --schema tpcc --sf 1 --dialect postgres
     python benchmarks/run_bench.py --schema tpcc --sf 1 --dialect sqlserver
+    python benchmarks/run_bench.py --schema tpcc --sf 1 --dialect oracle
 
-# Oracle:
-    BENCH_ORACLE_DSN="localhost/XEPDB1" BENCH_ORACLE_USER=bench BENCH_ORACLE_PASS=secret \\
-    python benchmarks/run_bench.py --schema tpch --sf 1 --dialect oracle
+# Override with an explicit profile YAML and profile name:
+    python benchmarks/run_bench.py --schema tpcc --sf 1 --dialect postgres \\
+        --profile-yaml config/statschema.tpcb.yaml --conn-profile tpcb_postgres
 
-# IBM Db2:
-    BENCH_DB2_DSN="DATABASE=bench;HOSTNAME=localhost;PORT=50000;UID=db2inst1;PWD=secret" \\
-    python benchmarks/run_bench.py --schema tpch --sf 1 --dialect db2
-
-Environment variables
----------------------
-BENCH_PG_DSN          PostgreSQL libpq connection string
-BENCH_MYSQL_HOST/USER/PASS/DB/PORT
-BENCH_SQLSERVER_DSN   mssql-python / pymssql connection string
-BENCH_ORACLE_DSN/USER/PASS
-BENCH_DB2_DSN         ibm_db_dbi connection string
-BENCH_SQLITE_PATH     SQLite file path (default: benchmarks/results/bench.db)
+Connection credentials
+----------------------
+All credentials are read from config/statschema.tpcb.yaml (profile tpcb_<dialect>).
+Values in the YAML use ${oc.env:VAR, default} so individual fields can be
+overridden by setting the corresponding environment variable.
 """
 
 from __future__ import annotations
@@ -50,7 +35,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import platform
 import socket
 import subprocess
@@ -73,6 +57,8 @@ from src.statschema.model import CanonicalTableSchema
 from src.statschema.row_generator import generate_rows
 from src.statschema.data_loader import BatchConfig, LoadStrategy, load_dataframe
 from src.statschema.schema_transforms import rename_tables, parse_table_map, TABLE_NAME_PRESETS
+
+from benchmarks import cli_args as _cli_args
 
 logger = logging.getLogger(__name__)
 
@@ -104,75 +90,29 @@ def fastest_strategy(dialect: str) -> LoadStrategy:
 # Connection factories
 # ---------------------------------------------------------------------------
 
-def connect(dialect: str) -> Any:
-    """Open and return a DBAPI2 connection for the given dialect."""
-    env = os.environ
+_DEFAULT_BENCH_YAML = str(_REPO_ROOT / "config" / "statschema.tpcb.yaml")
+
+
+def connect(dialect: str, profile_yaml: str = None, profile_name: str = None) -> Any:
+    """Open and return a DBAPI2 connection for the given dialect.
+
+    Credentials are loaded from *profile_yaml* / *profile_name*.  When not
+    supplied, defaults to ``tpcb_<dialect>`` in config/statschema.tpcb.yaml.
+    Delegates to each dialect's ``connect_from_profile()`` — the single
+    authoritative place for dialect-specific connection setup.
+    """
+    from statschema.connection_profile import load_profile
+    from benchmarks.dialects import get as _get_dialect
 
     if dialect == "sqlite":
         import sqlite3
-        path = env.get("BENCH_SQLITE_PATH", str(RESULTS_DIR / "bench.db"))
-        return sqlite3.connect(path)
+        return sqlite3.connect(str(RESULTS_DIR / "bench.db"))
 
-    if dialect in ("postgres", "cockroachdb", "neon"):
-        import psycopg2
-        dsn = env.get("BENCH_PG_DSN", "")
-        if not dsn:
-            raise RuntimeError("Set BENCH_PG_DSN to connect to PostgreSQL/CockroachDB/Neon.")
-        return psycopg2.connect(dsn)
+    yaml_path = profile_yaml or _DEFAULT_BENCH_YAML
+    pname     = profile_name or f"tpcb_{dialect}"
+    p = load_profile(yaml_path, pname)
 
-    if dialect in ("mysql", "mariadb"):
-        import pymysql
-        return pymysql.connect(
-            host=env.get("BENCH_MYSQL_HOST", "localhost"),
-            user=env.get("BENCH_MYSQL_USER", "root"),
-            password=env.get("BENCH_MYSQL_PASS", ""),
-            database=env.get("BENCH_MYSQL_DB", "bench"),
-            port=int(env.get("BENCH_MYSQL_PORT", "3306")),
-            local_infile=True,
-            autocommit=False,
-        )
-
-    if dialect == "sqlserver":
-        dsn = env.get("BENCH_SQLSERVER_DSN", "")
-        if not dsn:
-            raise RuntimeError("Set BENCH_SQLSERVER_DSN to connect to SQL Server.")
-        try:
-            import mssql_python
-            return mssql_python.connect(dsn)
-        except ImportError:
-            import pymssql
-            parts = dict(p.split("=", 1) for p in dsn.split(";") if "=" in p)
-            server_str = parts.get("SERVER", "localhost")
-            # pymssql requires host and port as separate arguments.
-            # SQL Server DSN uses comma notation: "host,port".
-            if "," in server_str:
-                server_host, server_port_str = server_str.rsplit(",", 1)
-                server_port = int(server_port_str.strip())
-            else:
-                server_host, server_port = server_str, 1433
-            return pymssql.connect(
-                server=server_host,
-                port=server_port,
-                database=parts.get("DATABASE", "master"),
-                user=parts.get("UID", "sa"),
-                password=parts.get("PWD", ""),
-            )
-
-    if dialect == "oracle":
-        import oracledb
-        dsn  = env.get("BENCH_ORACLE_DSN", "localhost/XEPDB1")
-        user = env.get("BENCH_ORACLE_USER", "bench")
-        pwd  = env.get("BENCH_ORACLE_PASS", "")
-        return oracledb.connect(user=user, password=pwd, dsn=dsn)
-
-    if dialect == "db2":
-        import ibm_db_dbi
-        dsn = env.get("BENCH_DB2_DSN", "")
-        if not dsn:
-            raise RuntimeError("Set BENCH_DB2_DSN to connect to IBM Db2.")
-        return ibm_db_dbi.connect(dsn, "", "")
-
-    raise ValueError(f"Unsupported dialect: {dialect!r}")
+    return _get_dialect(dialect).connect_from_profile(p)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +259,8 @@ def run_benchmark(
     seed: int = 42,
     append: bool = False,
     table_map: dict[str, str] | None = None,
+    profile_yaml: str = None,
+    profile_name: str = None,
 ) -> dict:
     """
     Run the full load benchmark for one schema × dialect combination.
@@ -370,7 +312,7 @@ def run_benchmark(
     print(f"{'='*70}")
 
     # ── 3. Connect, and optionally create tables ──────────────────────────────
-    conn = connect(dialect)
+    conn = connect(dialect, profile_yaml=profile_yaml, profile_name=profile_name)
 
     if append:
         # Query existing row counts to compute sequential PK offsets and
@@ -508,22 +450,18 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--schema",   choices=["tpcc", "tpch", "tpcb", "tpcds", "tpce", "tpcdi"],
-                   default="tpcc",
-                   help="TPC schema to benchmark (default: tpcc)")
-    p.add_argument("--sf",       type=float, default=1.0,
-                   help="Scale factor: warehouses for TPC-C, GB for TPC-H (default: 1)")
-    p.add_argument("--dialect",  default="sqlite",
-                   choices=["sqlite", "postgres", "cockroachdb", "neon",
-                            "mysql", "mariadb", "sqlserver", "oracle", "db2"],
-                   help="Target database dialect (default: sqlite)")
+    _cli_args.add_schema_arg(p, default="tpcc")
+    _cli_args.add_sf_arg(
+        p, help="Scale factor: warehouses for TPC-C, GB for TPC-H (default: 1)",
+    )
+    _cli_args.add_dialect_arg(p, default="sqlite", include_sqlite=True,
+                              help="Target database dialect (default: sqlite)")
     p.add_argument("--strategy", default="auto",
                    choices=["auto", "singleton", "multi_row", "bulk_copy"],
                    help="Load strategy — auto selects the fastest for the dialect")
     p.add_argument("--out-dir",  default=str(RESULTS_DIR),
                    help="Directory for JSON result files (default: benchmarks/results/)")
-    p.add_argument("--seed",     type=int, default=42,
-                   help="Random seed for reproducible data generation (default: 42)")
+    _cli_args.add_seed_arg(p)
     p.add_argument("--append",   action="store_true",
                    help=(
                        "Append mode: skip DROP/CREATE and add rows on top of "
@@ -554,8 +492,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Combined with --table-preset: map is applied after the preset."
         ),
     )
-    p.add_argument("--verbose",  action="store_true",
-                   help="Enable debug logging")
+    _cli_args.add_verbose_arg(p)
     return p
 
 

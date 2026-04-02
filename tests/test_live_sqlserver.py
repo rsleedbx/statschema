@@ -19,7 +19,7 @@ Environment variables (or edit _CONN_DEFAULTS below):
     SQLSERVER_PORT    default: 14330
     SQLSERVER_USER    default: sa
     SQLSERVER_PASS    required (no default – set from cloud-init-output.log)
-    SQLSERVER_DB      default: testdb
+    SQLSERVER_DB      default: statschema
 
 Find the password:
     grep "SQL Server sa password is" ~/.lima/sqlserver22/serial*.log | tail -1
@@ -34,42 +34,40 @@ All tests are automatically skipped when:
 - the connection to SQL Server fails (e.g. VM not running)
 """
 
-import os
 import textwrap
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import parse_ddl, emit_ddl
 from src.statschema.model import CanonicalTableSchema
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection helpers
 # ---------------------------------------------------------------------------
 
+_p = _tp("test_sqlserver")
+
 _CONN_DEFAULTS = {
-    "host":     os.environ.get("SQLSERVER_HOST", "127.0.0.1"),
-    "port":     int(os.environ.get("SQLSERVER_PORT", "14330")),
-    "user":     os.environ.get("SQLSERVER_USER", "sa"),
-    "password": os.environ.get("SQLSERVER_PASS", ""),
-    "database": os.environ.get("SQLSERVER_DB",   "master"),
+    "host":     _p.host     or "127.0.0.1",
+    "port":     _p.port     or 14330,
+    "user":     _p.username or "sa",
+    "password": _p.password or "",
+    "database": _p.database or DEFAULT_CATALOG,
 }
 
 
 def _get_connection():
-    """Return a pymssql connection or raise RuntimeError."""
-    pymssql = pytest.importorskip("pymssql")
+    """Return an mssql_python connection or skip."""
+    mssql_python = pytest.importorskip("mssql_python")
     p = _CONN_DEFAULTS
     if not p["password"]:
         pytest.skip("SQLSERVER_PASS not set – skipping live SQL Server tests")
     try:
-        conn = pymssql.connect(
-            server=p["host"],
-            port=p["port"],
-            user=p["user"],
-            password=p["password"],
-            database=p["database"],
-            login_timeout=5,
-            tds_version="7.4",
+        conn = mssql_python.connect(
+            f"SERVER={p['host']},{p['port']};DATABASE={p['database']};"
+            f"UID={p['user']};PWD={p['password']};TrustServerCertificate=yes"
         )
         return conn
     except Exception as exc:

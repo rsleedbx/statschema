@@ -1,0 +1,7 @@
+# 2026-04-01T01:45:48.298918+00:00
+
+FAIL  sqlserver×tpcb(sf=1)                        exit=1
+
+Passed : 0 / 1
+Failed : 1 / 1
+Logs   : benchmarks/logs/identity-20260331-204545

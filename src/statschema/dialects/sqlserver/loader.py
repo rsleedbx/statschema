@@ -41,25 +41,40 @@ _MSSQL_MODULE_PREFIX = "mssql_python"
 
 
 def _require_mssql_python(conn: Any) -> None:
-    """Raise if the connection was not created by the mssql-python driver."""
-    if not type(conn).__module__.startswith(_MSSQL_MODULE_PREFIX):
+    """Raise if the connection was not created by the mssql-python driver.
+
+    Unwraps ConnWrapper (benchmarks.dialects) before checking the module so
+    that wrapped connections are accepted the same as raw connections.
+    """
+    raw = getattr(conn, "_raw", conn)  # unwrap ConnWrapper if present
+    if not type(raw).__module__.startswith(_MSSQL_MODULE_PREFIX):
         raise RuntimeError(
             f"SQL Server loaders require the mssql-python driver; "
-            f"got {type(conn).__module__!r}.  "
+            f"got {type(raw).__module__!r}.  "
             "Install mssql-python and use SQLServerDialect.connect()."
         )
 
 
 def _require_statschema_db(conn: Any) -> str:
-    """Return conn._statschema_db or raise RuntimeError if unset."""
+    """Return the SQL Server catalog (DATABASE) the connection was opened against."""
     database = getattr(conn, "_statschema_db", None)
     if database is None:
         raise RuntimeError(
             "SQL Server loaders require conn._statschema_db to be set. "
             "Create the connection via SQLServerDialect.connect() so the "
-            "current database is recorded at connect time."
+            "catalog is recorded at connect time."
         )
     return database
+
+
+def _get_statschema_schema(conn: Any) -> str:
+    """Return the current SQL Server schema namespace (defaults to 'dbo').
+
+    Set to the identity-test schema name by SQLServerDialect.set_namespace().
+    Falls back to 'dbo' for connections created outside the benchmark path
+    (e.g. via the CLI) that only set _statschema_db.
+    """
+    return getattr(conn, "_statschema_schema", "dbo")
 
 
 # ---------------------------------------------------------------------------
@@ -77,15 +92,17 @@ def bulk_load_sqlserver_bcp(  # pragma: no cover
     """Load using mssql-python cursor.bulkcopy() — no staging file required.
 
     cursor.bulkcopy() does not inherit the connection's current database
-    context, so a fully-qualified [database].[dbo].[table] reference is
-    built from the explicit ``database`` parameter.
+    context, so a fully-qualified [catalog].[schema].[table] reference is
+    built from the explicit ``database`` parameter (catalog) and the
+    schema recorded on the connection via ``_statschema_schema``.
     """
     _require_mssql_python(conn)
     rows  = list(_iter_rows(df))
     count = len(rows)
-    full_table = f"[{database}].[dbo].[{table}]"
+    schema     = _get_statschema_schema(conn)
+    full_table = f"[{database}].[{schema}].[{table}]"
     cur    = conn.cursor()
-    result = cur.bulkcopy(full_table, rows, column_mappings=col_names)
+    result = cur.bulkcopy(full_table, rows, column_mappings=col_names, timeout=0)
     conn.commit()
     rows_copied = (result.get("rows_copied") or count) if isinstance(result, dict) else count
     logger.info("bulk_load_sqlserver_bcp: loaded %d rows into %s", rows_copied, full_table)
@@ -117,8 +134,9 @@ def bulk_load_sqlserver_bulk_insert(  # pragma: no cover
     _require_mssql_python(conn)
     rows  = list(_iter_rows(df))
     count = len(rows)
-    full  = f"[{database}].[dbo].[{table}]"
-    cur   = conn.cursor()
+    schema = _get_statschema_schema(conn)
+    full   = f"[{database}].[{schema}].[{table}]"
+    cur    = conn.cursor()
 
     os.makedirs(staging_dir, exist_ok=True)
     fd, client_path = tempfile.mkstemp(prefix=f"ss_{table}_", suffix=".csv", dir=staging_dir)

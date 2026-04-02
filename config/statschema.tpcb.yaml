@@ -18,52 +18,140 @@
 
 profiles:
 
-  # ── PostgreSQL 16 (Podman) ─────────────────────────────────────────────────
-  tpcb_postgres:
+  # ── PostgreSQL (Podman) — per-major-version profiles ──────────────────────
+  # NOTE: PG_PASSWORD must be set in .env — OmegaConf's grammar cannot represent
+  # the '!' in Statsch3ma! as an inline default literal.
+  tpcb_postgres14:
+    dialect: postgres
+    host: 127.0.0.1
+    port: ${oc.env:PG14_PORT,5414}
+    database: ${oc.env:PG_DB,statschema}
+    username: postgres
+    password: ${oc.env:PG_PASSWORD}
+    loader: client_stream
+
+  tpcb_postgres16:
     dialect: postgres
     host: 127.0.0.1
     port: ${oc.env:PG16_PORT,5416}
-    database: ${oc.env:PG_DB,testdb}
+    database: ${oc.env:PG_DB,statschema}
     username: postgres
-    password: ${oc.env:PG_PASSWORD,testpass}
+    password: ${oc.env:PG_PASSWORD}
     loader: client_stream
 
-  # ── MySQL 8 (Podman) ───────────────────────────────────────────────────────
+  tpcb_postgres18:
+    dialect: postgres
+    host: 127.0.0.1
+    port: ${oc.env:PG18_PORT,5418}
+    database: ${oc.env:PG_DB,statschema}
+    username: postgres
+    password: ${oc.env:PG_PASSWORD}
+    loader: client_stream
+
+  # Default alias — used when no version is specified
+  tpcb_postgres:
+    dialect: postgres
+    host: 127.0.0.1
+    port: ${oc.env:PG_PORT,5432}
+    database: ${oc.env:PG_DB,statschema}
+    username: postgres
+    password: ${oc.env:PG_PASSWORD}
+    loader: client_stream
+
+  # ── CockroachDB single-node (Podman) ──────────────────────────────────────
+  # (moved before MySQL so the matrix order matches run_all_bench.py)
+
+  # ── MySQL (Podman) — per-version profiles ─────────────────────────────────
+  # ── MySQL (Podman) — per-version profiles ─────────────────────────────────
+  # In MySQL the catalog IS the schema (no sub-schema concept).  Each identity
+  # test creates its own MySQL database (tpcb_src, tpcb_tgt, …) within the
+  # same server.  The 'database' field here is the initial connection catalog;
+  # the identity test creates separate catalogs for each schema name.
+  tpcb_mysql57:
+    dialect: mysql
+    host: 127.0.0.1
+    port: ${oc.env:MYSQL57_PORT,3357}
+    database: ${oc.env:MYSQL_DB,statschema}
+    username: root
+    password: ${oc.env:MYSQL_ROOT_PASS,testpass}
+    loader: client_stream
+
+  tpcb_mysql8:
+    dialect: mysql
+    host: 127.0.0.1
+    port: ${oc.env:MYSQL8_PORT,3384}
+    database: ${oc.env:MYSQL_DB,statschema}
+    username: root
+    password: ${oc.env:MYSQL_ROOT_PASS,testpass}
+    loader: client_stream
+
+  # Default alias — used when no version is specified (points to MySQL 8)
   tpcb_mysql:
     dialect: mysql
     host: 127.0.0.1
     port: ${oc.env:MYSQL8_PORT,3384}
-    database: testdb
+    database: ${oc.env:MYSQL_DB,statschema}
+    username: root
+    password: ${oc.env:MYSQL_ROOT_PASS,testpass}
+    loader: client_stream
+
+  # ── MariaDB (Podman) — per-version profiles ────────────────────────────────
+  tpcb_mariadb_lts:
+    dialect: mariadb
+    host: 127.0.0.1
+    port: ${oc.env:MARIADB1011_PORT,3311}
+    database: ${oc.env:MYSQL_DB,statschema}
+    username: root
+    password: ${oc.env:MYSQL_ROOT_PASS,testpass}
+    loader: client_stream
+
+  tpcb_mariadb_new:
+    dialect: mariadb
+    host: 127.0.0.1
+    port: ${oc.env:MARIADB114_PORT,3340}
+    database: ${oc.env:MYSQL_DB,statschema}
+    username: root
+    password: ${oc.env:MYSQL_ROOT_PASS,testpass}
+    loader: client_stream
+
+  # Default alias
+  tpcb_mariadb:
+    dialect: mariadb
+    host: 127.0.0.1
+    port: ${oc.env:MARIADB1011_PORT,3311}
+    database: ${oc.env:MYSQL_DB,statschema}
     username: root
     password: ${oc.env:MYSQL_ROOT_PASS,testpass}
     loader: client_stream
 
   # ── SQL Server 2022 (Lima QEMU VM) ────────────────────────────────────────
+  # 'database' is the SQL Server catalog (DATABASE) the connection opens into.
+  # Identity-test schemas are SQL Server SCHEMAs within this catalog — no
+  # CREATE DATABASE per test, just CREATE SCHEMA.
   tpcb_sqlserver:
     dialect: sqlserver
     host: 127.0.0.1
     port: ${oc.env:SQLSERVER_PORT,14330}
-    database: testdb
+    database: ${oc.env:SQLSERVER_DB,statschema}
     username: sa
     password: ${oc.env:SQLSERVER_PASS}
     loader: native_bulk
     version: "2022"
     server_is_emulated: true
 
-  # ── Oracle XE 21c (Lima QEMU VM) ──────────────────────────────────────────
+  # ── Oracle Database 23ai Free (native ARM64 Podman container) ────────────
   # native_bulk → oracledb direct_path_load.
-  # Under QEMU, direct_path_load is ~7× faster than sqlldr/external tables
-  # because it avoids a JIT recompile on each process fork.
+  # App user (statschema) connects to the FREEPDB1 pluggable database.
+  # Requires ORACLE_PASS in .env — Oracle enforces password complexity (upper+digit+special).
   tpcb_oracle:
     dialect: oracle
     host: ${oc.env:ORACLE_HOST,127.0.0.1}
     port: ${oc.env:ORACLE_PORT,1521}
-    database: ${oc.env:ORACLE_SERVICE,XE}
-    username: ${oc.env:ORACLE_USER,system}
-    password: ${oc.env:ORACLE_PASS,oracle}
+    database: ${oc.env:ORACLE_PDB,FREEPDB1}
+    username: ${oc.env:ORACLE_USER,statschema}
+    password: ${oc.env:ORACLE_PASS}
     loader: native_bulk
-    version: "21c"
-    server_is_emulated: true
+    version: "23ai"
 
   # ── IBM Db2 CE 11.5 (Lima QEMU VM) ────────────────────────────────────────
   # server_file → ADMIN_CMD LOAD FROM … OF DEL (fastest bulk path for Db2).
@@ -72,7 +160,7 @@ profiles:
     dialect: db2
     host: ${oc.env:DB2_HOST,127.0.0.1}
     port: ${oc.env:DB2_PORT,50000}
-    database: ${oc.env:DB2_DATABASE,testdb}
+    database: ${oc.env:DB2_DATABASE,statschema}
     username: ${oc.env:DB2_USER,db2inst1}
     password: ${oc.env:DB2_PASS,testpass}
     loader: server_file
@@ -84,7 +172,17 @@ profiles:
   tpcb_cockroachdb:
     dialect: cockroachdb
     host: ${oc.env:CRDB_HOST,127.0.0.1}
-    port: ${oc.env:CRDB_SINGLE_PORT,26257}
+    port: ${oc.env:CRDB_PORT,26257}
     database: defaultdb
     username: ${oc.env:CRDB_USER,root}
     loader: client_stream
+
+  # ── Databricks Lakebase (Postgres-wire endpoint) ──────────────────────────
+  tpcb_lakebase:
+    dialect: lakebase
+    host: ${oc.env:STATSCHEMA_LAKEBASE_HOST, ""}
+    port: ${oc.env:STATSCHEMA_LAKEBASE_PORT, 5432}
+    database: ${oc.env:STATSCHEMA_LAKEBASE_DB, databricks_postgres}
+    username: ${oc.env:DATABRICKS_CLIENT_ID, ""}
+    password: ${oc.env:DATABRICKS_CLIENT_SECRET, ""}
+    endpoint: ${oc.env:STATSCHEMA_LAKEBASE_ENDPOINT, ""}

@@ -25,6 +25,11 @@ class ConnWrapper:
     def __getattr__(self, name: str):
         return getattr(object.__getattribute__(self, "_raw"), name)
 
+    @property
+    def __class__(self):
+        """Report the wrapped type so isinstance() and type-module checks pass."""
+        return type(object.__getattribute__(self, "_raw"))
+
     def __setattr__(self, name: str, value) -> None:
         raw = object.__getattribute__(self, "_raw")
         try:

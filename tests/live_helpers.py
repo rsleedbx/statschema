@@ -3,192 +3,41 @@ tests/live_helpers.py
 
 Dialect-aware database helper for live integration tests.
 Encapsulates connection setup, query execution, and schema introspection so
-that individual test files don't each need their own _get_connection / _execute
-/ _fetchall / _introspect functions.
+that individual test files don't each need their own execute / fetchall /
+introspect helpers.
 
-Each engine has a ``connect()`` function that:
-  - imports the required driver via pytest.importorskip (skips on missing driver)
-  - skips cleanly when the database is unreachable
-  - returns a DBAPI-2 connection with autocommit on (unless the driver requires
-    explicit commits, like Oracle)
+``make_helper(dialect, **kwargs)`` loads a named profile from
+``config/statschema.test.yaml``, applies any kwarg overrides (port, host,
+user, password, db), delegates to the dialect's ``connect_from_profile``, and
+returns a ``LiveDbHelper`` wrapping the connection.
+
+Connection credentials are read from ``config/statschema.test.yaml`` via
+``load_profile()``.  Do not add ``os.environ.get()`` calls here or in test
+files — add the env-var reference to the YAML instead.
 """
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Per-engine connection factories
+# Profile loader
 # ---------------------------------------------------------------------------
 
-def connect_postgres(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    db: str | None = None,
-    sslmode: str = "prefer",
-):
-    psycopg2 = pytest.importorskip("psycopg2")
-    _host     = host     or os.environ.get("PG_HOST",     "127.0.0.1")
-    _port     = port     or int(os.environ.get("PG18_PORT", os.environ.get("PG16_PORT", "5418")))
-    _user     = user     or os.environ.get("PG_USER",     "postgres")
-    _password = password or os.environ.get("PG18_PASS",   os.environ.get("PG_PASSWORD", "postgres"))
-    _db       = db       or os.environ.get("PG_DB",       "postgres")
+_REPO_ROOT = Path(__file__).parent.parent
+TEST_YAML  = str(_REPO_ROOT / "config" / "statschema.test.yaml")
+
+
+def _tp(name: str):
+    """Load a named profile from the test YAML.  Skip the test on failure."""
+    from statschema.connection_profile import load_profile
     try:
-        conn = psycopg2.connect(
-            host=_host, port=_port, user=_user, password=_password,
-            dbname=_db, sslmode=sslmode, connect_timeout=5,
-        )
-        conn.autocommit = True
-        return conn
+        return load_profile(TEST_YAML, name)
     except Exception as exc:
-        pytest.skip(f"Cannot connect to PostgreSQL on {_host}:{_port}: {exc}")
-
-
-def connect_cockroachdb(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    db: str | None = None,
-):
-    psycopg2 = pytest.importorskip("psycopg2")
-    _host = host or os.environ.get("CRDB_HOST",        "127.0.0.1")
-    _port = port or int(os.environ.get("CRDB_SINGLE_PORT", "26257"))
-    _user = user or os.environ.get("CRDB_USER",        "root")
-    _db   = db   or os.environ.get("CRDB_DB",          "defaultdb")
-    try:
-        conn = psycopg2.connect(
-            host=_host, port=_port, user=_user, dbname=_db,
-            sslmode="disable", connect_timeout=5,
-        )
-        conn.autocommit = True
-        return conn
-    except Exception as exc:
-        pytest.skip(f"Cannot connect to CockroachDB on {_host}:{_port}: {exc}")
-
-
-def connect_mysql(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    db: str | None = None,
-):
-    pymysql = pytest.importorskip("pymysql")
-    _host     = host     or os.environ.get("MYSQL_HOST",      "127.0.0.1")
-    _port     = port     or int(os.environ.get("MYSQL8_PORT", "3384"))
-    _user     = user     or os.environ.get("MYSQL_USER",      "root")
-    _password = password or os.environ.get("MYSQL_ROOT_PASS", os.environ.get("MYSQL_PASS", "testpass"))
-    _db       = db       or os.environ.get("MYSQL_DB",        "testdb")
-    try:
-        conn = pymysql.connect(
-            host=_host, port=_port, user=_user, password=_password,
-            database=_db, connect_timeout=5, autocommit=True,
-        )
-        return conn
-    except Exception as exc:
-        pytest.skip(f"Cannot connect to MySQL on {_host}:{_port}: {exc}")
-
-
-def connect_mariadb(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    db: str | None = None,
-):
-    pymysql = pytest.importorskip("pymysql")
-    _host     = host     or os.environ.get("MARIADB_HOST", "127.0.0.1")
-    _port     = port     or int(os.environ.get("MARIADB_PORT", "3311"))
-    _user     = user     or os.environ.get("MARIADB_USER", "root")
-    _password = password or os.environ.get("MARIADB_PASS", os.environ.get("MYSQL_ROOT_PASS", "testpass"))
-    _db       = db       or os.environ.get("MARIADB_DB",   "testdb")
-    try:
-        conn = pymysql.connect(
-            host=_host, port=_port, user=_user, password=_password,
-            database=_db, connect_timeout=5, autocommit=True,
-        )
-        return conn
-    except Exception as exc:
-        pytest.skip(f"Cannot connect to MariaDB on {_host}:{_port}: {exc}")
-
-
-def connect_sqlserver(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    db: str | None = None,
-):
-    pymssql = pytest.importorskip("pymssql")
-    _host     = host     or os.environ.get("SQLSERVER_HOST", "127.0.0.1")
-    _port     = port     or int(os.environ.get("SQLSERVER_PORT", "14330"))
-    _user     = user     or os.environ.get("SQLSERVER_USER", "sa")
-    _password = password or os.environ.get("SQLSERVER_PASS", "")
-    _db       = db       or os.environ.get("SQLSERVER_DB",   "master")
-    if not _password:
-        pytest.skip("SQLSERVER_PASS not set — skipping live SQL Server tests")
-    try:
-        conn = pymssql.connect(
-            server=_host, port=_port, user=_user, password=_password,
-            database=_db, login_timeout=5, tds_version="7.4",
-        )
-        return conn
-    except Exception as exc:
-        pytest.skip(f"Cannot connect to SQL Server on {_host}:{_port}: {exc}")
-
-
-def connect_oracle(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    service: str | None = None,
-):
-    oracledb = pytest.importorskip("oracledb")
-    _host     = host     or os.environ.get("ORACLE_HOST",    "127.0.0.1")
-    _port     = port     or int(os.environ.get("ORACLE_PORT", "1521"))
-    _user     = user     or os.environ.get("ORACLE_USER",    "system")
-    _password = password or os.environ.get("ORACLE_PASS",    "")
-    _service  = service  or os.environ.get("ORACLE_SERVICE", "XE")
-    if not _password:
-        pytest.skip("ORACLE_PASS not set — skipping live Oracle tests")
-    try:
-        conn = oracledb.connect(
-            user=_user,
-            password=_password,
-            dsn=f"{_host}:{_port}/{_service}",
-        )
-        return conn
-    except Exception as exc:
-        pytest.skip(f"Cannot connect to Oracle ({_host}:{_port}/{_service}): {exc}")
-
-
-def connect_db2(
-    host: str | None = None,
-    port: int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    database: str | None = None,
-):
-    ibm_db_dbi = pytest.importorskip("ibm_db_dbi")
-    _host     = host     or os.environ.get("DB2_HOST",     "127.0.0.1")
-    _port     = port     or int(os.environ.get("DB2_PORT", "50000"))
-    _user     = user     or os.environ.get("DB2_USER",     "db2inst1")
-    _password = password or os.environ.get("DB2_PASS",     "testpass")
-    _database = database or os.environ.get("DB2_DATABASE", "testdb")
-    conn_str  = (
-        f"DATABASE={_database};HOSTNAME={_host};PORT={_port};"
-        f"PROTOCOL=TCPIP;UID={_user};PWD={_password};"
-    )
-    try:
-        return ibm_db_dbi.connect(conn_str, "", "")
-    except Exception as exc:
-        pytest.skip(f"Cannot connect to Db2 on {_host}:{_port}: {exc}")
+        pytest.skip(f"Cannot load test profile {name!r} from {TEST_YAML}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -339,15 +188,26 @@ class LiveDbHelper:
 # Factory
 # ---------------------------------------------------------------------------
 
-_CONNECT_FN = {
-    "postgres":    connect_postgres,
-    "cockroachdb": connect_cockroachdb,
-    "neon":        connect_postgres,   # same protocol, uses different env vars
-    "mysql":       connect_mysql,
-    "mariadb":     connect_mariadb,
-    "sqlserver":   connect_sqlserver,
-    "oracle":      connect_oracle,
-    "db2":         connect_db2,
+_DIALECT_PROFILE: dict[str, str] = {
+    "postgres":    "test_postgres18",
+    "cockroachdb": "test_cockroachdb",
+    "neon":        "test_neon",
+    "mysql":       "test_mysql8",
+    "mariadb":     "test_mariadb_lts",
+    "sqlserver":   "test_sqlserver",
+    "oracle":      "test_oracle",
+    "db2":         "test_db2",
+}
+
+_DIALECT_DRIVER: dict[str, str] = {
+    "postgres":    "psycopg2",
+    "cockroachdb": "psycopg2",
+    "neon":        "psycopg2",
+    "mysql":       "pymysql",
+    "mariadb":     "pymysql",
+    "sqlserver":   "mssql_python",
+    "oracle":      "oracledb",
+    "db2":         "ibm_db_dbi",
 }
 
 
@@ -355,10 +215,23 @@ def make_helper(dialect: str, **kwargs) -> LiveDbHelper:
     """
     Return a LiveDbHelper for the given dialect, skipping if unreachable.
 
-    Extra kwargs are forwarded to the connection factory (e.g. port=5416).
+    Supported kwargs override profile fields: port, host, user, password, db.
     """
-    fn = _CONNECT_FN.get(dialect)
-    if fn is None:
+    driver = _DIALECT_DRIVER.get(dialect)
+    if driver:
+        pytest.importorskip(driver)
+    profile_name = _DIALECT_PROFILE.get(dialect)
+    if profile_name is None:
         raise ValueError(f"Unknown dialect: {dialect!r}")
-    conn = fn(**kwargs)
+    p = _tp(profile_name)
+    if "port"     in kwargs: p.port     = kwargs["port"]
+    if "host"     in kwargs: p.host     = kwargs["host"]
+    if "user"     in kwargs: p.username = kwargs["user"]
+    if "password" in kwargs: p.password = kwargs["password"]
+    if "db"       in kwargs: p.database = kwargs["db"]
+    from benchmarks.dialects import get as _get_dialect
+    try:
+        conn = _get_dialect(dialect).connect_from_profile(p)
+    except Exception as exc:
+        pytest.skip(f"Cannot connect to {dialect} on {p.host}:{p.port}: {exc}")
     return LiveDbHelper(conn, dialect)

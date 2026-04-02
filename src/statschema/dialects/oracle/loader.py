@@ -35,7 +35,10 @@ _NUMBER_TYPES = frozenset({
 
 def _oracle_is_oracledb(conn: Any) -> bool:
     """Return True if *conn* was created by the python-oracledb driver."""
-    return type(conn).__module__.split(".")[0] == "oracledb"
+    # Use __class__ so thin wrappers (e.g. ConnWrapper) that delegate their
+    # declared type to the underlying connection still pass this check.
+    cls = getattr(conn, "__class__", type(conn))
+    return cls.__module__.split(".")[0] == "oracledb"
 
 
 def _get_oracle_col_kinds(

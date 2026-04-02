@@ -1,0 +1,58 @@
+run_id: identity-20260331-205601
+timestamp: '2026-04-01T01:56:02.069694+00:00'
+git_commit: e17b93d2e21eea1fa331648901cbb763a84ff955
+invocation:
+  argv:
+  - benchmarks/run_matrix.py
+  - identity
+  - --profile-yaml
+  - config/statschema.tpcb.yaml
+  - --engines
+  - sqlserver
+  - --schemas
+  - tpcb,tpcc,tpch,tpcdi,tpcds,tpce
+  - --phases
+  - load_source,explain_source,collect_stats,load_target,explain_target,score,validate
+  - --log-dir
+  - benchmarks/logs/identity-20260331-205601
+  cwd: /Users/robert.lee/github/statschema
+host:
+  os: macOS-26.3.1-arm64-arm-64bit
+  python: 3.11.13
+  cpu_count: 12
+tools:
+  lima: limactl version 1.0.6
+  podman: podman version 5.4.0
+  qemu: QEMU emulator version 9.2.3
+test_config:
+  mode: identity
+  engines:
+  - sqlserver
+  schemas:
+  - tpcb
+  - tpcc
+  - tpch
+  - tpcdi
+  - tpcds
+  - tpce
+  phases:
+  - load_source
+  - explain_source
+  - collect_stats
+  - load_target
+  - explain_target
+  - score
+  - validate
+  profile_yaml: config/statschema.tpcb.yaml
+  schema_workers_override: null
+  schema_workers_resolved:
+    sqlserver: 3
+  lpt_ordering: true
+  sweep_random: null
+  full_stats: false
+engines:
+  sqlserver:
+    version: null
+    driver: mssql_python
+    driver_version: 1.4.0
+    error: 'DSN build failed: resolver ''secrets'' is already registered'

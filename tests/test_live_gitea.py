@@ -56,7 +56,6 @@ installed — ``make test`` always completes cleanly.
 
 from __future__ import annotations
 
-import os
 import textwrap
 
 import pytest
@@ -69,11 +68,15 @@ from src.statschema.schema_io import dump_schema as dump_canonical
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST = os.environ.get("GITEA_PG_HOST", "127.0.0.1")
-_PORT = int(os.environ.get("GITEA_PG_PORT", "5416"))
-_USER = os.environ.get("GITEA_PG_USER", "gitea")
-_PASS = os.environ.get("GITEA_PG_PASS", "gitea123")
-_DB   = os.environ.get("GITEA_PG_DB",   "gitea")
+from tests.live_helpers import _tp  # noqa: E402
+
+_p = _tp("test_gitea")
+
+_HOST = _p.host     or "127.0.0.1"
+_PORT = _p.port     or 5416
+_USER = _p.username or "gitea"
+_PASS = _p.password or "gitea123"
+_DB   = _p.database or "gitea"
 
 # ---------------------------------------------------------------------------
 # Helpers

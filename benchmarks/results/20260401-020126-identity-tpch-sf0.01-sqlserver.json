@@ -1,0 +1,184 @@
+{
+  "schema": "tpch",
+  "dialect": "sqlserver",
+  "sf": 0.01,
+  "source_schema": "tpch_src",
+  "target_schema": "tpch_tgt",
+  "source_row_counts": {
+    "region": 5,
+    "part": 2000,
+    "nation": 25,
+    "supplier": 100,
+    "customer": 1500,
+    "partsupp": 8000,
+    "orders": 15000,
+    "lineitem": 60000
+  },
+  "target_row_counts": {
+    "region": 5,
+    "part": 2000,
+    "nation": 25,
+    "supplier": 100,
+    "customer": 1500,
+    "partsupp": 8000,
+    "orders": 15000,
+    "lineitem": 60000
+  },
+  "query_metrics": {
+    "tpch-q01": {
+      "query_id": "tpch-q01",
+      "source_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Result",
+        "Hash Join",
+        "Result",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.0021107996816498,
+        1.0021107996816498
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 4,
+      "target_plan_depth": 4
+    },
+    "tpch-q03": {
+      "query_id": "tpch-q03",
+      "source_node_types": [
+        "Sort",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan",
+        "Result",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Sort",
+        "Aggregate",
+        "Sort",
+        "Hash Join",
+        "Hash Join",
+        "Seq Scan",
+        "Seq Scan",
+        "Result",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.389763779527559,
+        1.3870632998962298,
+        1.3870632998962298,
+        1.3896396396396395,
+        1.013840830449827,
+        1.0118768328445749,
+        1.0027301213042534,
+        1.0027301213042534
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    },
+    "tpch-q06": {
+      "query_id": "tpch-q06",
+      "source_node_types": [
+        "Result",
+        "Aggregate",
+        "Result",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Result",
+        "Aggregate",
+        "Result",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0056906363166063,
+        1.0056906363166063
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 3,
+      "target_plan_depth": 3
+    },
+    "tpch-q14": {
+      "query_id": "tpch-q14",
+      "source_node_types": [
+        "Result",
+        "Result",
+        "Aggregate",
+        "Hash Join",
+        "Result",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "target_node_types": [
+        "Result",
+        "Result",
+        "Aggregate",
+        "Hash Join",
+        "Result",
+        "Seq Scan",
+        "Seq Scan"
+      ],
+      "node_jaccard": 1.0,
+      "row_estimate_ratios": [
+        1.0,
+        1.0,
+        1.0,
+        1.010989010989011,
+        1.002721088435374,
+        1.002721088435374,
+        1.0
+      ],
+      "within_2x": 1.0,
+      "within_10x": 1.0,
+      "source_plan_depth": 5,
+      "target_plan_depth": 5
+    }
+  },
+  "mean_node_jaccard": 1.0,
+  "mean_within_2x": 1.0,
+  "mean_within_10x": 1.0,
+  "phase_times": {
+    "A_load_source": 33.78008033300284,
+    "B_baseline_explain": 9.90867341705598,
+    "C_collect_stats": 0.44182833295781165,
+    "D_build_target": 23.153222666995134,
+    "C5_target_stats_fidelity": 0.24919191701337695,
+    "E_replay_explain": 9.730564083030913
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": true,
+  "failure_reason": "",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "",
+  "git_commit": "e17b93d2e21eea1fa331648901cbb763a84ff955",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {}
+  }
+}

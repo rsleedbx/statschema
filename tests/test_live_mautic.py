@@ -57,7 +57,6 @@ pymysql is not installed — ``make test`` always completes cleanly.
 
 from __future__ import annotations
 
-import os
 import textwrap
 from typing import Optional
 
@@ -78,11 +77,15 @@ from src.statschema.schema_io import dump_schema as dump_canonical
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST  = os.environ.get("MAUTIC_MYSQL_HOST", "127.0.0.1")
-_PORT  = int(os.environ.get("MAUTIC_MYSQL_PORT", "3384"))
-_USER  = os.environ.get("MAUTIC_MYSQL_USER", "mautic")
-_PASS  = os.environ.get("MAUTIC_MYSQL_PASS", "mauticpass")
-_DB    = os.environ.get("MAUTIC_MYSQL_DB",   "mautic")
+from tests.live_helpers import _tp  # noqa: E402
+
+_p = _tp("test_mautic")
+
+_HOST  = _p.host     or "127.0.0.1"
+_PORT  = _p.port     or 3384
+_USER  = _p.username or "mautic"
+_PASS  = _p.password or "mauticpass"
+_DB    = _p.database or "mautic"
 
 # ---------------------------------------------------------------------------
 # Helpers

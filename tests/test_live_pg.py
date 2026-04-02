@@ -10,11 +10,11 @@ Prerequisites
 Two PostgreSQL containers via Podman (see docs/local-databases.md):
 
     podman run -d --name pg14 \\
-        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=testdb \\
+        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=statschema \\
         -p 5414:5432 docker.io/library/postgres:14
 
     podman run -d --name pg16 \\
-        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=testdb \\
+        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=statschema \\
         -p 5416:5432 docker.io/library/postgres:16
 
 Environment variables (defaults match the Podman commands above):
@@ -22,7 +22,7 @@ Environment variables (defaults match the Podman commands above):
     PG_HOST      default: 127.0.0.1
     PG_USER      default: postgres
     PG_PASSWORD  default: testpass
-    PG_DB        default: testdb
+    PG_DB        default: statschema
     PG14_PORT    default: 5414
     PG16_PORT    default: 5416
 
@@ -32,23 +32,27 @@ Each parametrised version skips automatically when its port is unreachable or
 psycopg2 is not installed — so make test always completes cleanly.
 """
 
-import os
 import textwrap
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import parse_ddl, emit_ddl
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST     = os.environ.get("PG_HOST",     "127.0.0.1")
-_USER     = os.environ.get("PG_USER",     "postgres")
-_PASSWORD = os.environ.get("PG_PASSWORD", "testpass")
-_DB       = os.environ.get("PG_DB",       "testdb")
-_PORT_14  = int(os.environ.get("PG14_PORT", "5414"))
-_PORT_16  = int(os.environ.get("PG16_PORT", "5416"))
+_p14 = _tp("test_postgres14")
+_p16 = _tp("test_postgres16")
+
+_HOST     = _p16.host     or "127.0.0.1"
+_USER     = _p16.username or "postgres"
+_PASSWORD = _p16.password or "testpass"
+_DB       = _p16.database or DEFAULT_CATALOG
+_PORT_14  = _p14.port or 5414
+_PORT_16  = _p16.port or 5416
 
 _VERSIONS = [
     pytest.param(("14", _PORT_14), id="pg14"),

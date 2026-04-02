@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import itertools
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -31,6 +30,7 @@ sys.path.insert(0, str(_REPO))
 
 from benchmarks.tpc_generators import tpcc_rows
 from benchmarks.tpc_schemas import TPCC_COLUMNS
+from statschema.connection_profile import load_profile
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
@@ -38,12 +38,14 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 # Schema / DDL
 # ---------------------------------------------------------------------------
 
+_BENCH_YAML = str(_REPO / "config" / "statschema.tpcb.yaml")
+_p     = load_profile(_BENCH_YAML, "tpcb_oracle")
 _SCHEMA = "bench_ora_load"
-_USER   = os.environ.get("ORACLE_USER", "system")
-_PASS   = os.environ.get("ORACLE_PASS", "oracle")
-_HOST   = os.environ.get("ORACLE_HOST", "127.0.0.1")
-_PORT   = os.environ.get("ORACLE_PORT", "1521")
-_SVC    = os.environ.get("ORACLE_SERVICE", "XE")
+_USER   = _p.username or "system"
+_PASS   = _p.password or ""
+_HOST   = _p.host     or "127.0.0.1"
+_PORT   = str(_p.port or 1521)
+_SVC    = _p.database or "XE"
 _DSN    = f"{_HOST}:{_PORT}/{_SVC}"
 
 # Oracle DDL for order_line.  Uses Oracle-native types; no CLOB columns so

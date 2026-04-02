@@ -1,0 +1,7 @@
+# 2026-04-01T03:19:55.844294+00:00
+
+PASS  postgres×tpcdi(sf=5)                        Overall: PASS ✓
+
+Passed : 1 / 1
+Failed : 0 / 1
+Logs   : benchmarks/logs/identity-20260331-221912

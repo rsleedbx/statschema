@@ -33,8 +33,6 @@ If the env var IS set but the connection fails, the test fails hard (no silent s
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from src.statschema import parse_ddl, emit_ddl
@@ -46,14 +44,14 @@ from src.statschema.data_loader import LoadStrategy, load_dataframe
 # Connection parameters — all read from environment at import time
 # ---------------------------------------------------------------------------
 
-_ENDPOINT = os.environ.get("STATSCHEMA_LAKEBASE_ENDPOINT", "")
-_HOST     = os.environ.get("STATSCHEMA_LAKEBASE_HOST", "")
-_DB       = os.environ.get("STATSCHEMA_LAKEBASE_DB", "databricks_postgres")
-_USER     = (
-    os.environ.get("STATSCHEMA_LAKEBASE_USER")
-    or os.environ.get("PGUSER")
-    or os.environ.get("DATABRICKS_CLIENT_ID", "")
-)
+from tests.live_helpers import _tp  # noqa: E402
+
+_p = _tp("test_lakebase")
+
+_ENDPOINT = _p.endpoint or ""
+_HOST     = _p.host     or ""
+_DB       = _p.database or "databricks_postgres"
+_USER     = _p.username or ""
 _SCHEMA   = "statschema_test"
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ Supported databases
 -------------------
   mysql       pymysql connection  (or any PEP-249 connection to MySQL / MariaDB)
   postgres    psycopg2 connection (or any PEP-249 connection to PostgreSQL / Neon / CockroachDB)
-  sqlserver   pymssql connection  (or any PEP-249 connection to SQL Server)
+  sqlserver   mssql-python connection  (or any PEP-249 connection to SQL Server)
   oracle      oracledb connection
 
 Usage

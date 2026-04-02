@@ -63,6 +63,7 @@ from benchmarks.bench_config import (
     BENCH_TPCH_SF,
     sf_for,
 )
+from benchmarks import cli_args as _cli_args
 
 logger = logging.getLogger(__name__)
 
@@ -208,22 +209,30 @@ def _run_check_run(
     json_path: str,
     log_file: Path,
     dialect: str,
-    dsn: str,
+    dsn_or_yaml: str,           # either a DSN string or a YAML path (detected by absence of "=")
     target_dialect: str | None = None,
     target_dsn: str | None = None,
+    profile_name: str = "",
 ) -> bool:
     if not json_path or not Path(json_path).exists():
         logger.warning("check_run: no result JSON at %s — skipping row-count check", json_path)
         return True
+
+    is_yaml = dsn_or_yaml and "=" not in dsn_or_yaml and dsn_or_yaml.endswith(".yaml")
+
     cmd = [
         _python(), "benchmarks/check_run.py",
         json_path, str(log_file),
         "--dialect", dialect,
-        "--dsn", dsn,
     ]
+    if is_yaml:
+        cmd += ["--profile-yaml", dsn_or_yaml, "--profile-name", profile_name]
+    elif dsn_or_yaml:
+        cmd += ["--dsn", dsn_or_yaml]
+
     if target_dialect and target_dialect != dialect:
         cmd += ["--target-dialect", target_dialect]
-    if target_dsn and target_dsn != dsn:
+    if target_dsn and target_dsn != dsn_or_yaml:
         cmd += ["--target-dsn", target_dsn]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=_REPO_ROOT)
     if result.returncode != 0:
@@ -236,13 +245,38 @@ def _run_check_run(
 # ---------------------------------------------------------------------------
 
 def _profile_name(profile_yaml: str, engine: str) -> str:
-    """Derive profile name from YAML path + engine.
+    """Derive the profile name from the YAML path and engine token.
+
+    If *engine* already looks like a full profile name (i.e. it starts with
+    the YAML file's prefix), return it unchanged so callers can pass either
+    a short alias (``postgres``) or a full profile name (``tpcb_postgres14``).
 
     ``config/statschema.tpcb.yaml`` → prefix ``tpcb`` → ``tpcb_postgres``.
     """
     stem   = Path(profile_yaml).stem          # "statschema.tpcb" or "tpcb"
     prefix = stem.removeprefix("statschema.")  # "tpcb"
+    if engine.startswith(f"{prefix}_"):
+        return engine
     return f"{prefix}_{engine}"
+
+
+def _dialect_for_engine(profile_yaml: str, engine: str) -> str:
+    """Return the dialect string for *engine*.
+
+    When *engine* is a full profile name (e.g. ``tpcb_postgres14``), read
+    the ``dialect`` field from the profile so that SF tables and feature
+    flags work correctly.  When it is a short alias (``postgres``), the
+    alias itself is the dialect.
+    """
+    stem   = Path(profile_yaml).stem
+    prefix = stem.removeprefix("statschema.")
+    if not engine.startswith(f"{prefix}_"):
+        return engine  # short alias — engine == dialect
+
+    sys.path.insert(0, str(_REPO_ROOT))
+    from statschema.connection_profile import load_profile
+    p = load_profile(profile_yaml, engine)
+    return p.dialect.value  # Dialect enum → lowercase string e.g. "postgres"
 
 
 def _run_one_identity(
@@ -256,8 +290,9 @@ def _run_one_identity(
     extra_env: dict[str, str] | None = None,
     full_stats: bool = False,
 ) -> RunResult:
-    sf     = sf_for(engine, schema)
-    result = RunResult(engine, schema, sf, "identity")
+    dialect  = _dialect_for_engine(profile_yaml, engine)
+    sf       = sf_for(dialect, schema)
+    result   = RunResult(engine, schema, sf, "identity")
     log_file = log_dir / f"{engine}_{schema}.log"
     result.log_file = log_file
 
@@ -266,15 +301,15 @@ def _run_one_identity(
         _python(), "benchmarks/identity_test.py",
         "--schema",       schema,
         "--sf",           str(sf),
-        "--dialect",      engine,
+        "--dialect",      dialect,
         "--profile-yaml",  profile_yaml,
         "--conn-profile",  _profile_name(profile_yaml, engine),
     ]
     if skip_load:
         cmd.append("--skip-load")
-    if no_extended_stats or engine not in ("postgres", "cockroachdb", "neon"):
+    if no_extended_stats or dialect not in ("postgres", "cockroachdb", "neon"):
         cmd.append("--no-extended-stats")
-    if full_stats and engine in ("db2", "oracle"):
+    if full_stats and dialect in ("db2", "oracle"):
         cmd.append("--full-stats-db2-ora")
     if phases_str:
         cmd += ["--phases", phases_str]
@@ -295,7 +330,10 @@ def _run_one_identity(
     result.passed     = proc.returncode == 0
 
     if result.passed and "validate" in phases:
-        _run_check_run(result.json_path, log_file, engine, profile_yaml)
+        _run_check_run(
+            result.json_path, log_file, dialect,
+            profile_yaml, profile_name=_profile_name(profile_yaml, engine),
+        )
 
     return result
 
@@ -668,24 +706,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── identity ──────────────────────────────────────────────────────────────
     ident = sub.add_parser("identity", help="Same-engine identity test matrix")
-    ident.add_argument("--profile-yaml", required=True, metavar="FILE",
-                       help="Path to statschema.yaml (e.g. config/statschema.tpcb.yaml). "
-                            "Profiles are looked up as {yaml_prefix}_{engine}.")
+    _cli_args.add_profile_yaml_arg(ident)
     ident.add_argument("--engines",  default=",".join(DEFAULT_ENGINES))
     ident.add_argument("--schemas",  default=",".join(DEFAULT_SCHEMAS))
     ident.add_argument("--log-dir",  default=None)
-    ident.add_argument("--skip-load", action="store_true")
-    ident.add_argument("--no-extended-stats", action="store_true")
-    ident.add_argument("--full-stats-db2-ora", action="store_true",
-                       help="DB2 and Oracle only: gather full per-column distribution stats "
-                            "on the target schema (5–10× slower than the default predicate-"
-                            "column-only stats). No effect on other engines. Use for "
-                            "major-release or audit validation runs.")
-    ident.add_argument(
-        "--phases",
-        default=",".join(ALL_PHASES),
-        help=f"Comma-separated subset of: {', '.join(ALL_PHASES)}",
-    )
+    _cli_args.add_skip_load_arg(ident)
+    _cli_args.add_no_extended_stats_arg(ident)
+    _cli_args.add_full_stats_db2_ora_arg(ident)
+    _cli_args.add_phases_arg(ident, all_phases=ALL_PHASES)
     ident.add_argument(
         "--schema-workers", type=int, default=None, metavar="N",
         help=(
@@ -705,19 +733,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── lakebase ──────────────────────────────────────────────────────────────
     lb = sub.add_parser("lakebase", help="Cross-engine Lakebase target test")
-    lb.add_argument("--source-engines",    default=",".join(DEFAULT_ENGINES))
-    lb.add_argument("--schemas",           default=",".join(DEFAULT_SCHEMAS))
-    lb.add_argument("--log-dir",           default=None)
-    lb.add_argument("--skip-load",         action="store_true")
-    lb.add_argument("--max-jobs",          type=int, default=3)
-    lb.add_argument("--full-stats-db2-ora", action="store_true",
-                    help="Collect all-column distribution stats for DB2/Oracle source "
-                         "schemas (slower; use for audit / major-release runs).")
-    lb.add_argument(
-        "--phases",
-        default=",".join(ALL_PHASES),
-        help=f"Comma-separated subset of: {', '.join(ALL_PHASES)}",
-    )
+    lb.add_argument("--source-engines", default=",".join(DEFAULT_ENGINES))
+    lb.add_argument("--schemas",        default=",".join(DEFAULT_SCHEMAS))
+    lb.add_argument("--log-dir",        default=None)
+    _cli_args.add_skip_load_arg(lb)
+    lb.add_argument("--max-jobs", type=int, default=3)
+    _cli_args.add_full_stats_db2_ora_arg(lb)
+    _cli_args.add_phases_arg(lb, all_phases=ALL_PHASES)
 
     # ── score-only shortcut ───────────────────────────────────────────────────
     score = sub.add_parser("score", help="Re-score from saved result JSON (no DB needed)")

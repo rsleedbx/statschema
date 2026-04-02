@@ -18,7 +18,7 @@ Prerequisites
 PostgreSQL container (pg16 used as the primary identity test target):
 
     podman run -d --name pg16 \\
-        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=testdb \\
+        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=statschema \\
         -p 5416:5432 docker.io/library/postgres:16
 
 Environment variables (defaults match the Podman command above):
@@ -26,7 +26,7 @@ Environment variables (defaults match the Podman command above):
     PG_HOST       default: 127.0.0.1
     PG_USER       default: postgres
     PG_PASSWORD   default: testpass
-    PG_DB         default: testdb
+    PG_DB         default: statschema
     PG16_PORT     default: 5416
 
 Test matrix
@@ -49,7 +49,6 @@ small tables.
 from __future__ import annotations
 
 import json
-import os
 import socket
 from pathlib import Path
 
@@ -61,11 +60,16 @@ _REPO_ROOT = Path(__file__).parent.parent
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST    = os.environ.get("PG_HOST",     "127.0.0.1")
-_USER    = os.environ.get("PG_USER",     "postgres")
-_PASS    = os.environ.get("PG_PASSWORD", "testpass")
-_DB      = os.environ.get("PG_DB",       "testdb")
-_PORT_16 = int(os.environ.get("PG16_PORT", "5416"))
+from benchmarks.bench_config import DEFAULT_CATALOG
+from tests.live_helpers import _tp  # noqa: E402
+
+_p16 = _tp("test_postgres16")
+
+_HOST    = _p16.host     or "127.0.0.1"
+_USER    = _p16.username or "postgres"
+_PASS    = _p16.password or "testpass"
+_DB      = _p16.database or DEFAULT_CATALOG
+_PORT_16 = _p16.port     or 5416
 
 
 def _pg16_dsn() -> str:

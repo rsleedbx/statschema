@@ -11,11 +11,11 @@ Prerequisites
 Two MariaDB containers via Podman (see docs/local-databases.md):
 
     podman run -d --name mariadb1011 \\
-        -e MARIADB_ROOT_PASSWORD=testpass -e MARIADB_DATABASE=testdb \\
+        -e MARIADB_ROOT_PASSWORD=testpass -e MARIADB_DATABASE=statschema \\
         -p 3310:3306 docker.io/library/mariadb:10.11
 
     podman run -d --name mariadb114 \\
-        -e MARIADB_ROOT_PASSWORD=testpass -e MARIADB_DATABASE=testdb \\
+        -e MARIADB_ROOT_PASSWORD=testpass -e MARIADB_DATABASE=statschema \\
         -p 3311:3306 docker.io/library/mariadb:11.4
 
 Environment variables (defaults match the Podman commands above):
@@ -42,21 +42,25 @@ MariaDB uses ``longtext`` / ``longblob`` for the unbounded text/blob types in th
 - ``INT UNSIGNED`` widening follows MySQL semantics.
 """
 
-import os
 import textwrap
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import parse_ddl, emit_ddl, load_schema
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection config
 # ---------------------------------------------------------------------------
 
-_HOST      = os.environ.get("MARIADB_HOST",      "127.0.0.1")
-_ROOT_PASS = os.environ.get("MARIADB_ROOT_PASS", "testpass")
-_PORT_LTS  = int(os.environ.get("MARIADB_LTS_PORT", "3310"))
-_PORT_NEW  = int(os.environ.get("MARIADB_NEW_PORT",  "3311"))
+_pl = _tp("test_mariadb_lts")
+_pn = _tp("test_mariadb_new")
+
+_HOST      = _pl.host     or "127.0.0.1"
+_ROOT_PASS = _pl.password or "testpass"
+_PORT_LTS  = _pl.port or 3311
+_PORT_NEW  = _pn.port or 3340
 
 _VERSIONS = [
     pytest.param(("10.11", _PORT_LTS), id="mariadb1011"),
@@ -68,7 +72,7 @@ _VERSIONS = [
 # Connection helpers
 # ---------------------------------------------------------------------------
 
-def _get_connection(port: int, db: str = "testdb"):
+def _get_connection(port: int, db: str = DEFAULT_CATALOG):
     pymysql = pytest.importorskip("pymysql")
     try:
         conn = pymysql.connect(

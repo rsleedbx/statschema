@@ -18,7 +18,6 @@ import argparse
 import csv
 import itertools
 import logging
-import os
 import sys
 import tempfile
 import time
@@ -29,8 +28,13 @@ sys.path.insert(0, str(_REPO))
 
 from benchmarks.tpc_generators import tpcc_rows
 from benchmarks.tpc_schemas import TPCC_COLUMNS
+from benchmarks.bench_config import DEFAULT_CATALOG
+from statschema.connection_profile import load_profile
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
+_BENCH_YAML = str(_REPO / "config" / "statschema.tpcb.yaml")
+_p = load_profile(_BENCH_YAML, "tpcb_db2")
 
 # ---------------------------------------------------------------------------
 # Schema / DDL
@@ -62,11 +66,11 @@ _COL_NAMES = TPCC_COLUMNS["order_line"]
 
 def connect_db2():
     import ibm_db_dbi  # type: ignore
-    host = os.environ.get("DB2_HOST",     "127.0.0.1")
-    port = os.environ.get("DB2_PORT",     "50000")
-    db   = os.environ.get("DB2_DATABASE", "testdb")
-    user = os.environ.get("DB2_USER",     "db2inst1")
-    pwd  = os.environ.get("DB2_PASS",     "testpass")
+    host = _p.host     or "127.0.0.1"
+    port = str(_p.port or 50000)
+    db   = _p.database or DEFAULT_CATALOG
+    user = _p.username or "db2inst1"
+    pwd  = _p.password or "testpass"
     dsn  = f"DATABASE={db};HOSTNAME={host};PORT={port};PROTOCOL=TCPIP;UID={user};PWD={pwd};"
     return ibm_db_dbi.connect(dsn, "", "")
 
@@ -123,13 +127,12 @@ def generate_rows(n_rows: int | None) -> list[tuple]:
 # Load path A: write CSV to shared filesystem, call ADMIN_CMD LOAD
 # ---------------------------------------------------------------------------
 
-_STAGING = os.environ.get("STATSCHEMA_CLIENT_STAGING_DIR", "").strip()
+_STAGING = (_p.client_staging_dir or "").strip()
 if not _STAGING:
     raise RuntimeError(
-        "STATSCHEMA_CLIENT_STAGING_DIR is not set. "
-        "Set it to the shared filesystem path writable by statschema and "
-        "readable by the DB2 server process. "
-        "Example: STATSCHEMA_CLIENT_STAGING_DIR=/tmp/lima/statschema"
+        "client_staging_dir is not set in tpcb_db2 profile. "
+        "Set STATSCHEMA__CLIENT_STAGING_DIR or add client_staging_dir to the profile. "
+        "Example: STATSCHEMA__CLIENT_STAGING_DIR=/tmp/lima/statschema"
     )
 
 

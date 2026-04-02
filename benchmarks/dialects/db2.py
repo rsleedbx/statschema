@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from benchmarks.dialects._base import DialectBase, require_application_catalog
+
 logger = logging.getLogger(__name__)
 
 _DB2_OP_MAP = {
@@ -24,60 +26,162 @@ _DB2_OP_MAP = {
 }
 
 
-class DB2Dialect:
+class DB2Dialect(DialectBase):
+    system_database              = None   # single-instance; no separate system DB
+    ddl_if_not_exists            = False
+    is_pg_wire                   = False
+    needs_column_types_for_bulk_load = True   # ibm_db_dbi cannot auto-coerce non-strings
+    sqlglot_dialect              = "db2"
+    manages_own_autocommit       = False
+    supports_extended_stats      = False
 
     # ------------------------------------------------------------------ #
     # Connection                                                           #
     # ------------------------------------------------------------------ #
 
-    def connect(self, dsn: str):
+    def connect_from_profile(self, profile) -> object:
         import ibm_db_dbi  # type: ignore
-        p = _parse_dsn(dsn)
-        if "DATABASE" in dsn or "HOSTNAME" in dsn:
-            ibm_dsn = dsn  # already a native IBM DSN
-        else:
-            ibm_dsn = (
-                f"DATABASE={p.get('database', p.get('db', 'SAMPLE'))};"
-                f"HOSTNAME={p.get('host', '127.0.0.1')};"
-                f"PORT={p.get('port', '50000')};"
-                f"UID={p.get('user', 'db2inst1')};"
-                f"PWD={p.get('password', '')};"
-                "PROTOCOL=TCPIP;"
-            )
+        ibm_dsn = (
+            f"DATABASE={getattr(profile, 'database', None) or 'SAMPLE'};"
+            f"HOSTNAME={getattr(profile, 'host',     None) or '127.0.0.1'};"
+            f"PORT={getattr(profile,     'port',     None) or 50000};"
+            f"UID={getattr(profile,      'username', None) or 'db2inst1'};"
+            f"PWD={getattr(profile,      'password', None) or ''};"
+            "PROTOCOL=TCPIP;"
+        )
         return ibm_db_dbi.connect(ibm_dsn, "", "")
+
+    def connect(self, dsn: str) -> object:
+        import ibm_db_dbi  # type: ignore
+        # Native IBM DSN passthrough (DATABASE=…;HOSTNAME=…)
+        if "DATABASE" in dsn or "HOSTNAME" in dsn:
+            return ibm_db_dbi.connect(dsn, "", "")
+        p = _parse_dsn(dsn)
+
+        class _P:
+            host     = p.get("host", "127.0.0.1")
+            port     = int(p.get("port", "50000"))
+            database = p.get("database", p.get("db", "SAMPLE"))
+            username = p.get("user", "db2inst1")
+            password = p.get("password", "")
+
+        return self.connect_from_profile(_P())
+
+    # ------------------------------------------------------------------ #
+    # Transaction control                                                 #
+    # ------------------------------------------------------------------ #
+
+    def commit(self, conn) -> None:
+        conn.commit()
+
+    def rollback(self, conn) -> None:
+        conn.rollback()
+
+    # ------------------------------------------------------------------ #
+    # Identifier normalisation / query rewrite / auto-stats              #
+    # ------------------------------------------------------------------ #
+
+    def normalize_identifier(self, name: str) -> str:
+        return name.upper()
+
+    def rewrite_query_sql(
+        self, sql: str, schema: str, table_names: set[str], source_dialect: str
+    ) -> str:
+        from benchmarks.dialects._sql_rewrite import rewrite_limit_to_fetch
+        return rewrite_limit_to_fetch(sql)
+
+    def autovacuum_disable_sql(self) -> str | None:
+        return None
+
+    def configure_auto_stats(self, conn, enabled: bool) -> None:
+        pass
+
+    def predicate_query_store_kwargs(self, schema: str) -> dict:
+        return {}
+
+    def create_column_statistics_sql(self, schema, stat_name, col_a, col_b, table_name) -> str:
+        raise NotImplementedError("DB2 does not support pg_statistic_ext-style extended stats")
+
+    # ------------------------------------------------------------------ #
+    # Schema lifecycle                                                     #
+    # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # Catalog introspection                                               #
+    # ------------------------------------------------------------------ #
+
+    # Lowercase for uniform comparison — all list_* methods return lowercase.
+    _SYSTEM_SCHEMAS = frozenset({
+        "sysibm", "syscat", "sysstat", "sysfun", "sysproc",
+        "systools", "nullid", "sqlj",
+    })
+
+    def list_schemas(self, conn) -> list[str]:
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT SCHEMANAME FROM SYSCAT.SCHEMATA "
+                "WHERE DEFINER != 'SYSIBM'"
+            )
+            return [r[0].lower() for r in cur.fetchall()
+                    if r[0].lower() not in self._SYSTEM_SCHEMAS]
+
+    def list_tables(self, conn, schema: str) -> list[str]:
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT TABNAME FROM SYSCAT.TABLES "
+                "WHERE TABSCHEMA = ? AND TYPE = 'T'",
+                (schema.upper(),),
+            )
+            return [r[0].lower() for r in cur.fetchall()]
+
+    def _list_objects(self, conn, schema: str, obj_type: str) -> list[str]:
+        """Return object names of TYPE *obj_type* in *schema* (DB2 SYSCAT.TABLES)."""
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TYPE = ?",
+                (schema.upper(), obj_type),
+            )
+            return [r[0].lower() for r in cur.fetchall()]
 
     # ------------------------------------------------------------------ #
     # Schema lifecycle                                                     #
     # ------------------------------------------------------------------ #
 
     def create_schema(self, conn, schema_name: str) -> None:
-        with conn.cursor() as cur:
-            # Ensure explain tables exist (needed for EXPLAIN ALL)
-            try:
+        # Ensure EXPLAIN tables exist (needed for EXPLAIN ALL).
+        try:
+            with conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM SYSTOOLS.EXPLAIN_OPERATOR FETCH FIRST 1 ROW ONLY")
-            except Exception:
-                try:
+        except Exception:
+            try:
+                with conn.cursor() as cur:
                     cur.execute("CALL SYSPROC.SYSINSTALLOBJECTS('EXPLAIN', 'C', NULL, NULL)")
-                    conn.commit()
-                except Exception:
-                    pass
-            # Drop existing tables in this schema individually
-            try:
-                cur.execute(f"""
-                    SELECT TABNAME FROM SYSCAT.TABLES
-                    WHERE TABSCHEMA = '{schema_name.upper()}'
-                """)
-                for (tab,) in cur.fetchall():
-                    try:
-                        cur.execute(f"DROP TABLE {schema_name}.{tab}")
-                    except Exception:
-                        pass
+                conn.commit()
             except Exception:
                 pass
-            try:
+
+        # Drop all objects in dependency order so DROP SCHEMA RESTRICT succeeds.
+        for obj_type, drop_tmpl in [
+            ("T", "DROP TABLE {schema}.{name}"),
+            ("S", "DROP SEQUENCE {schema}.{name}"),
+            ("A", "DROP ALIAS {schema}.{name}"),
+            ("V", "DROP VIEW {schema}.{name}"),
+            ("N", "DROP NICKNAME {schema}.{name}"),
+        ]:
+            for name in self._list_objects(conn, schema_name, obj_type):
+                with conn.cursor() as cur:
+                    cur.execute(drop_tmpl.format(schema=schema_name, name=name))
+        conn.commit()
+
+        if schema_name.lower() in self.list_schemas(conn):
+            with conn.cursor() as cur:
                 cur.execute(f"DROP SCHEMA {schema_name} RESTRICT")
-            except Exception:
-                pass
+            conn.commit()
+
+        with conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA {schema_name}")
         conn.commit()
 

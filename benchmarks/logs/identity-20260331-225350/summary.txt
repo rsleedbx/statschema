@@ -1,0 +1,12 @@
+# 2026-04-01T03:54:57.598001+00:00
+
+PASS  postgres×tpcb(sf=1)                         Overall: PASS ✓
+PASS  postgres×tpcc(sf=1)                         Overall: PASS ✓
+PASS  postgres×tpcdi(sf=5)                        Overall: PASS ✓
+PASS  postgres×tpcds(sf=0.01)                     Overall: PASS ✓
+PASS  postgres×tpce(sf=0.01)                      Overall: PASS ✓
+PASS  postgres×tpch(sf=0.1)                       Overall: PASS ✓
+
+Passed : 6 / 6
+Failed : 0 / 6
+Logs   : benchmarks/logs/identity-20260331-225350

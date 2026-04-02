@@ -25,7 +25,7 @@ def inject_stats_sqlserver(  # pragma: no cover
 
     Parameters
     ----------
-    conn        pymssql connection to the SQL Server target database.
+    conn        mssql-python connection to the SQL Server target database.
     table_stats TableStats collected from any source dialect.
     schema      Target schema (default: "dbo").
     """

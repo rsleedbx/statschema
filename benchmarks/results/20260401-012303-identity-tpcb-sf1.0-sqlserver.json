@@ -1,0 +1,44 @@
+{
+  "schema": "tpcb",
+  "dialect": "sqlserver",
+  "sf": 1.0,
+  "source_schema": "tpcb_src",
+  "target_schema": "tpcb_tgt",
+  "source_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "target_row_counts": {
+    "branch": 1,
+    "teller": 10,
+    "account": 100000,
+    "history": 100000
+  },
+  "query_metrics": {},
+  "mean_node_jaccard": 0.0,
+  "mean_within_2x": 0.0,
+  "mean_within_10x": 0.0,
+  "phase_times": {
+    "A_load_source": 17.73632754199207,
+    "B_baseline_explain": 5.274059082963504,
+    "C_collect_stats": 25.496623083017766,
+    "D_build_target": 14.07384299999103,
+    "C5_target_stats_fidelity": 0.00025754200760275126,
+    "E_replay_explain": 0.40269558399450034
+  },
+  "threshold_node_jaccard": 0.7,
+  "threshold_within_2x": 0.5,
+  "passed": false,
+  "failure_reason": "mean_node_jaccard 0.000 < threshold 0.7",
+  "stats_injection_mode": "stats_analyze",
+  "stats_source_dialect": "",
+  "git_commit": "e17b93d2e21eea1fa331648901cbb763a84ff955",
+  "stats_fidelity": {
+    "mean_ndistinct_within_2x": null,
+    "mean_range_covered": null,
+    "mean_null_match": null,
+    "per_table": {}
+  }
+}

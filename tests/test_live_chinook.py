@@ -39,8 +39,6 @@ pymssql is not installed — ``make test`` always completes cleanly.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from src.statschema import emit_ddl, load_canonical, parse_ddl
@@ -51,9 +49,13 @@ from src.statschema.schema_io import dump_schema as dump_canonical
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST    = os.environ.get("SQLSERVER_HOST", "127.0.0.1")
-_PORT    = int(os.environ.get("SQLSERVER_PORT", "14330"))
-_PASS    = os.environ.get("SQLSERVER_PASS", "")
+from tests.live_helpers import _tp  # noqa: E402
+
+_p = _tp("test_sqlserver")
+
+_HOST    = _p.host     or "127.0.0.1"
+_PORT    = _p.port     or 14330
+_PASS    = _p.password or ""
 _DB      = "Chinook"
 
 # ---------------------------------------------------------------------------
@@ -63,14 +65,13 @@ _DB      = "Chinook"
 def _get_conn():
     if not _PASS:
         pytest.skip("SQLSERVER_PASS not set")
-    pymssql = pytest.importorskip("pymssql")
+    mssql_python = pytest.importorskip("mssql_python")
+    _user = _p.username or "sa"
     try:
-        conn = pymssql.connect(
-            server=_HOST, port=_PORT,
-            user="sa", password=_PASS,
-            database=_DB,
+        conn = mssql_python.connect(
+            f"SERVER={_HOST},{_PORT};DATABASE={_DB};"
+            f"UID={_user};PWD={_PASS};TrustServerCertificate=yes"
         )
-        conn.autocommit(True)
         return conn
     except Exception as exc:
         pytest.skip(f"Cannot connect to Chinook on {_HOST}:{_PORT}: {exc}")

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from benchmarks.dialects._base import DialectBase, require_application_catalog
+
 
 _ORA_OP_MAP = {
     "TABLE ACCESS": {"FULL": "Seq Scan", "BY INDEX ROWID": "Index Scan",
@@ -22,52 +24,136 @@ _ORA_OP_MAP = {
 }
 
 
-class OracleDialect:
+class OracleDialect(DialectBase):
+    system_database              = None   # single-instance; no separate system DB
+    ddl_if_not_exists            = False
+    is_pg_wire                   = False
+    needs_column_types_for_bulk_load = False
+    sqlglot_dialect              = "oracle"
+    manages_own_autocommit       = False
+    supports_extended_stats      = False
 
     # ------------------------------------------------------------------ #
     # Connection                                                           #
     # ------------------------------------------------------------------ #
 
-    def connect(self, dsn: str):
+    def connect_from_profile(self, profile) -> object:
         import oracledb  # type: ignore
-        p = _parse_dsn(dsn)
-        host    = p.get("host", "127.0.0.1")
-        port    = p.get("port", "1521")
-        service = p.get("service", "XE")
-        user = p.get("user", "system")
+        host    = getattr(profile, "host",     None) or "127.0.0.1"
+        port    = getattr(profile, "port",     None) or 1521
+        service = getattr(profile, "database", None) or "XE"
+        user    = getattr(profile, "username", None) or "system"
+        password = getattr(profile, "password", None) or "oracle"
         conn = oracledb.connect(
             user=user,
-            password=p.get("password", "oracle"),
+            password=password,
             dsn=f"{host}:{port}/{service}",
         )
-        # Oracle schema == username; track it so loaders never need to query.
         conn._statschema_db = user.upper()
         return conn
+
+    def connect(self, dsn: str) -> object:
+        p = _parse_dsn(dsn)
+
+        class _P:
+            host     = p.get("host", "127.0.0.1")
+            port     = int(p.get("port", "1521"))
+            database = p.get("service", "XE")
+            username = p.get("user", "system")
+            password = p.get("password", "oracle")
+
+        return self.connect_from_profile(_P())
+
+    # ------------------------------------------------------------------ #
+    # Transaction control                                                 #
+    # ------------------------------------------------------------------ #
+
+    def commit(self, conn) -> None:
+        conn.commit()
+
+    def rollback(self, conn) -> None:
+        conn.rollback()
+
+    # ------------------------------------------------------------------ #
+    # Identifier normalisation / query rewrite / auto-stats              #
+    # ------------------------------------------------------------------ #
+
+    def normalize_identifier(self, name: str) -> str:
+        return name.upper()
+
+    def rewrite_query_sql(
+        self, sql: str, schema: str, table_names: set[str], source_dialect: str
+    ) -> str:
+        from benchmarks.dialects._sql_rewrite import strip_double_quotes, rewrite_limit_to_fetch
+        return rewrite_limit_to_fetch(strip_double_quotes(sql))
+
+    def autovacuum_disable_sql(self) -> str | None:
+        return None
+
+    def configure_auto_stats(self, conn, enabled: bool) -> None:
+        pass
+
+    def predicate_query_store_kwargs(self, schema: str) -> dict:
+        return {"schema": schema}
+
+    def create_column_statistics_sql(self, schema, stat_name, col_a, col_b, table_name) -> str:
+        raise NotImplementedError("Oracle does not support pg_statistic_ext-style extended stats")
+
+    # ------------------------------------------------------------------ #
+    # Catalog introspection                                               #
+    # ------------------------------------------------------------------ #
+
+    # Oracle built-in accounts that must never be dropped (lowercase for
+    # uniform comparison — all list_* methods return lowercase).
+    _SYSTEM_SCHEMAS = frozenset({
+        "sys", "system", "outln", "dbsnmp", "appqossys", "dbsfwuser",
+        "ggsys", "anonymous", "ctxsys", "dvsys", "dvf", "gsmadmin_internal",
+        "mdsys", "olapsys", "ordplugins", "ordsys", "orddata", "si_informtn_schema",
+        "wmsys", "xdb", "lbacsys", "apex_public_user", "flows_files",
+        "hr", "oe", "pm", "ix", "sh", "bi",
+    })
+
+    def list_schemas(self, conn) -> list[str]:
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT username FROM dba_users "
+                "WHERE account_status = 'OPEN' AND oracle_maintained = 'N'"
+            )
+            return [r[0].lower() for r in cur.fetchall()
+                    if r[0].lower() not in self._SYSTEM_SCHEMAS]
+
+    def list_tables(self, conn, schema: str) -> list[str]:
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT table_name FROM all_tables WHERE owner = :1",
+                (schema.upper(),),
+            )
+            return [r[0].lower() for r in cur.fetchall()]
 
     # ------------------------------------------------------------------ #
     # Schema lifecycle                                                     #
     # ------------------------------------------------------------------ #
 
     def create_schema(self, conn, schema_name: str) -> None:
-        """Create an Oracle user (= schema). Requires DBA privileges (system user)."""
-        with conn.cursor() as cur:
-            try:
+        """Drop and recreate an Oracle user (= schema). Requires DBA privileges."""
+        if schema_name.lower() in self.list_schemas(conn):
+            with conn.cursor() as cur:
                 cur.execute(f"DROP USER {schema_name} CASCADE")
-            except Exception:
-                pass  # expected if user doesn't exist yet
+            conn.commit()
+        with conn.cursor() as cur:
             cur.execute(f"CREATE USER {schema_name} IDENTIFIED BY Ident123")
             cur.execute(f"GRANT CONNECT, RESOURCE TO {schema_name}")
             cur.execute(f"GRANT CREATE SESSION TO {schema_name}")
             cur.execute(f"ALTER USER {schema_name} QUOTA UNLIMITED ON USERS")
-            # Set USERS tablespace to NOLOGGING so all test tables created in it
-            # inherit NOLOGGING by default.  direct_path_load then generates zero
-            # redo, which meaningfully cuts load time on the emulated x86 VM.
-            # Oracle XE already runs in NOARCHIVELOG mode; this removes the last
-            # redo overhead for DML on test objects.  Idempotent.
-            try:
+        # Set USERS tablespace to NOLOGGING so all test tables inherit it.
+        # Oracle XE runs in NOARCHIVELOG mode; this eliminates remaining redo overhead.
+        try:
+            with conn.cursor() as cur:
                 cur.execute("ALTER TABLESPACE USERS NOLOGGING")
-            except Exception:
-                pass
+        except Exception:
+            pass  # may already be set or require higher privilege
         conn.commit()
 
     def set_namespace(self, conn, schema_name: str):

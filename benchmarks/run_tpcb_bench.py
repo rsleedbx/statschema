@@ -11,7 +11,6 @@ Run from the repo root:
 
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,8 +19,9 @@ _REPO_ROOT = Path(__file__).parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from benchmarks.run_all_bench import TARGETS, DbTarget, probe
-from benchmarks.run_bench import run_benchmark, connect, RESULTS_DIR
+from benchmarks.run_bench import run_benchmark, connect, RESULTS_DIR, _DEFAULT_BENCH_YAML
 from src.statschema.data_loader import LoadStrategy
 from src.statschema.schema_transforms import TABLE_NAME_PRESETS
 
@@ -61,10 +61,8 @@ def _add_pgbench_indexes(target: DbTarget) -> None:
     if target.dialect not in ("postgres", "cockroachdb", "neon"):
         return
 
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     try:
-        conn = connect(target.dialect)
+        conn = connect(target.dialect, profile_yaml=_DEFAULT_BENCH_YAML, profile_name=target.profile)
         cur  = conn.cursor()
         stmts = [
             # Drop first so re-runs are idempotent
@@ -85,12 +83,6 @@ def _add_pgbench_indexes(target: DbTarget) -> None:
         print(f"  Primary keys added to pgbench_accounts/branches/tellers", flush=True)
     except Exception as exc:
         print(f"  WARNING: could not add pgbench indexes: {exc}", flush=True)
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
 
 def _run_pgbench(target: DbTarget, clients: int = 4, txns: int = 500) -> str:
@@ -103,18 +95,16 @@ def _run_pgbench(target: DbTarget, clients: int = 4, txns: int = 500) -> str:
     if target.dialect not in ("postgres", "cockroachdb", "neon"):
         return "n/a (pgbench only runs against PostgreSQL)"
 
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     try:
-        import subprocess, re
+        import subprocess, re, os
+        from statschema.connection_profile import load_profile
 
-        dsn = target.env.get("BENCH_PG_DSN", "")
-        parts = dict(kv.split("=", 1) for kv in dsn.split() if "=" in kv)
-        host  = parts.get("host", "127.0.0.1")
-        port  = parts.get("port", "5432")
-        user  = parts.get("user", "postgres")
-        dbname = parts.get("dbname", "testdb")
-        pwd   = parts.get("password", "")
+        p      = load_profile(_DEFAULT_BENCH_YAML, target.profile)
+        host   = p.host     or "127.0.0.1"
+        port   = str(p.port or 5432)
+        user   = p.username or "postgres"
+        dbname = p.database or DEFAULT_CATALOG
+        pwd    = p.password or ""
 
         env = os.environ.copy()
         env["PGPASSWORD"] = pwd
@@ -143,17 +133,9 @@ def _run_pgbench(target: DbTarget, clients: int = 4, txns: int = 500) -> str:
         return "ERR: pgbench not found in PATH"
     except Exception as exc:
         return f"ERR: {exc}"
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
 
 def run_one(target: DbTarget, sf: float, append: bool = False) -> BenchResult:
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     # Apply pgbench preset for PostgreSQL-family databases so that tables are
     # named pgbench_branches/tellers/accounts/history — required for pgbench
     # to run its transaction mix.  Non-Postgres dialects keep canonical names.
@@ -167,6 +149,7 @@ def run_one(target: DbTarget, sf: float, append: bool = False) -> BenchResult:
             schema="tpcb", sf=sf, dialect=target.dialect,
             strategy=target.strategy, out_dir=RESULTS_DIR,
             seed=42, append=append, table_map=table_map,
+            profile_yaml=_DEFAULT_BENCH_YAML, profile_name=target.profile,
         )
         totals = result["totals"]
         return BenchResult(
@@ -177,12 +160,6 @@ def run_one(target: DbTarget, sf: float, append: bool = False) -> BenchResult:
         )
     except Exception as exc:
         return BenchResult(label=target.label, sf=sf, error=str(exc)[:160])
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
 
 def _cell(r: BenchResult | None) -> str:

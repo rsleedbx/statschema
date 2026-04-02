@@ -52,7 +52,6 @@ Environment variables:
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import yaml
@@ -90,23 +89,31 @@ def _stats_from_yaml(yaml_str: str) -> TableStats:
 # Configuration
 # ---------------------------------------------------------------------------
 
-_MYSQL_HOST  = os.environ.get("MYSQL8_HOST",  "127.0.0.1")
-_MYSQL_PORT  = int(os.environ.get("MYSQL8_PORT", "3384"))
-_MYSQL_USER  = "root"
-_MYSQL_PASS  = os.environ.get("MYSQL_ROOT_PASS", os.environ.get("MYSQL8_ROOT_PASS", "testpass"))
+from benchmarks.bench_config import DEFAULT_CATALOG
+from tests.live_helpers import _tp as _ltp  # noqa: E402
 
-_PG18_HOST   = os.environ.get("PG18_HOST",  "127.0.0.1")
-_PG18_PORT   = int(os.environ.get("PG18_PORT", "5418"))
-_PG18_USER   = "postgres"
-_PG18_PASS   = "postgres"
+_pm = _ltp("test_mysql8")
+_pp = _ltp("test_postgres18")
+_po = _ltp("test_oracle")
+_ps = _ltp("test_sqlserver")
 
-_ORA_HOST    = os.environ.get("ORACLE_HOST", "127.0.0.1")
-_ORA_PORT    = int(os.environ.get("ORACLE_PORT", "1521"))
-_ORA_PASS    = os.environ.get("ORACLE_PASS", "oracle")
+_MYSQL_HOST  = _pm.host     or "127.0.0.1"
+_MYSQL_PORT  = _pm.port     or 3384
+_MYSQL_USER  = _pm.username or "root"
+_MYSQL_PASS  = _pm.password or "testpass"
 
-_SS_HOST     = os.environ.get("SQLSERVER_HOST", "127.0.0.1")
-_SS_PORT     = int(os.environ.get("SQLSERVER_PORT", "14330"))
-_SS_PASS     = os.environ.get("SQLSERVER_PASS", "")
+_PG18_HOST   = _pp.host     or "127.0.0.1"
+_PG18_PORT   = _pp.port     or 5418
+_PG18_USER   = _pp.username or "postgres"
+_PG18_PASS   = _pp.password or "postgres"
+
+_ORA_HOST    = _po.host     or "127.0.0.1"
+_ORA_PORT    = _po.port     or 1521
+_ORA_PASS    = _po.password or ""
+
+_SS_HOST     = _ps.host     or "127.0.0.1"
+_SS_PORT     = _ps.port     or 14330
+_SS_PASS     = _ps.password or ""
 
 # ---------------------------------------------------------------------------
 # Source table DDL (MySQL)
@@ -236,17 +243,15 @@ def _oracle_conn():
         pytest.skip(f"Cannot connect to Oracle {dsn}: {exc}")
 
 
-def _sqlserver_conn(database: str = "master"):
+def _sqlserver_conn(database: str = DEFAULT_CATALOG):
     if not _SS_PASS:
         pytest.skip("SQLSERVER_PASS not set")
-    pymssql = pytest.importorskip("pymssql")
+    mssql_python = pytest.importorskip("mssql_python")
     try:
-        conn = pymssql.connect(
-            server=_SS_HOST, port=_SS_PORT,
-            user="sa", password=_SS_PASS,
-            database=database,
+        conn = mssql_python.connect(
+            f"SERVER={_SS_HOST},{_SS_PORT};DATABASE={database};"
+            f"UID={_ps.username or 'sa'};PWD={_SS_PASS};TrustServerCertificate=yes"
         )
-        conn.autocommit(True)
         return conn
     except Exception as exc:
         pytest.skip(f"Cannot connect to SQL Server on {_SS_HOST}:{_SS_PORT}: {exc}")

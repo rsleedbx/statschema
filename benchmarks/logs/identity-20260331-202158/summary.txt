@@ -1,0 +1,7 @@
+# 2026-04-01T01:23:04.092830+00:00
+
+FAIL  sqlserver×tpcb(sf=1)                        Overall: FAIL ✗  (mean_node_jaccard 0.000 < threshold 0.7)
+
+Passed : 0 / 1
+Failed : 1 / 1
+Logs   : benchmarks/logs/identity-20260331-202158

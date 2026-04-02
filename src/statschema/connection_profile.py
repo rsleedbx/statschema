@@ -48,7 +48,11 @@ def _secrets_resolver(*args: str) -> str:
     return str(value)
 
 
-OmegaConf.register_new_resolver("secrets", _secrets_resolver, use_cache=True)
+try:
+    OmegaConf.register_new_resolver("secrets", _secrets_resolver, use_cache=True)
+except ValueError as exc:
+    if "already registered" not in str(exc):
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +65,7 @@ class Dialect(str, Enum):
     NEON        = "neon"
     LAKEBASE    = "lakebase"      # Databricks Postgres-wire endpoint
     MYSQL       = "mysql"
+    MARIADB     = "mariadb"
     SQLSERVER   = "sqlserver"
     ORACLE      = "oracle"
     DB2         = "db2"
@@ -120,6 +125,11 @@ class ConnectionProfile:
     # Lakehouse / cloud
     cloud_staging_uri: Optional[str] = None
     cloud_format:      str           = "parquet"
+
+    # Full connection URL — used when host/port decomposition is insufficient
+    # (e.g. Neon cloud's postgresql://… string).  Takes precedence over
+    # host/port fields when set.
+    url: Optional[str] = None
 
     # Lakebase — OAuth endpoint resource path
     # (projects/<p>/branches/<b>/endpoints/<e>)

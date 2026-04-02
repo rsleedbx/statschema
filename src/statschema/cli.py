@@ -122,12 +122,27 @@ def _open_connection(
         )
 
     if dialect == "sqlserver":
-        try:
-            import mssql_python
-            return mssql_python.connect(f"SERVER={host},{port};DATABASE={database};UID={user};PWD={password}")
-        except ImportError:
-            import pymssql
-            return pymssql.connect(server=host, port=port, database=database, user=user, password=password)
+        import mssql_python
+        conn_str = (
+            f"SERVER={host},{port};DATABASE={database};UID={user};PWD={password}"
+            ";TrustServerCertificate=yes"
+        )
+        conn = mssql_python.connect(conn_str)
+        # CREATE DATABASE / DROP DATABASE / UPDATE STATISTICS must run outside
+        # an explicit transaction; autocommit=True is the SQL Server requirement.
+        conn.setautocommit(True)
+        # Template used by set_namespace() (benchmarks/dialects/sqlserver.py) to
+        # reconnect to a different database without USE [db] (unsupported on Azure
+        # SQL and mssql_python pooled sessions).
+        conn._mssql_conn_template = (
+            f"SERVER={host},{port};"
+            "DATABASE={db};"
+            f"UID={user};"
+            f"PWD={password};"
+            "TrustServerCertificate=yes"
+        )
+        conn._statschema_db = database
+        return conn
 
     if dialect == "oracle":
         import oracledb
@@ -190,24 +205,8 @@ def _connect(dialect: str, dsn: str) -> Any:
     if dialect == "sqlserver":
         if not dsn:
             _die("Provide --dsn or use --profile.")
-        try:
-            import mssql_python
-            return mssql_python.connect(dsn)
-        except ImportError:
-            import pymssql
-            parts = dict(p.split("=", 1) for p in dsn.split(";") if "=" in p)
-            server_str = parts.get("SERVER", "localhost")
-            if "," in server_str:
-                host, port_s = server_str.rsplit(",", 1)
-                port = int(port_s.strip())
-            else:
-                host, port = server_str, 1433
-            return pymssql.connect(
-                server=host, port=port,
-                database=parts.get("DATABASE", "master"),
-                user=parts.get("UID", "sa"),
-                password=parts.get("PWD", ""),
-            )
+        import mssql_python
+        return mssql_python.connect(dsn)
 
     if dialect == "oracle":
         import oracledb

@@ -36,10 +36,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from benchmarks import cli_args as _cli_args
+from benchmarks.bench_config import DEFAULT_CATALOG
+from benchmarks.dialects import get as _get_dialect
 
 # ---------------------------------------------------------------------------
 # Log-file patterns
@@ -92,8 +99,37 @@ def check_log(log_path: Path) -> list[str]:
 # Database connections — all six engines + Lakebase
 # ---------------------------------------------------------------------------
 
-def _connect(dialect: str, dsn: str):
-    """Open and return a DBAPI2 connection for the given dialect."""
+def _connect(dialect: str, dsn: str = "", profile_yaml: str = "", profile_name: str = ""):
+    """Open and return a DBAPI2 connection for the given dialect.
+
+    Credentials are resolved in this order:
+      1. Explicit *dsn* string (legacy, for direct CLI use).
+      2. *profile_yaml* + *profile_name* — load a ConnectionProfile from YAML.
+    """
+    if not dsn and profile_yaml:
+        # Build a DSN string from the named profile so the rest of the
+        # function does not need to be duplicated.
+        from statschema.connection_profile import load_profile  # noqa: PLC0415
+        p_obj = load_profile(profile_yaml, profile_name)
+        host = p_obj.host     or "127.0.0.1"
+        port = str(p_obj.port or "")
+        user = p_obj.username or ""
+        pwd  = p_obj.password or ""
+        db   = p_obj.database or ""
+        if dialect in ("postgres", "cockroachdb", "neon", "lakebase"):
+            dsn = (
+                f"host={host} port={port or '5432'} dbname={db or DEFAULT_CATALOG} "
+                f"user={user or 'postgres'} password={pwd}"
+            )
+        elif dialect in ("mysql", "mariadb"):
+            dsn = f"host={host} port={port or '3306'} database={db or DEFAULT_CATALOG} user={user or 'root'} password={pwd}"
+        elif dialect == "sqlserver":
+            dsn = f"server={host} port={port or '14330'} database={db or 'master'} user={user or 'sa'} password={pwd}"
+        elif dialect == "oracle":
+            dsn = f"host={host} port={port or '1521'} service={db or 'XE'} user={user or 'system'} password={pwd}"
+        elif dialect == "db2":
+            dsn = f"host={host} port={port or '50000'} database={db or DEFAULT_CATALOG} user={user or 'db2inst1'} password={pwd}"
+
     p: dict[str, str] = _parse_dsn(dsn)
 
     if dialect in ("postgres", "cockroachdb", "neon"):
@@ -128,7 +164,7 @@ def _connect(dialect: str, dsn: str):
     if dialect == "db2":
         import ibm_db_dbi  # type: ignore
         ibm_dsn = (
-            f"DATABASE={p.get('database', 'testdb')};"
+            f"DATABASE={p.get('database', DEFAULT_CATALOG)};"
             f"HOSTNAME={p.get('hostname', p.get('host', '127.0.0.1'))};"
             f"PORT={p.get('port', '50000')};"
             f"UID={p.get('uid', p.get('user', 'db2inst1'))};"
@@ -152,18 +188,23 @@ def _connect(dialect: str, dsn: str):
 
 
 def _connect_lakebase():
-    """Connect to Lakebase using STATSCHEMA_LAKEBASE_* env vars (psycopg2)."""
+    """Connect to Lakebase using the tpcb_lakebase profile (psycopg2)."""
     import psycopg2  # type: ignore
+    from statschema.connection_profile import load_profile
 
-    host     = os.environ.get("STATSCHEMA_LAKEBASE_HOST", "")
-    port     = int(os.environ.get("STATSCHEMA_LAKEBASE_PORT", "5432"))
-    dbname   = os.environ.get("STATSCHEMA_LAKEBASE_DB", "databricks_postgres")
-    user     = os.environ.get("DATABRICKS_CLIENT_ID", "")
-    password = _lakebase_token()
+    _bench_yaml = str(_REPO_ROOT / "config" / "statschema.tpcb.yaml")
+    p = load_profile(_bench_yaml, "tpcb_lakebase")
+
+    host     = p.host     or ""
+    port     = p.port     or 5432
+    dbname   = p.database or "databricks_postgres"
+    user     = p.username or ""
+    password = _lakebase_token(p)
 
     if not host:
         raise RuntimeError(
-            "STATSCHEMA_LAKEBASE_HOST not set — run ./scripts/lakebase-up.sh"
+            "STATSCHEMA_LAKEBASE_HOST not set — set it in tpcb_lakebase profile "
+            "or via STATSCHEMA_LAKEBASE_HOST env var"
         )
     return psycopg2.connect(
         host=host, port=port, dbname=dbname,
@@ -172,14 +213,14 @@ def _connect_lakebase():
     )
 
 
-def _lakebase_token() -> str:
+def _lakebase_token(profile=None) -> str:
     """Generate a short-lived OAuth token for the Databricks service principal."""
     try:
         from databricks.sdk import WorkspaceClient  # type: ignore
         w = WorkspaceClient()
         return w.config.authenticate()["Authorization"].removeprefix("Bearer ")
     except Exception:
-        return os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+        return (profile.password if profile else None) or ""
 
 
 def _parse_dsn(dsn: str) -> dict[str, str]:
@@ -202,27 +243,13 @@ def _parse_dsn(dsn: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def _count_rows(conn, dialect: str, schema: str, table: str) -> int | None:
-    """Return COUNT(*) for the given table, or None on error."""
+    """Return COUNT(*) for the given table using the dialect's own table_ref."""
+    d = _get_dialect(dialect)
+    tref = d.table_ref(table, schema)
     cur = conn.cursor()
-    try:
-        if dialect in ("postgres", "cockroachdb", "neon", "lakebase"):
-            cur.execute(f'SELECT COUNT(*) FROM "{schema}"."{table}"')
-        elif dialect == "sqlserver":
-            cur.execute(f"USE [{schema}]")
-            cur.execute(f"SELECT COUNT(*) FROM dbo.[{table}]")
-        elif dialect == "oracle":
-            cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema}")
-            cur.execute(f'SELECT COUNT(*) FROM "{table.upper()}"')
-        elif dialect == "db2":
-            cur.execute(f'SELECT COUNT(*) FROM "{schema.upper()}"."{table.upper()}"')
-        elif dialect in ("mysql", "mariadb"):
-            cur.execute(f"SELECT COUNT(*) FROM `{schema}`.`{table}`")
-        else:
-            return None
-        row = cur.fetchone()
-        return int(row[0]) if row else None
-    except Exception:
-        return None
+    cur.execute(f"SELECT COUNT(*) FROM {tref}")
+    row = cur.fetchone()
+    return int(row[0]) if row else None
 
 
 def check_row_counts(
@@ -235,9 +262,17 @@ def check_row_counts(
     """Return mismatch lines for one schema (source or target)."""
     mismatches: list[str] = []
     for table, exp in expected.items():
-        actual = _count_rows(conn, dialect, schema, table)
+        try:
+            actual = _count_rows(conn, dialect, schema, table)
+        except Exception as exc:
+            mismatches.append(f"  {label}.{table}: could not query ({exc})")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            continue
         if actual is None:
-            mismatches.append(f"  {label}.{table}: could not query")
+            mismatches.append(f"  {label}.{table}: unsupported dialect {dialect!r}")
         elif actual != exp:
             mismatches.append(
                 f"  {label}.{table}: expected {exp:>10,}  actual {actual:>10,}  ⚠ MISMATCH"
@@ -253,13 +288,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Post-run integrity checker for identity_test results"
     )
-    ap.add_argument("result_json",  help="Path to the result JSON from identity_test.py")
-    ap.add_argument("log_file",     nargs="?", help="Optional path to the captured stdout/stderr log")
-    ap.add_argument("--dialect",    required=True,
-                    help="Source database dialect (postgres, cockroachdb, mysql, sqlserver, oracle, db2)")
-    ap.add_argument("--dsn",        default="",
+    ap.add_argument("result_json", help="Path to the result JSON from identity_test.py")
+    ap.add_argument("log_file",    nargs="?", help="Optional path to the captured stdout/stderr log")
+    _cli_args.add_dialect_arg(ap, required=True,
+                              help="Source database dialect")
+    ap.add_argument("--dsn",         default="",
                     help="DSN for the source database (space-separated key=value pairs)")
+    _cli_args.add_profile_yaml_arg(ap, required=False)
+    ap.add_argument("--profile-name", default="",
+                    help="Profile name within --profile-yaml (alternative to --dsn)")
     ap.add_argument("--target-dialect", default=None,
+                    choices=_cli_args.DIALECT_CHOICES,
                     help="Target database dialect (defaults to same as --dialect). "
                          "Use 'lakebase' for cross-DB tests.")
     ap.add_argument("--target-dsn", default=None,
@@ -316,7 +355,10 @@ def main() -> int:
     # Source connection
     src_conn = None
     try:
-        src_conn = _connect(args.dialect, args.dsn)
+        src_conn = _connect(
+            args.dialect, args.dsn,
+            profile_yaml=args.profile_yaml, profile_name=args.profile_name,
+        )
     except Exception as e:
         print(f"  [DB] source connection failed: {e}")
         any_problem = True

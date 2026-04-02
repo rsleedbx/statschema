@@ -61,12 +61,12 @@ Run
 from __future__ import annotations
 
 import math
-import os
 import textwrap
 from typing import Any
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import emit_ddl, parse_ddl
 from src.statschema.db_stats_collector import collect_table_stats
 from src.statschema.dbldatagen_builder import build_dataframe_from_canonical
@@ -76,15 +76,21 @@ from src.statschema.stats_io import make_default_stats
 # Connection settings — match test_live_mysql.py / test_live_pg.py / test_live_sqlserver.py
 # ---------------------------------------------------------------------------
 
-_MYSQL_HOST = "127.0.0.1"
-_MYSQL_PASS = os.environ.get("MYSQL_ROOT_PASS", "testpass")
-_MYSQL8_PORT = int(os.environ.get("MYSQL8_PORT", "3384"))
+from tests.live_helpers import _tp  # noqa: E402
 
-_PG_PASS    = os.environ.get("PG_PASSWORD",    "testpass")
-_PG16_PORT  = int(os.environ.get("PG16_PORT",  "5416"))
+_pm  = _tp("test_mysql8")
+_pp  = _tp("test_postgres16")
+_pss = _tp("test_sqlserver")
 
-_SS_PASS    = os.environ.get("SQLSERVER_PASS", "")
-_SS_PORT    = int(os.environ.get("SQLSERVER_PORT", "14330"))
+_MYSQL_HOST  = _pm.host     or "127.0.0.1"
+_MYSQL_PASS  = _pm.password or "testpass"
+_MYSQL8_PORT = _pm.port     or 3384
+
+_PG_PASS   = _pp.password or "testpass"
+_PG16_PORT = _pp.port     or 5416
+
+_SS_PASS = _pss.password or ""
+_SS_PORT = _pss.port     or 14330
 
 _SYNTH_ROWS = 1000   # rows per generation round (fast but enough for meaningful stats)
 
@@ -192,7 +198,7 @@ def _mysql_engine(db: str = "live_synth"):
 def _pg_engine(schema: str = "live_synth"):
     sa = pytest.importorskip("sqlalchemy", reason="sqlalchemy not installed")
     return sa.create_engine(
-        f"postgresql+psycopg2://postgres:{_PG_PASS}@127.0.0.1:{_PG16_PORT}/testdb"
+        f"postgresql+psycopg2://postgres:{_PG_PASS}@127.0.0.1:{_PG16_PORT}/{DEFAULT_CATALOG}"
         f"?options=-csearch_path%3D{schema}",
         pool_pre_ping=True,
     )
@@ -217,7 +223,7 @@ def _pg_raw():
         conn = psycopg2.connect(
             host="127.0.0.1", port=_PG16_PORT,
             user="postgres", password=_PG_PASS,
-            dbname="testdb", connect_timeout=5,
+            dbname=DEFAULT_CATALOG, connect_timeout=5,
         )
         conn.autocommit = True
         return conn
@@ -228,12 +234,14 @@ def _pg_raw():
 def _ss_raw():
     if not _SS_PASS:
         pytest.skip("SQLSERVER_PASS not set")
-    pymssql = pytest.importorskip("pymssql")
+    mssql_python = pytest.importorskip("mssql_python")
+    _host = _pss.host or "127.0.0.1"
+    _user = _pss.username or "sa"
+    _db   = _pss.database or DEFAULT_CATALOG
     try:
-        conn = pymssql.connect(
-            host="127.0.0.1", port=_SS_PORT,
-            user="sa", password=_SS_PASS,
-            autocommit=True, timeout=5,
+        conn = mssql_python.connect(
+            f"SERVER={_host},{_SS_PORT};DATABASE={_db};"
+            f"UID={_user};PWD={_SS_PASS};TrustServerCertificate=yes"
         )
         return conn
     except Exception as e:
@@ -282,7 +290,7 @@ def _load_df_to_pg(df_spark, table: str, cols: list[str], schema: str = "live_sy
 
 
 def _load_df_to_ss(df_spark, conn, table: str, cols: list[str]):
-    """Spark DataFrame → pandas → SQL Server via pymssql executemany."""
+    """Spark DataFrame → pandas → SQL Server via mssql_python executemany."""
     pdf = df_spark.select(cols).toPandas()
     if pdf.empty:
         return 0

@@ -44,8 +44,6 @@ All tests skip when Oracle is unreachable or oracledb is not installed.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from src.statschema import emit_ddl, load_canonical, parse_ddl
@@ -56,10 +54,14 @@ from src.statschema.schema_io import dump_schema as dump_canonical
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST    = os.environ.get("ORACLE_HOST", "127.0.0.1")
-_PORT    = int(os.environ.get("ORACLE_PORT", "1521"))
-_SYS_PW  = os.environ.get("ORACLE_PASS", "oracle")
-_DSN     = f"{_HOST}:{_PORT}/XE"
+from tests.live_helpers import _tp  # noqa: E402
+
+_p = _tp("test_oracle")
+
+_HOST    = _p.host     or "127.0.0.1"
+_PORT    = _p.port     or 1521
+_SYS_PW  = _p.password or ""
+_DSN     = f"{_HOST}:{_PORT}/{_p.database or 'XE'}"
 
 # ---------------------------------------------------------------------------
 # Helpers

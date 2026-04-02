@@ -15,20 +15,18 @@ DBAPI-2 connection with dialect-aware execute / fetchall / introspect helpers.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-from tests.live_helpers import make_helper, LiveDbHelper
+from tests.live_helpers import make_helper, LiveDbHelper, _tp
 
 # ---------------------------------------------------------------------------
 # PostgreSQL — parametrized by version
 # ---------------------------------------------------------------------------
 
 _PG_VERSIONS = [
-    ("14", int(os.environ.get("PG14_PORT", "5414"))),
-    ("16", int(os.environ.get("PG16_PORT", "5416"))),
-    ("18", int(os.environ.get("PG18_PORT", "5418"))),
+    ("14", _tp("test_postgres14").port),
+    ("16", _tp("test_postgres16").port),
+    ("18", _tp("test_postgres18").port),
 ]
 
 
@@ -44,7 +42,7 @@ def pg_helper(request) -> LiveDbHelper:
 @pytest.fixture(scope="session")
 def pg18_helper() -> LiveDbHelper:
     """Single fixture for PostgreSQL 18 when version-parametrization is not needed."""
-    return make_helper("postgres", port=int(os.environ.get("PG18_PORT", "5418")))
+    return make_helper("postgres", port=_tp("test_postgres18").port)
 
 
 # ---------------------------------------------------------------------------
@@ -61,11 +59,11 @@ def crdb_helper() -> LiveDbHelper:
 # ---------------------------------------------------------------------------
 
 _MYSQL_VERSIONS = [
-    ("8.x",   int(os.environ.get("MYSQL8_PORT",   "3384"))),
+    ("8.x", _tp("test_mysql8").port),
 ]
 _MARIADB_VERSIONS = [
-    ("10.11", int(os.environ.get("MARIADB1011_PORT", "3311"))),
-    ("11.4",  int(os.environ.get("MARIADB114_PORT",  "3340"))),
+    ("10.11", _tp("test_mariadb_lts").port),
+    ("11.4",  _tp("test_mariadb_new").port),
 ]
 
 

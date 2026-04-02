@@ -1,0 +1,24 @@
+# 2026-03-31T22:33:28.357235+00:00
+
+PASS  db2×tpcb(sf=1)                              Overall: PASS ✓
+PASS  db2×tpcc(sf=1)                              Overall: PASS ✓
+PASS  db2×tpcdi(sf=1)                             Overall: PASS ✓
+PASS  db2×tpcds(sf=0.01)                          Overall: PASS ✓
+PASS  db2×tpce(sf=0.01)                           Overall: PASS ✓
+PASS  db2×tpch(sf=0.01)                           Overall: PASS ✓
+PASS  oracle×tpcb(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcc(sf=1)                           Overall: PASS ✓
+PASS  oracle×tpcdi(sf=1)                          Overall: PASS ✓
+PASS  oracle×tpcds(sf=0.01)                       Overall: PASS ✓
+PASS  oracle×tpce(sf=0.1)                         Overall: PASS ✓
+PASS  oracle×tpch(sf=0.01)                        Overall: PASS ✓
+FAIL  sqlserver×tpcb(sf=1)                        exit=1
+FAIL  sqlserver×tpcc(sf=1)                        exit=1
+FAIL  sqlserver×tpcdi(sf=1)                       exit=1
+FAIL  sqlserver×tpcds(sf=0.01)                    exit=1
+FAIL  sqlserver×tpce(sf=0.1)                      exit=1
+FAIL  sqlserver×tpch(sf=0.01)                     exit=1
+
+Passed : 12 / 18
+Failed : 6 / 18
+Logs   : benchmarks/logs/identity-20260331-172255

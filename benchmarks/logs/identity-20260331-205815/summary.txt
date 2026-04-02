@@ -1,0 +1,7 @@
+# 2026-04-01T01:59:00.154521+00:00
+
+PASS  sqlserver×tpcb(sf=1)                        Overall: PASS ✓
+
+Passed : 1 / 1
+Failed : 0 / 1
+Logs   : benchmarks/logs/identity-20260331-205815

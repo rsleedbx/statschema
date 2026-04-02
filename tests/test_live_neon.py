@@ -44,26 +44,29 @@ still passes without Neon.
 
 from __future__ import annotations
 
-import os
 import textwrap
 
 import pytest
 
 from src.statschema import emit_ddl, parse_ddl
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection configuration
 # ---------------------------------------------------------------------------
 
-_HOST = os.environ.get("NEON_HOST", "127.0.0.1")
-_PORT = int(os.environ.get("NEON_LOCAL_PORT", "55433"))
-_USER = os.environ.get("NEON_USER", "neon")
-_PASSWORD = os.environ.get("NEON_PASSWORD", "npg")
-_DB = os.environ.get("NEON_DATABASE", "neondb")
+_p = _tp("test_neon")
+
+_HOST     = _p.host     or "127.0.0.1"
+_PORT     = _p.port     or 55433
+_USER     = _p.username or "neon"
+_PASSWORD = _p.password or "npg"
+_DB       = _p.database or "neondb"
 # RCA: Neon's serverless Postgres and Neon Local expect TLS; ``prefer`` often fails because
 # libpq may not upgrade the session the way the proxy requires — use ``require`` by default.
-_SSLMODE = os.environ.get("NEON_SSLMODE", "require")
-_NEON_URL = os.environ.get("NEON_DATABASE_URL", "").strip()
+_SSLMODE  = "require"
+# Full DSN URL takes precedence when set (e.g. Neon cloud endpoint).
+_NEON_URL = (_p.url or "").strip()
 
 
 def _get_connection():

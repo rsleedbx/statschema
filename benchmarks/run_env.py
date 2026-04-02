@@ -41,7 +41,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import logging
+
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Version SQL per engine
@@ -62,11 +66,25 @@ _VERSION_SQL: dict[str, str] = {
 }
 
 # Driver package names for version reporting
+def _psycopg2_package() -> str:
+    """Return the installed psycopg2 distribution name (binary or source)."""
+    import importlib.metadata
+    for name in ("psycopg2-binary", "psycopg2"):
+        try:
+            importlib.metadata.version(name)
+            return name
+        except importlib.metadata.PackageNotFoundError:
+            pass
+    return "psycopg2"  # fallback; _driver_version will return None
+
+
+_PSYCOPG2 = _psycopg2_package()
+
 _DRIVER_PACKAGE: dict[str, str] = {
-    "postgres":    "psycopg2",
-    "cockroachdb": "psycopg2",
-    "neon":        "psycopg2",
-    "lakebase":    "psycopg2",
+    "postgres":    _PSYCOPG2,
+    "cockroachdb": _PSYCOPG2,
+    "neon":        _PSYCOPG2,
+    "lakebase":    _PSYCOPG2,
     "mysql":       "pymysql",
     "mariadb":     "pymysql",
     "sqlserver":   "mssql_python",
@@ -76,26 +94,25 @@ _DRIVER_PACKAGE: dict[str, str] = {
 
 
 def _query_db_version(engine: str, conn) -> str | None:
-    """Run a lightweight version query on an open connection. Returns None on failure."""
+    """Run a lightweight version query on an open connection."""
     sql = _VERSION_SQL.get(engine)
     if not sql:
         return None
-    try:
-        cur = conn.cursor()
-        cur.execute(sql)
-        row = cur.fetchone()
-        cur.close()
-        return str(row[0]).strip() if row else None
-    except Exception:
-        return None
+    cur = conn.cursor()
+    cur.execute(sql)
+    row = cur.fetchone()
+    cur.close()
+    return str(row[0]).strip() if row else None
 
 
 def _driver_version(package: str) -> str | None:
     """Return the installed version of a Python driver package."""
+    if not package:
+        return None
+    import importlib.metadata
     try:
-        import importlib.metadata
         return importlib.metadata.version(package)
-    except Exception:
+    except importlib.metadata.PackageNotFoundError:
         return None
 
 
@@ -106,7 +123,10 @@ def _tool_version(*cmd: str) -> str | None:
             list(cmd), text=True, stderr=subprocess.STDOUT, timeout=5
         )
         return out.splitlines()[0].strip() or None
-    except Exception:
+    except FileNotFoundError:
+        return None  # tool not installed
+    except Exception as exc:
+        logger.warning("version probe %s failed: %s", cmd[0], exc)
         return None
 
 

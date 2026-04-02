@@ -13,13 +13,13 @@ given database is not running.
 PostgreSQL prerequisites (ports from test_live_pg.py defaults):
 
     podman run -d --name pg16 \\
-        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=testdb \\
+        -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=statschema \\
         -p 5416:5432 docker.io/library/postgres:16
 
 MySQL prerequisites:
 
     podman run -d --name mysql8 \\
-        -e MYSQL_ROOT_PASSWORD=testpass -e MYSQL_DATABASE=testdb \\
+        -e MYSQL_ROOT_PASSWORD=testpass -e MYSQL_DATABASE=statschema \\
         -p 3384:3306 docker.io/library/mysql:8.4
 
 SQL Server prerequisites:
@@ -29,7 +29,6 @@ SQL Server prerequisites:
 """
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -66,11 +65,18 @@ def _insert(conn, tref: str, col: str, values: list, dialect: str):
 # PostgreSQL
 # ---------------------------------------------------------------------------
 
-_PG_HOST = os.environ.get("PG_HOST", "127.0.0.1")
-_PG_USER = os.environ.get("PG_USER", "postgres")
-_PG_PASS = os.environ.get("PG_PASSWORD", "testpass")
-_PG_DB   = os.environ.get("PG_DB",       "testdb")
-_PG_PORT = int(os.environ.get("PG16_PORT", "5416"))
+from benchmarks.bench_config import DEFAULT_CATALOG
+from tests.live_helpers import _tp as _ltp  # noqa: E402
+
+_pp = _ltp("test_postgres16")
+_pm = _ltp("test_mysql8")
+_pss = _ltp("test_sqlserver")
+
+_PG_HOST = _pp.host     or "127.0.0.1"
+_PG_USER = _pp.username or "postgres"
+_PG_PASS = _pp.password or "testpass"
+_PG_DB   = _pp.database or DEFAULT_CATALOG
+_PG_PORT = _pp.port     or 5416
 
 
 def _pg_conn():
@@ -203,9 +209,9 @@ class TestPGMinMax:
 # MySQL
 # ---------------------------------------------------------------------------
 
-_MY_HOST = os.environ.get("MYSQL_HOST",      "127.0.0.1")
-_MY_PASS = os.environ.get("MYSQL_ROOT_PASS", "testpass")
-_MY_PORT = int(os.environ.get("MYSQL8_PORT",  "3384"))
+_MY_HOST = _pm.host     or "127.0.0.1"
+_MY_PASS = _pm.password or "testpass"
+_MY_PORT = _pm.port     or 3384
 
 _MYSQL_CASES: list[tuple] = [
     ("INT",              True,  [10, 3, 77, 1],                         "1",    "77"),
@@ -230,7 +236,7 @@ def my_conn():
         conn = pymysql.connect(
             host=_MY_HOST, port=_MY_PORT,
             user="root", password=_MY_PASS,
-            database="testdb",
+            database=DEFAULT_CATALOG,
             connect_timeout=5,
             autocommit=True,
         )
@@ -292,10 +298,10 @@ class TestMySQLMinMax:
 # SQL Server
 # ---------------------------------------------------------------------------
 
-_SS_HOST = os.environ.get("SQLSERVER_HOST", "127.0.0.1")
-_SS_PORT = int(os.environ.get("SQLSERVER_PORT", "14330"))
-_SS_USER = os.environ.get("SQLSERVER_USER", "sa")
-_SS_PASS = os.environ.get("SQLSERVER_PASS", "")
+_SS_HOST = _pss.host     or "127.0.0.1"
+_SS_PORT = _pss.port     or 14330
+_SS_USER = _pss.username or "sa"
+_SS_PASS = _pss.password or ""
 
 _SS_CASES: list[tuple] = [
     ("INT",              True,  [10, 3, 77, 1],                         "1",    "77"),
@@ -318,15 +324,13 @@ _SS_CASES: list[tuple] = [
 
 @pytest.fixture(scope="module")
 def ss_conn():
-    pymssql = pytest.importorskip("pymssql")
+    mssql_python = pytest.importorskip("mssql_python")
     if not _SS_PASS:
         pytest.skip("SQLSERVER_PASS not set")
     try:
-        conn = pymssql.connect(
-            server=_SS_HOST, port=_SS_PORT,
-            user=_SS_USER, password=_SS_PASS,
-            database="master",
-            as_dict=False,
+        conn = mssql_python.connect(
+            f"SERVER={_SS_HOST},{_SS_PORT};DATABASE=master;"
+            f"UID={_SS_USER};PWD={_SS_PASS};TrustServerCertificate=yes"
         )
         cur = conn.cursor()
         cur.execute("IF EXISTS (SELECT 1 FROM sys.databases WHERE name = 'mm_test') DROP DATABASE mm_test")

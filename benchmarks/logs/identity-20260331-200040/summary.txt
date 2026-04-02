@@ -1,0 +1,12 @@
+# 2026-04-01T01:00:52.253102+00:00
+
+FAIL  sqlserver×tpcb(sf=1)                        exit=1
+FAIL  sqlserver×tpcc(sf=1)                        exit=1
+FAIL  sqlserver×tpcdi(sf=1)                       exit=1
+FAIL  sqlserver×tpcds(sf=0.01)                    exit=1
+FAIL  sqlserver×tpce(sf=0.1)                      exit=1
+FAIL  sqlserver×tpch(sf=0.01)                     exit=1
+
+Passed : 0 / 6
+Failed : 6 / 6
+Logs   : benchmarks/logs/identity-20260331-200040

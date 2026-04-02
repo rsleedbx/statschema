@@ -1,0 +1,12 @@
+# 2026-04-01T03:56:15.085735+00:00
+
+FAIL  tpcb_postgres18×tpcb(sf=1)                  exit=1
+FAIL  tpcb_postgres18×tpcc(sf=1)                  exit=1
+FAIL  tpcb_postgres18×tpcdi(sf=5)                 exit=1
+FAIL  tpcb_postgres18×tpcds(sf=0.01)              exit=1
+FAIL  tpcb_postgres18×tpce(sf=0.01)               exit=1
+FAIL  tpcb_postgres18×tpch(sf=0.1)                exit=1
+
+Passed : 0 / 6
+Failed : 6 / 6
+Logs   : benchmarks/logs/identity-20260331-225609

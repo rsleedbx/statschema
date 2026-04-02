@@ -15,7 +15,6 @@ Run from repo root:
 
 from __future__ import annotations
 
-import os
 import sys
 import json
 import time
@@ -26,7 +25,7 @@ _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks.run_bench import (
-    connect, create_tables, RESULTS_DIR,
+    connect, create_tables, RESULTS_DIR, _DEFAULT_BENCH_YAML,
     _strip_pk_constraints, _emit_ddl_for_dialect,
 )
 from src.statschema.schema_io import load_canonical, resolve_load_order, resolve_row_counts
@@ -65,30 +64,20 @@ def _effective(strategy: LoadStrategy, dialect: str) -> LoadStrategy:
 
 @dataclass
 class DbTarget:
-    label: str
+    label:   str
     dialect: str
-    env: dict[str, str]
-
-
-def _pg(label, port):
-    return DbTarget(label, "postgres", {"BENCH_PG_DSN": f"host=127.0.0.1 port={port} dbname=testdb user=postgres password=testpass"})
-
-def _mysql(label, port):
-    return DbTarget(label, "mysql", {"BENCH_MYSQL_HOST": "127.0.0.1", "BENCH_MYSQL_PORT": str(port), "BENCH_MYSQL_USER": "root", "BENCH_MYSQL_PASS": "testpass", "BENCH_MYSQL_DB": "testdb"})
-
-def _mariadb(label, port):
-    return DbTarget(label, "mariadb", {"BENCH_MYSQL_HOST": "127.0.0.1", "BENCH_MYSQL_PORT": str(port), "BENCH_MYSQL_USER": "root", "BENCH_MYSQL_PASS": "testpass", "BENCH_MYSQL_DB": "testdb"})
+    profile: str    # profile name in config/statschema.tpcb.yaml
 
 
 TARGETS = [
-    _pg("PostgreSQL 14",   5414),
-    _pg("PostgreSQL 16",   5416),
-    _mysql("MySQL 5.7",    3357),
-    _mariadb("MariaDB 10.11", 3310),
-    _mariadb("MariaDB 11.4",  3311),
-    DbTarget("SQL Server 2022", "sqlserver", {"BENCH_SQLSERVER_DSN": os.environ.get("BENCH_SQLSERVER_DSN", "SERVER=127.0.0.1,14330;DATABASE=master;UID=sa;PWD=")}),
-    DbTarget("Oracle XE 21c",   "oracle",    {"BENCH_ORACLE_DSN": "127.0.0.1:1521/XE", "BENCH_ORACLE_USER": "system", "BENCH_ORACLE_PASS": "oracle"}),
-    DbTarget("IBM Db2 CE 11.5", "db2",       {"BENCH_DB2_DSN": "DATABASE=testdb;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=testpass;"}),
+    DbTarget("PostgreSQL 14",    "postgres",  "tpcb_postgres14"),
+    DbTarget("PostgreSQL 16",    "postgres",  "tpcb_postgres16"),
+    DbTarget("MySQL 5.7",        "mysql",     "tpcb_mysql57"),
+    DbTarget("MariaDB 10.11",    "mariadb",   "tpcb_mariadb_lts"),
+    DbTarget("MariaDB 11.4",     "mariadb",   "tpcb_mariadb_new"),
+    DbTarget("SQL Server 2022",  "sqlserver", "tpcb_sqlserver"),
+    DbTarget("Oracle XE 21c",    "oracle",    "tpcb_oracle"),
+    DbTarget("IBM Db2 CE 11.5",  "db2",       "tpcb_db2"),
 ]
 
 
@@ -110,12 +99,9 @@ class StratResult:
 
 def _run_one(target: DbTarget, schema_name: str, sf: float,
              strategy: LoadStrategy) -> StratResult:
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     try:
-        conn = connect(target.dialect)
+        conn = connect(target.dialect, profile_yaml=_DEFAULT_BENCH_YAML, profile_name=target.profile)
     except Exception as exc:
-        _restore(saved)
         return StratResult(error=f"connect: {exc!s:.80}")
 
     try:
@@ -159,29 +145,15 @@ def _run_one(target: DbTarget, schema_name: str, sf: float,
         except Exception:
             pass
         return StratResult(error=str(exc)[:120])
-    finally:
-        _restore(saved)
-
-
-def _restore(saved):
-    for k, v in saved.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
 
 
 def _probe(target: DbTarget) -> bool:
-    saved = {k: os.environ.get(k) for k in target.env}
-    os.environ.update(target.env)
     try:
-        conn = connect(target.dialect)
+        conn = connect(target.dialect, profile_yaml=_DEFAULT_BENCH_YAML, profile_name=target.profile)
         conn.close()
         return True
     except Exception:
         return False
-    finally:
-        _restore(saved)
 
 
 # ---------------------------------------------------------------------------

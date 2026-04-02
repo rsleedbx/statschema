@@ -1,0 +1,12 @@
+# 2026-04-01T02:03:25.681913+00:00
+
+PASS  sqlserver×tpcb(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcc(sf=1)                        Overall: PASS ✓
+PASS  sqlserver×tpcdi(sf=1)                       Overall: PASS ✓
+FAIL  sqlserver×tpcds(sf=0.01)                    exit=1
+FAIL  sqlserver×tpce(sf=0.1)                      exit=1
+PASS  sqlserver×tpch(sf=0.01)                     Overall: PASS ✓
+
+Passed : 4 / 6
+Failed : 2 / 6
+Logs   : benchmarks/logs/identity-20260331-205907

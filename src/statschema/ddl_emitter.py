@@ -229,11 +229,11 @@ def emit_column_comments(
         return []
 
     stmts: list[str] = []
-    tname = _quote(table.name.upper() if normalized == "oracle" else table.name, normalized)
+    tname = _quote(table.name, normalized)
     for col in table.columns:
         if not col.comment:
             continue
-        cname = _quote(col.name.upper() if normalized == "oracle" else col.name, normalized)
+        cname = _quote(col.name, normalized)
         escaped = col.comment.replace("'", "''")
         stmts.append(f"COMMENT ON COLUMN {tname}.{cname} IS '{escaped}';")
     return stmts

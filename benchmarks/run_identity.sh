@@ -127,6 +127,7 @@ if [[ $USE_TWO_WAVE -eq 1 ]]; then
 
     # Wave 1: Podman engines at their native high concurrency
     info "--- Wave 1: Podman engines ($WAVE1_ENGINES) ---"
+    wave1_rc=0
     # shellcheck disable=SC2086
     "$VENV" benchmarks/run_matrix.py identity \
         --profile-yaml "$PROFILE_YAML" \
@@ -135,11 +136,12 @@ if [[ $USE_TWO_WAVE -eq 1 ]]; then
         --phases   "$PHASES" \
         --log-dir  "$LOG_DIR" \
         $SKIP_LOAD \
-        $NO_EXT_STATS
-    wave1_rc=$?
+        $NO_EXT_STATS \
+        || wave1_rc=$?
 
     # Wave 2: QEMU Lima engines, uncontested, at sw=3 each
     info "--- Wave 2: QEMU engines ($WAVE2_ENGINES) with schema-workers=3 ---"
+    wave2_rc=0
     # shellcheck disable=SC2086
     "$VENV" benchmarks/run_matrix.py identity \
         --profile-yaml   "$PROFILE_YAML" \
@@ -149,8 +151,8 @@ if [[ $USE_TWO_WAVE -eq 1 ]]; then
         --log-dir        "$LOG_DIR" \
         --schema-workers 3 \
         $SKIP_LOAD \
-        $NO_EXT_STATS
-    wave2_rc=$?
+        $NO_EXT_STATS \
+        || wave2_rc=$?
 
     [[ $wave1_rc -eq 0 && $wave2_rc -eq 0 ]]
 else

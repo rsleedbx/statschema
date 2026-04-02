@@ -10,11 +10,11 @@ Prerequisites
 Two MySQL containers via Podman (see docs/local-databases.md):
 
     podman run -d --name mysql57 --platform linux/amd64 \\
-        -e MYSQL_ROOT_PASSWORD=testpass -e MYSQL_DATABASE=testdb \\
+        -e MYSQL_ROOT_PASSWORD=testpass -e MYSQL_DATABASE=statschema \\
         -p 3357:3306 docker.io/library/mysql:5.7
 
     podman run -d --name mysql8 \\
-        -e MYSQL_ROOT_PASSWORD=testpass -e MYSQL_DATABASE=testdb \\
+        -e MYSQL_ROOT_PASSWORD=testpass -e MYSQL_DATABASE=statschema \\
         -p 3384:3306 docker.io/library/mysql:8.4
 
 Environment variables (defaults match the Podman commands above):
@@ -30,21 +30,25 @@ Each parametrised version skips automatically when its port is unreachable or
 pymysql is not installed — so make test always completes cleanly.
 """
 
-import os
 import textwrap
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import parse_ddl, emit_ddl
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection helpers
 # ---------------------------------------------------------------------------
 
-_HOST      = os.environ.get("MYSQL_HOST",      "127.0.0.1")
-_ROOT_PASS = os.environ.get("MYSQL_ROOT_PASS", "testpass")
-_PORT_57   = int(os.environ.get("MYSQL57_PORT", "3357"))
-_PORT_8    = int(os.environ.get("MYSQL8_PORT",  "3384"))
+_p57 = _tp("test_mysql57")
+_p8  = _tp("test_mysql8")
+
+_HOST      = _p8.host     or "127.0.0.1"
+_ROOT_PASS = _p8.password or "testpass"
+_PORT_57   = _p57.port or 3357
+_PORT_8    = _p8.port  or 3384
 
 _VERSIONS = [
     pytest.param(("5.7", _PORT_57), id="mysql57"),
@@ -52,7 +56,7 @@ _VERSIONS = [
 ]
 
 
-def _get_connection(port: int, db: str = "testdb"):
+def _get_connection(port: int, db: str = DEFAULT_CATALOG):
     pymysql = pytest.importorskip("pymysql")
     try:
         conn = pymysql.connect(

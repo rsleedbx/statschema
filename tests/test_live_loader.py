@@ -31,8 +31,6 @@ Each engine's tests skip when the DB is unreachable or driver is absent.
 
 from __future__ import annotations
 
-import os
-
 import pandas as pd
 import pytest
 
@@ -43,11 +41,17 @@ from src.statschema.loader_context import DeploymentContext
 # Oracle connection helpers
 # ---------------------------------------------------------------------------
 
-_ORA_HOST    = os.environ.get("ORACLE_HOST",    "127.0.0.1")
-_ORA_PORT    = int(os.environ.get("ORACLE_PORT", "1521"))
-_ORA_USER    = os.environ.get("ORACLE_USER",    "system")
-_ORA_PASS    = os.environ.get("ORACLE_PASS",    "oracle")
-_ORA_SERVICE = os.environ.get("ORACLE_SERVICE", "XE")
+from benchmarks.bench_config import DEFAULT_CATALOG
+from tests.live_helpers import _tp  # noqa: E402
+
+_po = _tp("test_oracle")
+_pd = _tp("test_db2")
+
+_ORA_HOST    = _po.host     or "127.0.0.1"
+_ORA_PORT    = _po.port     or 1521
+_ORA_USER    = _po.username or "system"
+_ORA_PASS    = _po.password or ""
+_ORA_SERVICE = _po.database or "XE"
 _ORA_SCHEMA  = "LOADER_TEST"
 _ORA_SCHEMA_PASS = "LoaderTest1"
 
@@ -82,11 +86,11 @@ def _ora_exec_ignore(conn, sql: str, *ora_codes: int):
 # DB2 connection helpers
 # ---------------------------------------------------------------------------
 
-_DB2_HOST = os.environ.get("DB2_HOST",     "127.0.0.1")
-_DB2_PORT = int(os.environ.get("DB2_PORT", "50000"))
-_DB2_USER = os.environ.get("DB2_USER",     "db2inst1")
-_DB2_PASS = os.environ.get("DB2_PASS",     "testpass")
-_DB2_DB   = os.environ.get("DB2_DATABASE", "testdb")
+_DB2_HOST = _pd.host     or "127.0.0.1"
+_DB2_PORT = _pd.port     or 50000
+_DB2_USER = _pd.username or "db2inst1"
+_DB2_PASS = _pd.password or "testpass"
+_DB2_DB   = _pd.database or DEFAULT_CATALOG
 _DB2_SCHEMA = _DB2_USER.upper()
 
 
@@ -280,7 +284,7 @@ class TestDB2AdminCmdLoader:
         lands in the shared directory which the DB2 server process can read at
         the same (or translated) path.
         """
-        staging = os.environ.get("STATSCHEMA__SERVER_STAGING_DIR", "")
+        staging = _pd.server_staging_dir or ""
         if not staging:
             pytest.skip("STATSCHEMA__SERVER_STAGING_DIR not set — skipping shared-fs test")
 
@@ -289,7 +293,7 @@ class TestDB2AdminCmdLoader:
         ctx = DeploymentContext(
             topology="shared_fs",
             server_staging_dir=staging,
-            client_staging_dir=os.environ.get("STATSCHEMA__CLIENT_STAGING_DIR") or staging,
+            client_staging_dir=_pd.client_staging_dir or staging,
         )
 
         inserted = load_dataframe(
@@ -308,7 +312,7 @@ class TestDB2AdminCmdLoader:
         """
         topology='shared_fs' with server_staging_dir → DB2AdminCmdLoader selected.
         """
-        staging_dir = os.environ.get("STATSCHEMA__SERVER_STAGING_DIR", "")
+        staging_dir = _pd.server_staging_dir or ""
         if not staging_dir:
             pytest.skip("STATSCHEMA__SERVER_STAGING_DIR not set — skipping shared-fs test")
 
@@ -317,7 +321,7 @@ class TestDB2AdminCmdLoader:
         ctx = DeploymentContext(
             topology="shared_fs",
             server_staging_dir=staging_dir,
-            client_staging_dir=os.environ.get("STATSCHEMA__CLIENT_STAGING_DIR") or staging_dir,
+            client_staging_dir=_pd.client_staging_dir or staging_dir,
         )
 
         assert ctx.topology == "shared_fs"
@@ -360,13 +364,13 @@ class TestDB2AdminCmdLoader:
             "ID":   [1, 2],
             "BODY": ["hello world", "foo bar"],
         })
-        staging = os.environ.get("STATSCHEMA__SERVER_STAGING_DIR", "")
+        staging = _pd.server_staging_dir or ""
         if not staging:
             pytest.skip("STATSCHEMA__SERVER_STAGING_DIR not set — skipping CLOB test")
         ctx = DeploymentContext(
             topology="shared_fs",
             server_staging_dir=staging,
-            client_staging_dir=os.environ.get("STATSCHEMA__CLIENT_STAGING_DIR") or staging,
+            client_staging_dir=_pd.client_staging_dir or staging,
         )
 
         inserted = load_dataframe(

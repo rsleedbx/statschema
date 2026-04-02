@@ -45,12 +45,12 @@ Environment variables
 
 from __future__ import annotations
 
-import os
 import textwrap
 from typing import Any
 
 import pytest
 
+from benchmarks.bench_config import DEFAULT_CATALOG
 from src.statschema import (
     CanonicalTableSchema,
     dump_schema,
@@ -66,21 +66,28 @@ from tests.test_ddl_roundtrip import (
     _cases_postgres,
     _cases_sqlserver,
 )
+from tests.live_helpers import _tp
 
 # ---------------------------------------------------------------------------
 # Connection settings
 # ---------------------------------------------------------------------------
 
-_MYSQL_PASS   = os.environ.get("MYSQL_ROOT_PASS", "testpass")
-_MYSQL57_PORT = int(os.environ.get("MYSQL57_PORT", "3357"))
-_MYSQL8_PORT  = int(os.environ.get("MYSQL8_PORT",  "3384"))
+_pm57 = _tp("test_mysql57")
+_pm8  = _tp("test_mysql8")
+_pp14 = _tp("test_postgres14")
+_pp16 = _tp("test_postgres16")
+_pss  = _tp("test_sqlserver")
 
-_PG_PASS  = os.environ.get("PG_PASSWORD", "testpass")
-_PG14_PORT = int(os.environ.get("PG14_PORT", "5414"))
-_PG16_PORT = int(os.environ.get("PG16_PORT", "5416"))
+_MYSQL_PASS   = _pm8.password  or "testpass"
+_MYSQL57_PORT = _pm57.port     or 3357
+_MYSQL8_PORT  = _pm8.port      or 3384
 
-_SS_PASS = os.environ.get("SQLSERVER_PASS", "")
-_SS_PORT = int(os.environ.get("SQLSERVER_PORT", "14330"))
+_PG_PASS   = _pp16.password or "testpass"
+_PG14_PORT = _pp14.port     or 5414
+_PG16_PORT = _pp16.port     or 5416
+
+_SS_PASS = _pss.password or ""
+_SS_PORT = _pss.port     or 14330
 
 # ---------------------------------------------------------------------------
 # Collect test cases from the in-memory round-trip suite
@@ -117,7 +124,7 @@ def _mysql_conn(port: int):
     try:
         conn = pymysql.connect(
             host="127.0.0.1", port=port, user="root", password=_MYSQL_PASS,
-            database="testdb", connect_timeout=5, autocommit=True,
+            database=DEFAULT_CATALOG, connect_timeout=5, autocommit=True,
         )
         return conn
     except Exception as exc:
@@ -129,7 +136,7 @@ def _pg_conn(port: int):
     try:
         conn = psycopg2.connect(
             host="127.0.0.1", port=port, user="postgres", password=_PG_PASS,
-            dbname="testdb", connect_timeout=5,
+            dbname=DEFAULT_CATALOG, connect_timeout=5,
         )
         conn.autocommit = True
         return conn
@@ -139,12 +146,15 @@ def _pg_conn(port: int):
 
 def _ss_conn():
     if not _SS_PASS:
-        pytest.skip("SQLSERVER_PASS env var not set")
-    pymssql = pytest.importorskip("pymssql")
+        pytest.skip("SQLSERVER_PASS not set — skipping live SQL Server tests")
+    mssql_python = pytest.importorskip("mssql_python")
+    _host = _pss.host or "127.0.0.1"
+    _user = _pss.username or "sa"
+    _db   = _pss.database or DEFAULT_CATALOG
     try:
-        conn = pymssql.connect(
-            host="127.0.0.1", port=_SS_PORT, user="sa", password=_SS_PASS,
-            database="master", as_dict=False, timeout=5, autocommit=True,
+        conn = mssql_python.connect(
+            f"SERVER={_host},{_SS_PORT};DATABASE={_db};UID={_user};PWD={_SS_PASS}"
+            ";TrustServerCertificate=yes"
         )
         return conn
     except Exception as exc:

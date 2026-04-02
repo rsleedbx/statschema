@@ -14,7 +14,7 @@ VENV_TEST  := .venv_test
 PYTHON_TEST := $(VENV_TEST)/bin/python
 PYTEST_TEST := $(PYTHON_TEST) -m pytest
 # All test-live-* targets use this variant so any skip → hard failure.
-PYTEST_LIVE := STATSCHEMA_ASSERT_NO_SKIPS=1 $(PYTEST_TEST)
+PYTEST_LIVE := $(PYTEST_TEST) --assert-no-skips
 
 VENV_DEV   := .venv
 PYTHON_DEV := $(VENV_DEV)/bin/python

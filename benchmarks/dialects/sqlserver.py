@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from benchmarks.dialects._base import DialectBase, require_application_catalog
+
 
 _MSSQL_OP_MAP = {
     "Clustered Index Scan": "Seq Scan",
@@ -26,20 +28,26 @@ _MSSQL_OP_MAP = {
 }
 
 
-class SQLServerDialect:
+class SQLServerDialect(DialectBase):
+    system_database              = "master"
+    ddl_if_not_exists            = False
+    is_pg_wire                   = False
+    needs_column_types_for_bulk_load = False
+    sqlglot_dialect              = "tsql"
+    manages_own_autocommit       = True  # connect_from_profile calls setautocommit(True)
+    supports_extended_stats      = False
 
     # ------------------------------------------------------------------ #
     # Connection                                                           #
     # ------------------------------------------------------------------ #
 
-    def connect(self, dsn: str):
+    def connect_from_profile(self, profile) -> object:
         import mssql_python  # type: ignore
-        p = _parse_dsn(dsn)
-        host     = p.get("server", p.get("host", "127.0.0.1"))
-        port     = int(p.get("port", "1433"))
-        database = p.get("database", p.get("db", "master"))
-        user     = p.get("user", "sa")
-        password = p.get("password", "")
+        host     = getattr(profile, "host",     None) or "127.0.0.1"
+        port     = getattr(profile, "port",     None) or 1433
+        database = getattr(profile, "database", None) or "master"
+        user     = getattr(profile, "username", None) or "sa"
+        password = getattr(profile, "password", None) or ""
         conn_str = (
             f"SERVER={host},{port};"
             f"DATABASE={database};"
@@ -48,71 +56,115 @@ class SQLServerDialect:
             "ENCRYPT=no;TrustServerCertificate=yes"
         )
         conn = mssql_python.connect(conn_str)
-        # DDL (CREATE DATABASE, DROP DATABASE, UPDATE STATISTICS) must run outside
+        # DDL (CREATE SCHEMA, DROP TABLE, UPDATE STATISTICS) must run outside
         # an explicit transaction.
         conn.setautocommit(True)
-        # Template used by set_namespace() to reconnect to a different database
-        # without USE [db] (not supported on Azure SQL Database).
-        conn._mssql_conn_template = (
-            f"SERVER={host},{port};"
-            f"DATABASE={{db}};"
-            f"UID={user};"
-            f"PWD={password};"
-            "ENCRYPT=no;TrustServerCertificate=yes"
-        )
-        # Track the current catalog on the connection so callers never need to
-        # round-trip SELECT DB_NAME().
-        conn._statschema_db = database
+        conn._statschema_db     = database  # SQL Server catalog (the DATABASE)
+        conn._statschema_schema = "dbo"     # current SQL Server schema; updated by set_namespace
         return conn
+
+    def connect(self, dsn: str) -> object:
+        p = _parse_dsn(dsn)
+
+        class _P:
+            host     = p.get("server", p.get("host", "127.0.0.1"))
+            port     = int(p.get("port", "1433"))
+            database = p.get("database", p.get("db", "master"))
+            username = p.get("user", "sa")
+            password = p.get("password", "")
+
+        return self.connect_from_profile(_P())
+
+    # ------------------------------------------------------------------ #
+    # Transaction control                                                 #
+    # ------------------------------------------------------------------ #
+
+    def commit(self, conn) -> None:
+        pass  # autocommit=True: each statement commits itself
+
+    def rollback(self, conn) -> None:
+        pass  # autocommit=True: no open transaction to roll back
+
+    # ------------------------------------------------------------------ #
+    # Identifier normalisation / query rewrite / auto-stats              #
+    # ------------------------------------------------------------------ #
+
+    def normalize_identifier(self, name: str) -> str:
+        return name.lower()
+
+    def rewrite_query_sql(
+        self, sql: str, schema: str, table_names: set[str], source_dialect: str
+    ) -> str:
+        from benchmarks.dialects._sql_rewrite import transpile_and_qualify, SQLGLOT_DIALECT
+        return transpile_and_qualify(
+            sql, schema, table_names, source_dialect,
+            SQLGLOT_DIALECT.get(self.sqlglot_dialect, self.sqlglot_dialect),
+        )
+
+    def autovacuum_disable_sql(self) -> str | None:
+        return None
+
+    def configure_auto_stats(self, conn, enabled: bool) -> None:
+        pass
+
+    def predicate_query_store_kwargs(self, schema: str) -> dict:
+        return {}
+
+    def create_column_statistics_sql(self, schema, stat_name, col_a, col_b, table_name) -> str:
+        raise NotImplementedError("SQL Server does not support pg_statistic_ext-style extended stats")
+
+    # ------------------------------------------------------------------ #
+    # Catalog introspection                                               #
+    # ------------------------------------------------------------------ #
+
+    # System schemas that ship with every SQL Server instance — never touch.
+    _SYSTEM_SCHEMAS = frozenset({
+        "sys", "dbo", "guest", "information_schema",
+        "db_owner", "db_accessadmin", "db_securityadmin", "db_ddladmin",
+        "db_backupoperator", "db_datareader", "db_datawriter", "db_denydatareader",
+        "db_denydatawriter",
+    })
+
+    def list_schemas(self, conn) -> list[str]:
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT name FROM sys.schemas")
+            return [r[0].lower() for r in cur.fetchall()
+                    if r[0].lower() not in self._SYSTEM_SCHEMAS]
+
+    def list_tables(self, conn, schema: str) -> list[str]:
+        require_application_catalog(self, conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                f"WHERE TABLE_SCHEMA = N'{schema}' AND TABLE_TYPE = 'BASE TABLE'"
+            )
+            return [r[0].lower() for r in cur.fetchall()]
 
     # ------------------------------------------------------------------ #
     # Schema lifecycle                                                     #
     # ------------------------------------------------------------------ #
 
     def create_schema(self, conn, schema_name: str) -> None:
-        """Drop and recreate a SQL Server database used as the identity-test namespace."""
+        """Drop (if present) and recreate a SQL Server schema.
+
+        Uses catalog introspection to discover existing tables, then drops
+        them and the schema deterministically — no IF-EXISTS guards in DDL.
+        SQL Server SCHEMAs are lightweight namespaces; creating one is free.
+        """
+        for tname in self.list_tables(conn, schema_name):
+            with conn.cursor() as cur:
+                cur.execute(f"DROP TABLE [{schema_name}].[{tname}]")
+        if schema_name in self.list_schemas(conn):
+            with conn.cursor() as cur:
+                cur.execute(f"DROP SCHEMA [{schema_name}]")
         with conn.cursor() as cur:
-            try:
-                cur.execute(f"ALTER DATABASE [{schema_name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE")
-            except Exception:
-                pass
-            try:
-                cur.execute(f"DROP DATABASE [{schema_name}]")
-            except Exception:
-                pass
-            cur.execute(f"CREATE DATABASE [{schema_name}]")
-            # SIMPLE recovery allows transaction log space to be reused after each
-            # checkpoint, preventing unbounded log file growth.  It does NOT reduce
-            # redo writes during bulk load (only BULK_LOGGED recovery does that);
-            # the identity test bottleneck is CPU-bound UPDATE STATISTICS, not log I/O.
-            # New databases inherit FULL from the model database; override for test namespaces.
-            cur.execute(f"ALTER DATABASE [{schema_name}] SET RECOVERY SIMPLE")
+            cur.execute(f"CREATE SCHEMA [{schema_name}]")
 
     def set_namespace(self, conn, schema_name: str):
-        """Reconnect to target database; returns the new connection.
-
-        Does NOT use USE [db] — that statement is unsupported on Azure SQL
-        Database and on any SQL Server connection with a pooled session.
-        Instead we close the current connection and open a fresh one to the
-        target database using the template stored at connect() time.
-        """
-        import mssql_python  # type: ignore
-        tmpl = getattr(conn, "_mssql_conn_template", None)
-        if tmpl is None:
-            raise RuntimeError(
-                "SQLServerDialect.set_namespace: conn._mssql_conn_template is not set. "
-                "Create the connection via SQLServerDialect.connect() so the "
-                "database-switch template is available."
-            )
-        try:
-            conn.close()
-        except Exception:
-            pass
-        new_conn = mssql_python.connect(tmpl.format(db=schema_name))
-        new_conn.setautocommit(True)
-        new_conn._mssql_conn_template = tmpl
-        new_conn._statschema_db = schema_name
-        return new_conn
+        """Record the active SQL Server schema; the catalog (DATABASE) never changes."""
+        conn._statschema_schema = schema_name
+        return conn
 
     # ------------------------------------------------------------------ #
     # Statistics                                                           #
@@ -121,20 +173,19 @@ class SQLServerDialect:
     def analyze(self, conn, tables: list, schema: str,
                 pred_col_map: dict | None = None, full_stats: bool = False,
                 tablesample_pct: float | None = None) -> None:
-        # SQL Server statistics are per-object; UPDATE STATISTICS refreshes all
-        # statistics objects on the table.  Autocommit=True handles commit.
+        # UPDATE STATISTICS is a DDL command; autocommit=True handles commit.
         # mssql_python raises "Invalid cursor state" if fetchall() is called on
-        # a statement that returns no rows — UPDATE STATISTICS is a command, not a query.
+        # a statement that returns no rows — UPDATE STATISTICS returns no rows.
         with conn.cursor() as cur:
             for t in tables:
-                cur.execute(f"UPDATE STATISTICS [dbo].[{t.name}]")
+                cur.execute(f"UPDATE STATISTICS [{schema}].[{self.normalize_identifier(t.name)}]")
 
     # ------------------------------------------------------------------ #
     # DDL helpers                                                          #
     # ------------------------------------------------------------------ #
 
     def qualify_ddl(self, ddl_text: str, schema_name: str) -> str:
-        """Prefix every CREATE TABLE with the schema (= database) name."""
+        """Prefix every CREATE TABLE with the SQL Server schema name."""
         return re.sub(
             r"CREATE TABLE \[([^\]]+)\]",
             lambda m: f"CREATE TABLE [{schema_name}].[{m.group(1)}]",
@@ -142,15 +193,13 @@ class SQLServerDialect:
         )
 
     def table_ref(self, table_name: str, schema_name: str) -> str:
-        # SQL Server maps schema_name → database; tables live under [db].[dbo].[table].
-        return f"[{schema_name}].[dbo].[{table_name}]"
+        return f"[{schema_name}].[{self.normalize_identifier(table_name)}]"
 
     # ------------------------------------------------------------------ #
     # EXPLAIN                                                              #
     # ------------------------------------------------------------------ #
 
     def explain(self, conn, sql: str, schema: str) -> dict:
-        conn = self.set_namespace(conn, schema)
         with conn.cursor() as cur:
             cur.execute("SET SHOWPLAN_ALL ON")
             try:

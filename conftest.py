@@ -11,7 +11,6 @@ Root conftest.py — runs before any test collection.
    runner) to start a local PySpark session without requiring the developer to
    manually export JAVA_HOME in each shell.
 """
-import os
 import sys
 from pathlib import Path
 
@@ -21,6 +20,15 @@ try:
     load_dotenv(Path(__file__).parent / ".env", override=False)
 except ImportError:
     pass  # python-dotenv not installed; env vars must be set in the shell
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--assert-no-skips",
+        action="store_true",
+        default=False,
+        help="Turn any test skip into a hard failure. Used by Makefile live-test targets.",
+    )
 
 
 def pytest_configure(config):
@@ -52,12 +60,12 @@ def _find_java_home() -> str | None:
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """When STATSCHEMA_ASSERT_NO_SKIPS=1, turn any skip into a hard failure.
+    """When --assert-no-skips is passed, turn any skip into a hard failure.
 
-    Set automatically by all test-live-* Makefile targets.  Prevents silent
+    Passed automatically by all test-live-* Makefile targets.  Prevents silent
     passes when a database container or endpoint is not running.
     """
-    if not os.environ.get("STATSCHEMA_ASSERT_NO_SKIPS"):
+    if not config.getoption("--assert-no-skips", default=False):
         return
     skipped = terminalreporter.stats.get("skipped", [])
     if not skipped:
@@ -69,7 +77,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     )
     terminalreporter.write_sep(
         "=",
-        f"ASSERT_NO_SKIPS: {len(skipped)} test(s) skipped — fix the infrastructure or unset STATSCHEMA_ASSERT_NO_SKIPS",
+        f"ASSERT_NO_SKIPS: {len(skipped)} test(s) skipped — fix the infrastructure or remove --assert-no-skips",
         red=True,
     )
     for reason in reasons:
@@ -77,8 +85,9 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     sys.exit(1)
 
 
-if not os.environ.get("JAVA_HOME"):
+import os as _os
+if not _os.environ.get("JAVA_HOME"):
     found = _find_java_home()
     if found:
-        os.environ["JAVA_HOME"] = found
-        os.environ["PATH"] = f"{found}/bin:{os.environ.get('PATH', '')}"
+        _os.environ["JAVA_HOME"] = found
+        _os.environ["PATH"] = f"{found}/bin:{_os.environ.get('PATH', '')}"
