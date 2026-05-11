@@ -1,23 +1,36 @@
-# benchmarks/_common.sh
+# benchmarks/_common_colima.sh
 #
-# Shared shell library sourced by all run_*.sh scripts.
-# NOT executable directly — source it: source "$(dirname "$0")/_common.sh"
+# Colima/containerd/nerdctl variant of _common.sh.
+# Uses nerdctl (Apache 2.0, CNCF) instead of podman or docker.
+# No Docker Desktop, no Docker license.
+#
+# Usage:  source "$(dirname "$0")/_common_colima.sh"
+#
+# Prerequisites (all Apache 2.0 / MIT, no commercial license):
+#   brew install colima
+#   ensure_colima   # starts Colima with containerd, installs nerdctl automatically
+#
+# All container functions are identical to _common.sh; only the container
+# runtime is changed from 'podman' to 'nerdctl' (containerd via Colima).
+# The Lima db2lima fallback is retained unchanged (it routes through the
+# Lima VM's own podman, independent of the host runtime).
 #
 # Provides:
+#   ensure_colima        — start Colima (containerd) + install nerdctl if needed
 #   load_dotenv          — load .env from repo root (safe grep-based approach)
 #   find_python          — sets VENV to the virtualenv Python; dies if missing
 #   info / warn / die    — timestamped log helpers
 #   wait_port            — wait until a TCP port is open (necessary but not sufficient)
 #   wait_db              — wait until the engine accepts a real connection (use this)
 #   start_pg             — start postgres container (version from DB_VERSION, port auto-discovered)
-#   start_crdb    — start CockroachDB container if not up
+#   start_crdb           — start CockroachDB container if not up
 #   start_mysql          — start MySQL 8 container if not up
-#   start_sqlserver      — start SQL Server Podman container (Rosetta 2) if not up
-#   start_oracle         — start Oracle Podman container if not up
-#   start_db2            — start DB2 Podman container (Rosetta 2) if not up
-#   start_databases      — Phase 0 orchestrator (all Podman, all parallel)
-#   delete_container CONTAINER     — stop and remove a container (Podman or Lima db2lima)
-#   delete_container_all CONTAINER — stop, remove container and its named volume (Podman or Lima db2lima)
+#   start_sqlserver      — start SQL Server container (Colima x86_64 emulation) if not up
+#   start_oracle         — start Oracle container if not up
+#   start_db2            — start DB2 container (Colima x86_64 emulation) if not up
+#   start_databases      — Phase 0 orchestrator (all nerdctl/Colima, all parallel)
+#   delete_container CONTAINER     — stop and remove a container (nerdctl or Lima db2lima)
+#   delete_container_all CONTAINER — stop, remove container and its named volume (nerdctl or Lima db2lima)
 #   sqlcli  CONTAINER    — interactive SQL shell as the app user
 #   sqlclidba CONTAINER  — interactive SQL shell as the DBA user
 #   sf_for ENGINE SCHEMA — print the scale factor for an engine × schema pair
@@ -41,6 +54,73 @@ load_dotenv() {
     fi
 }
 load_dotenv
+
+# ── Colima readiness ──────────────────────────────────────────────────────────
+# Starts Colima with sensible defaults if it is not already running.
+# Override all startup flags via COLIMA_START_ARGS (e.g. "--memory 8 --cpu 4").
+# On Apple Silicon, --vz-rosetta is added automatically for fast x86_64 emulation.
+ensure_colima() {
+    # Check if already running.
+    if colima status 2>/dev/null | grep -q "Running"; then
+        _ensure_nerdctl
+        return 0
+    fi
+
+    # Start Colima with the containerd runtime (Apache 2.0, no Docker license).
+    # nerdctl is the Docker-compatible CLI for containerd.
+    #
+    # Platform support matrix (all three run in the same Colima instance):
+    #   - linux/arm64  — native, zero overhead
+    #   - linux/amd64  via Rosetta 2 (on Apple Silicon, macOS 13+): ~1.5–2× native
+    #   - linux/amd64  via QEMU (Intel or older macOS): ~5–10× slower, auto-fallback
+    #
+    # On Apple Silicon we add --vz-rosetta so x86_64 images (SQL Server, DB2, Oracle)
+    # use the fast Rosetta 2 translation layer instead of QEMU.
+    # On Intel Macs x86_64 is already native; --vz-rosetta is neither available nor needed.
+    #
+    # Override all flags via COLIMA_START_ARGS (e.g. "--memory 8 --cpu 4").
+    local _vz_flag=""
+    [[ "$(uname -m)" == "arm64" ]] && _vz_flag="--vz-rosetta"
+
+    info "Colima is not running — starting with containerd runtime${_vz_flag:+ + Rosetta 2} (this may take ~60 s)..."
+    local _start_args="${COLIMA_START_ARGS:---runtime containerd ${_vz_flag}}"
+    # Ensure --runtime containerd is always present.
+    [[ "$_start_args" == *"--runtime"* ]] || _start_args="--runtime containerd $_start_args"
+
+    local _out
+    # shellcheck disable=SC2086
+    if ! _out=$(colima start $_start_args 2>&1); then
+        echo "$_out" | sed 's/^/  [colima] /'
+        if echo "$_out" | grep -q "unsupported container runtime\|different runtime"; then
+            warn "Stale Colima instance with incompatible runtime detected."
+            warn "Hard-deleting it (colima delete --data) and retrying..."
+            warn "Container data will be lost — images and volumes must be re-pulled."
+            colima delete --data --force 2>&1 | sed 's/^/  [colima] /' || true
+            # shellcheck disable=SC2086
+            colima start --runtime containerd ${_vz_flag} 2>&1 | sed 's/^/  [colima] /' \
+                || die "colima start failed — check 'colima status' and 'colima delete --data'"
+        else
+            die "colima start failed — check output above"
+        fi
+    else
+        echo "$_out" | sed 's/^/  [colima] /'
+    fi
+
+    _ensure_nerdctl
+    info "Colima is up — runtime: containerd, CLI: nerdctl"
+}
+
+_ensure_nerdctl() {
+    # Install nerdctl for direct use if not already available.
+    # 'colima nerdctl install' places the binary in ~/.local/bin/nerdctl
+    # (or /usr/local/bin on older versions) configured for this Colima profile.
+    if ! command -v nerdctl &>/dev/null; then
+        info "Installing nerdctl for direct use..."
+        colima nerdctl install 2>&1 | sed 's/^/  [colima] /'
+        # Reload PATH in case the binary landed in ~/.local/bin.
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+}
 
 # ── Python virtualenv ─────────────────────────────────────────────────────────
 # Sets VENV to the first Python interpreter that has statschema on sys.path.
@@ -71,21 +151,21 @@ die()  { echo "  [$(date '+%H:%M:%S')] ERROR: $*" >&2; kill -INT $$; }
 # ── find_free_port BASE_PORT ─────────────────────────────────────────────────
 # Prints the first TCP port >= BASE_PORT that is:
 #   (a) not actively listening on 127.0.0.1, AND
-#   (b) not already reserved by any Podman container (running or stopped).
-# Stopped containers don't bind their ports on the host but Podman still
+#   (b) not already reserved by any nerdctl/Colima container (running or stopped).
+# Stopped containers don't bind their ports on the host but Docker still
 # owns the reservation, so nc -z alone would hand out a conflicting port.
 find_free_port() {
     local port="$1"
-    # Collect all host ports already reserved by any Podman container.
-    local _podman_ports
-    _podman_ports=$(podman inspect \
+    # Collect all host ports already reserved by any Docker container.
+    local _docker_ports
+    _docker_ports=$(nerdctl inspect \
         --format '{{range $p, $b := .HostConfig.PortBindings}}{{(index $b 0).HostPort}} {{end}}' \
-        $(podman ps -aq 2>/dev/null) 2>/dev/null)
+        $(nerdctl ps -aq 2>/dev/null) 2>/dev/null)
     while true; do
         # Skip if port is actively listening.
         nc -z 127.0.0.1 "$port" 2>/dev/null && { port=$(( port + 1 )); continue; }
         # Skip if port is already reserved by a stopped (or running) container.
-        [[ " $_podman_ports " == *" $port "* ]] && { port=$(( port + 1 )); continue; }
+        [[ " $_docker_ports " == *" $port "* ]] && { port=$(( port + 1 )); continue; }
         break
     done
     echo "$port"
@@ -108,20 +188,20 @@ wait_port() {
 #
 # LABEL      — human-readable name for log/error messages
 # MAX_S      — max seconds to poll before dying (default: 120)
-# CONTAINER  — Podman container name; on each failed poll the last 5 log lines
+# CONTAINER  — Docker container name; on each failed poll the last 5 log lines
 #              are shown and all logs are saved to ${TMPDIR:-/tmp}/<name>-init.log
 #              Pass "" to skip log capture.
 # CHECK_CMD  — any command + args whose exit code indicates readiness
 #
-# NOTE: logs are NOT streamed in the background — running podman logs -f and
-# podman exec simultaneously against the same container causes Podman to hang.
-# Instead, a snapshot is captured via podman logs --tail on each failure.
+# NOTE: logs are NOT streamed in the background — running nerdctl logs -f and
+# nerdctl exec simultaneously against the same container can cause hangs.
+# Instead, a snapshot is captured via nerdctl logs --tail on each failure.
 #
 # Examples:
 #   wait_db "postgres (pg18)" 60 "pg18" \
-#       podman exec pg18 pg_isready -U postgres
+#       nerdctl exec pg18 pg_isready -U postgres
 #   wait_db "SQL Server (sqlserver2022-latest)" 90 "sqlserver2022-latest" \
-#       podman exec sqlserver2022-latest /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P ... -Q "SELECT 1" -b
+#       nerdctl exec sqlserver2022-latest /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P ... -Q "SELECT 1" -b
 wait_db() {
     local label="$1" max_s="${2:-120}" container="${3:-}"
     shift 3
@@ -134,42 +214,42 @@ wait_db() {
             # Dump full container log on timeout for post-mortem.
             if [[ -n "$container" ]]; then
                 info "  last container logs saved → $log_file"
-                podman logs "$container" 2>&1 | tee "$log_file" | tail -20
+                nerdctl logs "$container" 2>&1 | tee "$log_file" | tail -20
             fi
             die "$label did not accept connections after ${max_s}s"
         fi
         sleep 10; elapsed=$(( elapsed + 10 ))
         info "  waiting for $label to accept connections... (${elapsed}s)"
         # Show a brief snapshot so the user can see what the container is doing.
-        [[ -n "$container" ]] && podman logs --tail 3 "$container" 2>&1 \
+        [[ -n "$container" ]] && nerdctl logs --tail 3 "$container" 2>&1 \
             | sed 's/^/    /'
     done
 
     # Save the full log on success too (quiet — no terminal noise).
-    [[ -n "$container" ]] && podman logs "$container" >"$log_file" 2>&1
+    [[ -n "$container" ]] && nerdctl logs "$container" >"$log_file" 2>&1
     info "$label is accepting connections"
 }
 
 # ── _start_container ─────────────────────────────────────────────────────────
-# Reusable helper: start (or reuse) a named Podman container.
+# Reusable helper: start (or reuse) a named nerdctl/Colima container.
 #
 # Usage:
 #   _start_container CONTAINER IMAGE GUEST_PORT DEFAULT_PORT PORT_VAR \
 #                    [RUN_OPT...] [-- CMD_ARG...]
 #
-#   CONTAINER     podman container name (e.g. pg18, mysql8, crdb24)
+#   CONTAINER     nerdctl container name (e.g. pg18, mysql8, crdb24)
 #   IMAGE         image:tag (e.g. postgres:18)
 #   GUEST_PORT    port exposed inside the container (e.g. 5432)
 #   DEFAULT_PORT  host port to search from when creating a new container
 #   PORT_VAR      name of the env var to export with the resolved host port
-#   RUN_OPT...    extra options for podman run before IMAGE (e.g. -e KEY=VAL)
+#   RUN_OPT...    extra options for nerdctl run before IMAGE (e.g. -e KEY=VAL)
 #   -- CMD_ARG... optional container command/args placed after IMAGE
 
 _start_container() {
     local container="$1" image="$2" guest_port="$3" default_port="$4" port_var="$5" data_mount="$6"
     shift 6
 
-    # Split remaining args on '--': before is podman run options, after is CMD.
+    # Split remaining args on '--': before is nerdctl run options, after is CMD.
     local run_opts=() cmd_args=() past_sep=0
     for arg in "$@"; do
         if [[ "$arg" == "--" ]]; then
@@ -182,11 +262,11 @@ _start_container() {
     done
 
     local _state port
-    _state=$(podman inspect --format '{{.State.Status}}' "$container" 2>/dev/null)
+    _state=$(nerdctl inspect --format '{{.State.Status}}' "$container" 2>/dev/null)
 
     if [[ -n "$_state" ]]; then
         # Container exists (running or stopped) — read its provisioned host port.
-        port=$(podman inspect --format \
+        port=$(nerdctl inspect --format \
             "{{(index (index .HostConfig.PortBindings \"${guest_port}/tcp\") 0).HostPort}}" \
             "$container" 2>/dev/null)
         port="${port:-${!port_var:-$default_port}}"
@@ -194,7 +274,7 @@ _start_container() {
             info "$container already up on $port"
         else
             info "Starting stopped $container on port $port..."
-            podman start "$container" 2>/dev/null || true
+            nerdctl start "$container" 2>/dev/null || true
             wait_port 127.0.0.1 "$port" "$container" 60
         fi
     else
@@ -207,10 +287,10 @@ _start_container() {
         else
             info "Creating $container on port $port (no named volume)"
         fi
-        if ! podman run -d --name "$container" \
+        if ! nerdctl run -d --name "$container" \
                "${_vol_args[@]}" "${run_opts[@]}" \
                -p "${port}:${guest_port}" "$image" "${cmd_args[@]}"; then
-            die "podman run failed for $container (image: $image) — check image name, architecture, or pull errors above"
+            die "nerdctl run failed for $container (image: $image) — check image name, architecture, or pull errors above"
         fi
         wait_port 127.0.0.1 "$port" "$container" 60
     fi
@@ -248,7 +328,7 @@ start_pg() {
     # pg_isready: purpose-built health check; uses Unix socket (trust auth),
     # never reads stdin, exits 0 when the server is ready to accept connections.
     wait_db "postgres ($container)" 60 "$container" \
-        podman exec "$container" \
+        nerdctl exec "$container" \
             pg_isready -U postgres
 
     # Provision: idempotently create the app user and catalog, grant access.
@@ -297,7 +377,7 @@ start_crdb() {
 
     # Wait for CockroachDB to accept real connections (TCP open is not enough).
     wait_db "cockroachdb ($container)" 60 "$container" \
-        podman exec "$container" \
+        nerdctl exec "$container" \
             /cockroach/cockroach sql --insecure -e "SELECT 1"
 
     # Provision: idempotently create the app user and catalog, grant access.
@@ -337,7 +417,7 @@ start_mysql() {
 
     # Wait for MySQL to accept real connections (TCP open is not enough).
     wait_db "mysql ($container)" 60 "$container" \
-        podman exec "$container" \
+        nerdctl exec "$container" \
             mysqladmin ping -u root -p"${dba_pass}" --silent
 
     # Provision: idempotently create the app user and catalog, grant access.
@@ -356,7 +436,7 @@ EOF
 }
 
 # ── _resolve_container NAME → resolved_name ──────────────────────────────────
-# Resolves a short alias to the actual Podman container name.
+# Resolves a short alias to the actual Docker container name.
 # Falls back to the name as-is if no alias matches.
 #
 # Aliases:
@@ -367,14 +447,14 @@ _resolve_container() {
         cockroach|cockroachdb|crdb)
             # Resolve to the first existing crdb* container (e.g. crdb24, crdb25).
             local found
-            found=$(podman ps -a --format '{{.Names}}' 2>/dev/null \
+            found=$(nerdctl ps -a --format '{{.Names}}' 2>/dev/null \
                     | grep '^crdb' | head -1)
             echo "${found:-crdb}"
             ;;
         oracle|oracle-xe|oracle-free)
             # Resolve to the first existing oracle* container (e.g. oraclelatest, oracle23).
             local found
-            found=$(podman ps -a --format '{{.Names}}' 2>/dev/null \
+            found=$(nerdctl ps -a --format '{{.Names}}' 2>/dev/null \
                     | grep '^oracle' | head -1)
             echo "${found:-oracle23}"
             ;;
@@ -385,7 +465,7 @@ _resolve_container() {
 # ── delete_container / delete_container_all CONTAINER ────────────────────────
 # delete_container     CONTAINER  — stop and remove the container only.
 # delete_container_all CONTAINER  — stop, remove the container AND its named
-#                                   volume (${CONTAINER}-data for Podman;
+#                                   volume (${CONTAINER}-data for nerdctl/Colima;
 #                                   db2_data inside the Lima VM for db2lima).
 # CONTAINER may be a short alias (e.g. cockroach, crdb), the exact name, or
 # the Lima target 'db2lima' (routes to db2ce inside the Lima 'db2' VM).
@@ -404,26 +484,14 @@ delete_container() {
         return
     fi
 
-    # QEMU Podman machine DB2 — lives in the 'qemu' Podman machine, not host Podman.
-    if [[ "$name" == "db2qemu" ]]; then
-        if [[ -z "$(_podman_qemu inspect --format '{{.Id}}' db2qemu 2>/dev/null)" ]]; then
-            warn "delete_container: db2qemu not found in Podman 'qemu' machine"
-            return 1
-        fi
-        _podman_qemu stop db2qemu &>/dev/null || true
-        _podman_qemu rm   db2qemu &>/dev/null
-        info "deleted QEMU container: db2qemu"
-        return
-    fi
-
     local container
     container="$(_resolve_container "$name")"
-    if [[ -z "$(podman inspect --format '{{.Id}}' "$container" 2>/dev/null)" ]]; then
+    if [[ -z "$(nerdctl inspect --format '{{.Id}}' "$container" 2>/dev/null)" ]]; then
         warn "delete_container: no container named '$container' found"
         return 1
     fi
-    podman stop "$container" &>/dev/null || true
-    podman rm   "$container" &>/dev/null
+    nerdctl stop "$container" &>/dev/null || true
+    nerdctl rm   "$container" &>/dev/null
     info "deleted container: $container"
 }
 
@@ -443,24 +511,12 @@ delete_container_all() {
         return
     fi
 
-    # QEMU Podman machine DB2 — container + volume in the 'qemu' machine.
-    if [[ "$name" == "db2qemu" ]]; then
-        delete_container "db2qemu" || true
-        if _podman_qemu volume inspect db2qemu-data &>/dev/null; then
-            _podman_qemu volume rm db2qemu-data &>/dev/null
-            info "deleted QEMU volume: db2qemu-data"
-        else
-            info "no QEMU volume named 'db2qemu-data' — skipping"
-        fi
-        return
-    fi
-
     local container
     container="$(_resolve_container "$name")"
     local volume="${container}-data"
     delete_container "$container" || true
-    if podman volume inspect "$volume" &>/dev/null; then
-        podman volume rm "$volume" &>/dev/null
+    if nerdctl volume inspect "$volume" &>/dev/null; then
+        nerdctl volume rm "$volume" &>/dev/null
         info "deleted volume: $volume"
     else
         info "no volume named '$volume' — skipping"
@@ -481,7 +537,7 @@ start_sqlserver() {
     local user="${DB_SS_USERNAME:-${DB_USERNAME:-statschema}}"
     local app_pass="${DB_SS_PASSWORD:-${DB_PASSWORD:-Statsch3ma!}}"
     local catalog="${DB_SS_CATALOG:-${DB_CATALOG:-statschema}}"
-    local _ss_probe=(podman exec "$container"
+    local _ss_probe=(nerdctl exec "$container"
         /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$dba_pass" -Q "SELECT 1" -b)
 
     if ! "${_ss_probe[@]}" &>/dev/null; then
@@ -538,7 +594,7 @@ start_oracle() {
     # Without -L, sqlplus reads EXIT from stdin and exits 0 even when the PDB is
     # not yet registered (ORA-12514), producing a false-positive ready signal.
     local _ora_pdb="${DB_ORA_CATALOG:-${DB_ORA_DATABASE:-${ORACLE_PDB:-FREEPDB1}}}"
-    local _ora_probe=(podman exec "$container"
+    local _ora_probe=(nerdctl exec "$container"
         sqlplus -L -S "system/${pass}@//localhost:1521/${_ora_pdb}")
 
     if "${_ora_probe[@]}" &>/dev/null; then
@@ -612,22 +668,22 @@ start_db2() {
     # DB2 database names are limited to 8 characters.
     local catalog="${DB_DB2_CATALOG:-statsch}"
     # Fast probe: DB is already up and the catalog database exists.
-    local _db2_probe=(podman exec "$container"
+    local _db2_probe=(nerdctl exec "$container"
         su - db2inst1 -c ". ~/sqllib/db2profile && db2 connect to ${catalog^^}")
     # Init-done probe: IBM's setup_db2_instance.sh writes this file as its very
     # last step — even when db2start/create-db fail inside the init (Rosetta 2).
     # We wait for this file before running our own provisioning, which handles
     # db2start and database creation idempotently.
-    local _db2_init_done=(podman exec "$container"
+    local _db2_init_done=(nerdctl exec "$container"
         test -f /database/config/.shared-data/setup_complete)
 
     if "${_db2_probe[@]}" &>/dev/null; then
         info "$container is already accepting connections"
     else
-        # DB2 has no native ARM64 image; Rosetta 2 translates x86_64.
+        # DB2 has no native ARM64 image; Colima emulates x86_64 (QEMU or Rosetta).
         # --ipc=host is required by IBM: db2ftok creates System V IPC keys for
         # shared-memory inter-process communication; an isolated IPC namespace
-        # returns ENOTSUP (rc=0x870F00B4) for those operations under Rosetta 2.
+        # returns ENOTSUP for those operations under x86_64 emulation.
         _start_container "$container" \
             "icr.io/db2_community/db2:${version}" \
             50000 "${DB2_PORT:-50000}" DB2_PORT \
@@ -639,19 +695,16 @@ start_db2() {
             -e DBNAME="${catalog}" \
             -e LICENSE=accept
 
-        # ── Rosetta 2 / ARM64 patch ──────────────────────────────────────────
-        # Under x86_64 emulation on Apple Silicon, the IBM init scripts invoke
-        #   su - db2inst1 -c 'db2 ...'
-        # In that context, bash's login shell reads ~/.bash_profile → ~/.bashrc,
-        # which DOES source db2profile — yet some su invocations during init
-        # still fail with "db2: command not found" (transient Rosetta 2 IPC
-        # state during first boot).  We patch every script in /var/db2_setup/
-        # to prepend '. ~/sqllib/db2profile && ' as a belt-and-suspenders guard.
+        # ── x86_64 emulation init patch ──────────────────────────────────────
+        # Under x86_64 emulation (Rosetta 2 / QEMU via Colima), the IBM init
+        # scripts invoke 'su - db2inst1 -c db2 ...' before db2profile is on PATH.
+        # We patch every script in /var/db2_setup/ to prepend
+        # '. ~/sqllib/db2profile && ' as a belt-and-suspenders guard.
         # Note: '&&' in sed replacement must be '\&\&' (each '&' is a
         # metacharacter meaning "whole match"; '\&' escapes it to a literal '&').
         # Reference: https://community.ibm.com/community/user/discussion/db2-luw-115xx-mac-m1-ready
         info "Patching $container init scripts for Rosetta 2 compatibility..."
-        podman exec -i "$container" bash << 'PATCH' && info "Patch applied" || warn "Patch may have failed (non-fatal)"
+        nerdctl exec -i "$container" bash << 'PATCH' && info "Patch applied" || warn "Patch may have failed (non-fatal)"
 for f in $(find /var/db2_setup -type f ! -name '.*' 2>/dev/null); do
     sed -i -E "s|su - [^ ]+ -c '|&. ~/sqllib/db2profile \&\& |g" "$f" 2>/dev/null || true
     sed -i -E 's|su - [^ ]+ -c "|&. ~/sqllib/db2profile \&\& |g' "$f" 2>/dev/null || true
@@ -666,7 +719,7 @@ PATCH
 
     # Provision: ensure instance is up, database exists, app user exists with grants.
     # DBNAME env var only fires on first container boot; this block is idempotent.
-    podman exec "$container" bash -c "
+    nerdctl exec "$container" bash -c "
         id ${user} &>/dev/null || useradd -m ${user}
         echo '${user}:${app_pass}' | chpasswd
     " || { warn "DB2 OS user creation for '${user}' failed"; return 1; }
@@ -703,7 +756,7 @@ start_db2_lima() {
     limactl start db2 2>/dev/null || true  # no-op if already running
 
     # Probe: real db2 connect inside db2ce — proves the instance is accepting SQL.
-    # Pass "" as container arg so wait_db skips local podman-logs capture.
+    # Pass "" as container arg so wait_db skips local nerdctl-logs capture.
     local _probe=(limactl shell db2 -- sudo podman exec db2ce
         su - db2inst1 -c ". ~/sqllib/db2profile && db2 connect to ${catalog^^}")
     wait_db "db2lima (${catalog^^})" 300 "" "${_probe[@]}"
@@ -726,84 +779,6 @@ start_db2_lima() {
         " || { warn "provision db2lima failed"; return 1; }
 
     info "Provisioned db2lima: user=${user} catalog=${catalog^^}"
-}
-
-start_db2qemu() {
-    # Starts DB2 inside the 'qemu' Podman machine (full QEMU x86_64 emulation).
-    # Use this as the reliable fallback when start_db2 (Rosetta 2) is flaky.
-    #
-    # Credential / env var defaults match start_db2:
-    #   DB_DB2_DBA_PASSWORD — db2inst1 password  → DB_DBA_PASSWORD → Statsch3ma!
-    #   DB_DB2_USERNAME     — app OS user         → DB_USERNAME     → statschema
-    #   DB_DB2_PASSWORD     — app user password   → DB_PASSWORD     → Statsch3ma!
-    #   DB_DB2_CATALOG      — DB name (≤8 chars)  → statsch
-    #   DB2QEMU_PORT        — host port (default: 50001, avoids conflict with start_db2)
-    #
-    # No Rosetta 2 patch is applied — QEMU provides a real x86_64 CPU.
-    local dba_pass="${DB_DB2_DBA_PASSWORD:-${DB_DBA_PASSWORD:-Statsch3ma!}}"
-    local user="${DB_DB2_USERNAME:-${DB_USERNAME:-statschema}}"
-    local app_pass="${DB_DB2_PASSWORD:-${DB_PASSWORD:-Statsch3ma!}}"
-    local catalog="${DB_DB2_CATALOG:-statsch}"
-    local container="db2qemu"
-    local port="${DB2QEMU_PORT:-50001}"
-
-    local _probe=(_podman_qemu exec "$container"
-        su - db2inst1 -c ". ~/sqllib/db2profile && db2 connect to ${catalog^^}")
-    local _init_done=(_podman_qemu exec "$container"
-        test -f /database/config/.shared-data/setup_complete)
-
-    if "${_probe[@]}" &>/dev/null; then
-        info "$container is already accepting connections"
-    else
-        ensure_podman_qemu
-
-        local _state
-        _state=$(_podman_qemu inspect --format '{{.State.Status}}' "$container" 2>/dev/null)
-
-        if [[ -z "$_state" ]]; then
-            info "Creating $container on port $port (QEMU x86_64)..."
-            _podman_qemu run -d --name "$container" \
-                -v "${container}-data:/database" \
-                -p "${port}:50000" \
-                --platform linux/amd64 \
-                --privileged \
-                --ipc=host \
-                -e DB2INST1_PASSWORD="$dba_pass" \
-                -e DBNAME="${catalog}" \
-                -e LICENSE=accept \
-                "icr.io/db2_community/db2:latest" \
-                || die "podman run failed for $container"
-        elif [[ "$_state" != "running" ]]; then
-            info "Starting stopped $container on port $port..."
-            _podman_qemu start "$container" 2>/dev/null || true
-        fi
-
-        # Wait for IBM init sentinel (up to 10 min). Pass "" to skip log capture
-        # (podman logs targets the default machine; use _podman_qemu logs manually
-        # if you need to inspect: podman --connection qemu logs db2qemu).
-        wait_db "$container" 600 "" "${_init_done[@]}"
-    fi
-
-    # Provision app user — idempotent.
-    _podman_qemu exec "$container" bash -c "
-        id ${user} &>/dev/null || useradd -m ${user}
-        echo '${user}:${app_pass}' | chpasswd
-    " || { warn "DB2 QEMU: OS user creation for '${user}' failed"; return 1; }
-
-    _provision_run_qemu "$container" \
-        su - db2inst1 -c "
-            . ~/sqllib/db2profile
-            db2start 2>/dev/null; true
-            db2 list db directory 2>/dev/null | grep -q ${catalog^^} \
-                || db2 create db ${catalog^^}
-            db2 connect to ${catalog^^}
-            db2 \"GRANT CONNECT  ON DATABASE TO USER ${user^^}\"
-            db2 \"GRANT CREATETAB ON DATABASE TO USER ${user^^}\"
-            db2 terminate
-        " || { warn "provision $container failed"; return 1; }
-
-    export DB2QEMU_PORT="$port"
-    info "Provisioned $container: user=${user} catalog=${catalog^^} port=${port}"
 }
 
 # ── bench_prereq_check ────────────────────────────────────────────────────────
@@ -840,7 +815,7 @@ bench_prereq_check() {
 
 # start_databases ENGINE_COMMA_LIST
 # Starts only the databases in the comma-separated list, all in parallel.
-# All engines are now Podman containers (some via Rosetta 2 for x86_64 images).
+# All engines run as nerdctl/Colima containers (x86_64 images emulated via Colima).
 start_databases() {
     local engines="$1"
     local -a eng_list
@@ -855,7 +830,6 @@ start_databases() {
             oracle)      start_oracle      & ;;
             db2)         start_db2         & ;;
             db2lima)     start_db2_lima    & ;;
-            db2qemu)     start_db2qemu     & ;;
         esac
     done
     wait
@@ -864,18 +838,18 @@ start_databases() {
 
 
 # ── sqlcli / sqlclidba CONTAINER ─────────────────────────────────────────────
-# Open an interactive SQL shell inside the named Podman container or Lima VM.
+# Open an interactive SQL shell inside the named nerdctl/Colima container or Lima VM.
 #   sqlcli    — connects as the application user (DB_XX_USERNAME / DB_XX_PASSWORD)
 #   sqlclidba — connects as the DBA / superuser
 #
 # Container name determines the engine:
-#   pg*         → psql          (Podman)
-#   mysql*      → mysql         (Podman)
-#   crdb*       → cockroach sql (Podman)
-#   sqlserver*  → sqlcmd        (podman exec)
-#   oracle*     → sqlplus       (podman exec)
+#   pg*         → psql          (nerdctl/Colima)
+#   mysql*      → mysql         (nerdctl/Colima)
+#   crdb*       → cockroach sql (nerdctl/Colima)
+#   sqlserver*  → sqlcmd        (nerdctl exec)
+#   oracle*     → sqlplus       (nerdctl exec)
 #   db2lima     → db2           (limactl shell db2 → sudo podman exec db2ce)
-#   db2*        → db2           (podman exec → su db2inst1)
+#   db2*        → db2           (nerdctl exec → su db2inst1)
 
 _sqlcli_run() {
     # Adds -t (allocate PTY) only when stdin is an interactive terminal.
@@ -883,54 +857,13 @@ _sqlcli_run() {
     # and piped heredoc provisioning (_provision_run alias below).
     local target="$1"; shift
     local tty_flag=(); [[ -t 0 ]] && tty_flag=(-t)
-    podman exec -i "${tty_flag[@]}" "$target" "$@"
+    nerdctl exec -i "${tty_flag[@]}" "$target" "$@"
 }
 
 # Alias — same function, documents intent at the call site.
 _provision_run() { _sqlcli_run "$@"; }
 
-# ── QEMU Podman machine helpers ───────────────────────────────────────────────
-# Routes container commands to the named 'qemu' Podman machine (x86_64, full
-# QEMU emulation — satisfies DB2's x86-64-v2 / SSE4.2 / POPCNT requirements
-# that Rosetta 2 does not fully honour).
-_podman_qemu() { podman --connection qemu "$@"; }
-
-_sqlcli_run_qemu() {
-    local tty_flag=(); [[ -t 0 ]] && tty_flag=(-t)
-    _podman_qemu exec -i "${tty_flag[@]}" "$@"
-}
-_provision_run_qemu() { _sqlcli_run_qemu "$@"; }
-
-ensure_podman_qemu() {
-    # Fast path: machine is up and accepting commands.
-    if _podman_qemu info &>/dev/null; then
-        return 0
-    fi
-    # Start an existing stopped machine.
-    if podman machine inspect qemu &>/dev/null; then
-        info "Starting stopped Podman QEMU machine 'qemu'..."
-        podman machine start qemu
-        return
-    fi
-    # Podman 5.x on macOS removed the --vmtype / --arch flags; the only machine
-    # type is applehv (Apple Hypervisor = VZ + Rosetta 2 for x86_64).
-    # A genuine QEMU x86_64 Podman machine cannot be created on this platform.
-    # Use start_db2_lima instead — the Lima 'db2' VM is already QEMU x86_64.
-    if ! podman machine init --help 2>&1 | grep -q -- '--vmtype'; then
-        die "start_db2qemu: Podman $(podman --version | awk '{print $3}') does not support --vmtype on macOS." \
-            " Use start_db2_lima (Lima QEMU x86_64) instead."
-    fi
-    # Create from scratch (Podman <5 / Linux where --vmtype is available).
-    info "Creating Podman QEMU machine 'qemu' (x86_64, full x86-64-v2 support)..."
-    podman machine init qemu \
-        --arch x86_64 --vmtype qemu \
-        --memory 8192 --cpus 4 --disk-size 60 \
-        || die "podman machine init qemu failed — is QEMU installed? brew install qemu"
-    podman machine start qemu
-    info "QEMU Podman machine 'qemu' is up"
-}
-
-# Lima DB2 exec wrapper — routes through the Lima 'db2' VM instead of local podman.
+# Lima DB2 exec wrapper — routes through the Lima 'db2' VM instead of local nerdctl.
 # Usage: _limacli_db2_run CMD [ARGS...]
 _limacli_db2_run() {
     local tty_flag=(); [[ -t 0 ]] && tty_flag=(-t)
@@ -984,14 +917,6 @@ sqlcli() {
                 su - db2inst1 -c \
                     ". ~/sqllib/db2profile && db2start &>/dev/null; true && db2 \"CONNECT TO ${_db2_db^^} USER ${_db2_user} USING '${_db2_pass}'\" && db2"
             ;;
-        db2qemu)
-            local _db2_user="${DB_DB2_USERNAME:-${DB_USERNAME:-statschema}}"
-            local _db2_pass="${DB_DB2_PASSWORD:-${DB_PASSWORD:-Statsch3ma!}}"
-            local _db2_db="${DB_DB2_CATALOG:-statsch}"
-            _sqlcli_run_qemu "$container" \
-                su - db2inst1 -c \
-                    ". ~/sqllib/db2profile && db2start &>/dev/null; true && db2 \"CONNECT TO ${_db2_db^^} USER ${_db2_user} USING '${_db2_pass}'\" && db2"
-            ;;
         db2*)
             local _db2_user="${DB_DB2_USERNAME:-${DB_USERNAME:-statschema}}"
             local _db2_pass="${DB_DB2_PASSWORD:-${DB_PASSWORD:-Statsch3ma!}}"
@@ -1005,7 +930,7 @@ sqlcli() {
                     ". ~/sqllib/db2profile && db2start &>/dev/null; true && db2 \"CONNECT TO ${_db2_db^^} USER ${_db2_user} USING '${_db2_pass}'\" && db2"
             ;;
         *)
-            die "sqlcli: unknown container/VM '${container}' (expected pg*, mysql*, crdb*, sqlserver*, oracle*, db2lima, db2qemu, db2*)"
+            die "sqlcli: unknown container/VM '${container}' (expected pg*, mysql*, crdb*, sqlserver*, oracle*, db2lima, db2*)"
             ;;
     esac
 }
@@ -1051,13 +976,6 @@ sqlclidba() {
                 su - db2inst1 -c \
                     ". ~/sqllib/db2profile && db2start &>/dev/null; true && db2 connect to ${_db2_db^^} && db2"
             ;;
-        db2qemu)
-            # DBA: db2inst1 inside the QEMU Podman machine container.
-            local _db2_db="${DB_DB2_CATALOG:-statsch}"
-            _sqlcli_run_qemu "$container" \
-                su - db2inst1 -c \
-                    ". ~/sqllib/db2profile && db2start &>/dev/null; true && db2 connect to ${_db2_db^^} && db2"
-            ;;
         db2*)
             # DBA: db2inst1 (OS auth; no password needed once connected as the instance owner).
             # db2start ensures the instance is running after a container restart.
@@ -1067,7 +985,7 @@ sqlclidba() {
                     ". ~/sqllib/db2profile && db2start &>/dev/null; true && db2 connect to ${_db2_db^^} && db2"
             ;;
         *)
-            die "sqlclidba: unknown container/VM '${container}' (expected pg*, mysql*, crdb*, sqlserver*, oracle*, db2lima, db2qemu, db2*)"
+            die "sqlclidba: unknown container/VM '${container}' (expected pg*, mysql*, crdb*, sqlserver*, oracle*, db2lima, db2*)"
             ;;
     esac
 }

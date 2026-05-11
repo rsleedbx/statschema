@@ -20,7 +20,7 @@ Environment variables (defaults match the Lima config):
     DB2_PORT     default: 50000
     DB2_USER     default: db2inst1
     DB2_PASS     default: testpass
-    DB2_DATABASE default: statschema
+    DB2_DATABASE default: statsch
 
 Skip behaviour
 --------------

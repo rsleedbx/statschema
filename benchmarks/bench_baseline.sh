@@ -595,7 +595,7 @@ restore_image() {
                 -p 50000:50000 \
                 -e LICENSE=accept \
                 -e DB2INST1_PASSWORD=testpass \
-                -e DBNAME=testdb \
+                -e DBNAME=statsch \
                 -e ARCHIVE_LOGS=false \
                 -e AUTOCONFIG=false \
                 -v db2_data:/database:Z \

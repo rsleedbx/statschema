@@ -51,13 +51,13 @@ DB2_HOST=127.0.0.1 DB2_PORT=50000 DB2_PASS=testpass make test-live-db2
 
 ```bash
 # From macOS host using db2 CLI inside the VM:
-limactl shell db2 -- su - db2inst1 -c "db2 connect to testdb"
+limactl shell db2 -- su - db2inst1 -c "db2 connect to statsch"
 
 # Using Python from the macOS host:
 python3 -c "
 import ibm_db_dbi
 conn = ibm_db_dbi.connect(
-    'DATABASE=testdb;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=testpass;',
+    'DATABASE=STATSCH;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=testpass;',
     '', '')
 print(conn.cursor().execute('SELECT SERVICE_LEVEL FROM SYSIBMADM.ENV_INST_INFO').fetchone())
 "

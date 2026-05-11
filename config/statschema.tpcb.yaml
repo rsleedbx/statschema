@@ -160,7 +160,7 @@ profiles:
     dialect: db2
     host: ${oc.env:DB2_HOST,127.0.0.1}
     port: ${oc.env:DB2_PORT,50000}
-    database: ${oc.env:DB2_DATABASE,statschema}
+    database: ${oc.env:DB2_DATABASE,statsch}
     username: ${oc.env:DB2_USER,db2inst1}
     password: ${oc.env:DB2_PASS,testpass}
     loader: server_file
