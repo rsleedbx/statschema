@@ -1293,6 +1293,9 @@ pip install 'statschema[oracle]'     # oracledb
 
 # Databricks Lakebase (OAuth token generation + Postgres driver):
 pip install 'statschema[lakebase]'   # databricks-sdk>=0.89.0 + psycopg2-binary
+
+# MCP / REST server (FastMCP + FastAPI + Typer):
+pip install 'statschema[mcp]'
 ```
 
 ### Credentials
@@ -1444,6 +1447,72 @@ pandas-based synthetic data generation all work with `pip install statschema` �
 database connection, no Spark session, no Java installation required.
 `build_dataframe_from_canonical` additionally requires `statschema[spark]` (PySpark +
 dbldatagen) and is only needed when generating large datasets in a Databricks environment.
+
+---
+
+## MCP server — use statschema from any AI agent
+
+statschema exposes its full pipeline as an [MCP](https://modelcontextprotocol.io) server
+so Cursor, Claude Desktop, and Claude Code can call it as a tool without writing Python.
+
+### Install
+
+```bash
+pip install -e '.[mcp]'
+```
+
+### Start (SSE — recommended, survives Cursor restarts)
+
+```bash
+python cli/setup_mcp.py
+# auto-detects a free port from 8765 upward
+# installs ~/Library/LaunchAgents/com.statschema.mcp-server.plist
+# writes ~/.cursor/mcp.json  (and Claude Desktop config)
+# → restart Cursor (Cmd-Q) to connect
+```
+
+### Start (stdio — subprocess per session)
+
+```bash
+python cli/setup_mcp.py --stdio
+# restart Cursor (Cmd-Q) to connect
+```
+
+### Service management
+
+```bash
+# Status
+launchctl list com.statschema.mcp-server
+
+# Logs
+tail -f ~/Library/Logs/statschema-mcp-server.log
+
+# Reload after code change
+launchctl unload ~/Library/LaunchAgents/com.statschema.mcp-server.plist
+launchctl load   ~/Library/LaunchAgents/com.statschema.mcp-server.plist
+
+# Remove
+python cli/setup_mcp.py --uninstall
+```
+
+### Available tools
+
+| Tool | What it does |
+|---|---|
+| `describe_schema` | Generate `schema.yaml` from a description — no DB required |
+| `generate_data` | Generate synthetic rows from a schema YAML string |
+| `load_data` | Generate + bulk-load into a live database |
+| `collect_stats` | Collect DDL + column stats from a live source database |
+| `inject_stats` | Inject stats into a target database optimizer |
+| `transpile_ddl` | Parse DDL from one dialect and emit in another |
+
+### Example agent prompt
+
+> "Populate 10 tables with 10 columns each — int, float, and text types, bigint primary
+> key, Zipfian distribution, 50 000 rows per table — into my local Postgres on
+> `host=localhost dbname=test user=postgres`."
+
+The agent calls `describe_schema` → `load_data` → `inject_stats` in sequence.
 
 ---
 

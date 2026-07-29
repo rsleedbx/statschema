@@ -8,6 +8,7 @@ error normalisation on top of the underlying implementation functions.
 """
 
 from .collect import collect, collect_queries
+from .describe import describe
 from .generate import generate
 from .inject import inject
 from .transpile import parse, emit, transpile
@@ -16,6 +17,7 @@ from .benchmark import run_identity_test
 __all__ = [
     "collect",
     "collect_queries",
+    "describe",
     "generate",
     "inject",
     "parse",
