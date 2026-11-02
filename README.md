@@ -3,7 +3,7 @@
 [![CI](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml/badge.svg)](https://github.com/rsleedbx/statschema/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/badge/pypi-coming%20soon-orange)](https://pypi.org/project/statschema/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/statschema/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Databricks](https://img.shields.io/badge/License-Databricks-blue.svg)](LICENSE)
 
 ```
 pip install statschema
@@ -1625,7 +1625,7 @@ Where statschema does **not** help: stored procedure rewriting (T-SQL→PL/pgSQL
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Databricks License — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Contributing
 
