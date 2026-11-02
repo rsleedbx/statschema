@@ -110,4 +110,4 @@ The [roadmap](docs/ROADMAP.md) has prioritised items. The most common contributi
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [Databricks License](LICENSE).
